@@ -42,10 +42,12 @@ export function createChannelFailureTracker(): ChannelFailureTracker {
 
 /** Host admission failures never establish a provider outage or a bad API key. */
 export function localExecutionStopNotice(error: string): string | undefined {
-  if (/\b(?:REQUEST_BUDGET_EXHAUSTED|MONETARY_BUDGET_EXHAUSTED|MONETARY_OPERATION_EXHAUSTED)\b/.test(error)) {
-    return '本轮模型调用次数或金额预算已用完，当前阶段和产物已保留。请核对本地执行预算后再继续。'
+  if (/\bHARNESS_NO_PROGRESS\b/.test(error)) return '执行者持续读取但没有完成修改或验证，已停止本轮空转。已有文件和失败记录保留，可按具体缺口继续。'
+  if (/\bHARNESS_DEADLINE_EXCEEDED\b/.test(error)) return '本阶段运行时限已到，已停止继续执行。已有文件和验证记录保留，可核对具体缺口后继续。'
+  if (/\b(?:REQUEST_BUDGET_EXHAUSTED|MONETARY_BUDGET_EXHAUSTED|MONETARY_OPERATION_EXHAUSTED|HARNESS_REQUEST_BUDGET_EXHAUSTED|HARNESS_OUTPUT_BUDGET_EXHAUSTED)\b/.test(error)) {
+    return '本轮模型调用次数、输出或金额预算已用完，当前阶段和产物已保留。请核对本地执行预算后再继续。'
   }
-  if (/\b(?:MONETARY_[A-Z_]+|REQUEST_OUTPUT_LIMIT)\b/.test(error)) {
+  if (/\b(?:MONETARY_[A-Z_]+|HARNESS_[A-Z_]+|REQUEST_OUTPUT_LIMIT)\b/.test(error)) {
     return '本地模型调用策略未通过校验，本次调用未放行。请核对执行策略；当前进度已保留。'
   }
   if (/\bEXPERIMENT_[A-Z_]*(?:BUDGET|DEADLINE|ATTEMPT)[A-Z_]*\b/.test(error)) {

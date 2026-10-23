@@ -15,6 +15,7 @@ export interface DelegationParentContext {
   delegationTurnLimits?: Partial<Record<DelegationRunRole, number>>
   /** Host-owned independent child ceilings; absent roles retain the legacy parent cap. */
   delegationTurnCaps?: Partial<Record<DelegationRunRole, number>>
+  executionScope?: string
   permissionMode: PromaPermissionMode
   temperature: number
   system: string

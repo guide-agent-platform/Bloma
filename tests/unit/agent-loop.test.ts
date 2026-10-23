@@ -1938,7 +1938,8 @@ describe('B3 loop 进度对账三守卫（BLOMA_LOOP_PROGRESS_NUDGE）', () => {
     expect(text).toContain('尚未写入')
     expect(text).toContain('index.html')
     expect(text).toContain('server/routes/records.js')
-    expect(text).toContain('dist/app.js')
+    expect(text).toContain('核对实际入口与调用关系')
+    expect(text).not.toContain('dist/app.js')
 
     // 前 3 轮把清单全部写完 → 守卫2 不注入（守卫1 也因每轮有写入不触发）
     const covered = scriptedQuery([

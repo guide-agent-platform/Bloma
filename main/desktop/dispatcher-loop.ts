@@ -65,6 +65,9 @@ import { finishExperiment } from './dispatch-experiment-records'
 import { DEFAULT_DESKTOP_EXECUTION_LIMITS, type DesktopExecutionLimits } from './execution-limits'
 import { guardDispatcherCompletion } from './dispatcher-completion'
 import { buildProductionContextTool, scopedProductionDigest } from './production-context'
+import { buildProductionAgentPrompt, productionAgentTools, productionTurns, usesProductionAgent } from './production-agent'
+import { createProductionBudget, productionDeadlineMs } from './production-budget'
+import { loadProductionHistory } from './production-history'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -119,6 +122,8 @@ export interface DesktopDispatchRunInput {
   driverSpawn?: Parameters<typeof runContractDriver>[0]['spawn']
   /** 测试注入位：附加工具（挂起工具等故障注入用；仍过围栏白名单）。 */
   toolsOverride?: AgentLoopTool[]
+  historyTurns?: AgentLoopInput['historyTurns']
+  executionScope?: string
   /** 产物存在性谓词注入（缺省 sandboxRoot+existsSync）。 */
   artifactExists?: (relativePath: string) => boolean
   artifactRead?: (relativePath: string) => string | undefined
@@ -302,13 +307,20 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     catch (error) { return { status: 'error', phase: node, error_message: error instanceof Error ? error.message : String(error) } }
   }
   const standalone = experiment?.policy === 'standalone'
+  const primaryExecutor = usesProductionAgent(node, Boolean(configuration))
+  if (primaryExecutor) input = { ...input, maxTurns: input.maxTurns ?? productionTurns(node.id) }
+  if (!configuration && input.requirementsDigest) {
+    const budget = createProductionBudget(input.projectId, input.requirementsDigest, node.id)
+    input = { ...input, query: budget.wrap(input.query), maxTokens: Math.min(input.maxTokens, 16384),
+      ...(primaryExecutor ? { historyTurns: loadProductionHistory(input.sessionId, budget.phaseStartedAt()), executionScope: budget.executionScope } : {}) }
+  }
   const executionLimits = configuration?.execution_limits ?? DEFAULT_DESKTOP_EXECUTION_LIMITS
   const childTools = (projectId: string, role: DelegationRunRole, format: 'diff' | 'whole') => buildDesktopChildTools(projectId, role, format, executionLimits)
 
   // 骨架 v2 物化（批8 下半）：scaffold/implement 阶段入口把平台骨架复制进项目根
   // （幂等 skip-existing，不覆盖子会话成果）——任务书引用 ui/PATTERNS.md 的前提。
   // quick 模式不物化 00_SCAFFOLD 契约件（无工程化验收）。fail-open：资产异常只留痕。
-  if (node.id === 'desktop-scaffold' || node.id === 'desktop-implement') {
+  if (node.id === 'desktop-arch' || node.id === 'desktop-scaffold' || node.id === 'desktop-implement') {
     try {
       const rootForProvision = input.sandboxRoot ?? findProject(input.projectId).root_path
       if (rootForProvision) {
@@ -335,10 +347,12 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     [...buildDispatcherTools(input.projectId).filter((tool) => checkDispatcherToolGate(node, tool.name) === null), ...(input.toolsOverride ?? [])],
     node,
   )
-  const tools = standalone ? wrapExperimentWorkerTools(standaloneTools([...childTools(input.projectId, 'implement', 'diff'), buildDesktopEnvProbeTool()]), experiment!, input.sandboxRoot ?? findProject(input.projectId).root_path)
+  const tools = primaryExecutor ? productionAgentTools(childTools(input.projectId, 'implement', 'diff'), [buildDesktopEnvProbeTool(),
+    ...(node.extraTools.includes('run_project_driver') ? [buildProjectDriverRunnerTool(input.projectId)] : []), ...(input.toolsOverride ?? [])])
+    : standalone ? wrapExperimentWorkerTools(standaloneTools([...childTools(input.projectId, 'implement', 'diff'), buildDesktopEnvProbeTool()]), experiment!, input.sandboxRoot ?? findProject(input.projectId).root_path)
     : experiment ? wrapExperimentDispatcherTools(gatedTools, experiment) : gatedTools
 
-  const system = standalone ? standaloneSystem(promptNode, input) : buildDispatcherSystemPrompt(promptNode, {
+  const system = standalone ? standaloneSystem(promptNode, input) : (primaryExecutor ? buildProductionAgentPrompt : buildDispatcherSystemPrompt)(promptNode, {
     executionLimits,
     projectName: input.projectName,
     completedPhases: [],
@@ -372,6 +386,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     env: input.env,
     maxTokens: input.maxTokens,
     ...delegationBudgets,
+    executionScope: input.executionScope,
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
     system: buildDesktopChildBaseSystem(promptNode, {
@@ -428,7 +443,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   if (loopResult.status !== 'completed') {
     // turn_limit/budget_exhausted 等终态统一归 error（阶段未收口，编排层决定重跑或转 blocked）
     const status = loopResult.status === 'cancelled' ? 'cancelled' : 'error'
-    return { status, loopResult, phase: node }
+    return { status, loopResult, phase: node,
+      ...(loopResult.termination_detail?.reason === 'no_progress' ? { error_message: 'HARNESS_NO_PROGRESS: 执行者连续只读，未产生有效修改或验证，当前产物已保留' } : {}) }
   }
 
   // desktop-verify：异步驱动前置（完整版）
@@ -498,6 +514,8 @@ async function runAgentLoopSafe(
       images: input.images,
       materials: sessionMaterials(input.projectId, input.sessionId),
       initialMessagePersisted: input.initialMessagePersisted,
+      historyTurns: input.historyTurns,
+      executionScope: input.executionScope,
       tools,
       query: input.query,
       env: input.env,
@@ -510,9 +528,10 @@ async function runAgentLoopSafe(
       maxTokens: input.maxTokens,
       // 首跑深修：24 轮两轮都在收口/确认卡前耗尽——桌面阶段按 longterm 档给 40
       maxTurns: input.maxTurns ?? 40,
+      ...(usesProductionAgent(node, Boolean(readExperiment(input.projectId))) ? { workMode: 'implementation' as const } : {}),
       permissionMode: 'allow-all',
       // 首跑深修：调度员不写文件/不带自测工具——web 线进度对账三守卫不适用（首跑被反复误注入）
-      disableProgressNudge: !standalone,
+      disableProgressNudge: !standalone && !usesProductionAgent(node, Boolean(readExperiment(input.projectId))),
       ...(!standalone ? { beforeComplete: async (ctx: ToolContext) => {
         const feedback = await guardDispatcherCompletion(ctx)
         if (feedback) return feedback
@@ -545,11 +564,15 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
     recordExperiment(config, 'experiment_stage_started', { phase: input.currentPhase, request_id: input.requestId })
   }
   let result: DesktopDispatchRunResult
-  try { result = await runDesktopDispatcherLoopInner(input) }
+  const deadline = new AbortController()
+  const timer = !config && input.requirementsDigest ? setTimeout(() => deadline.abort(new Error('HARNESS_DEADLINE_EXCEEDED')), productionDeadlineMs(input.currentPhase)) : undefined
+  try { result = await runDesktopDispatcherLoopInner(timer ? { ...input, signal: AbortSignal.any([input.signal, deadline.signal]) } : input) }
   catch (error) {
-    if (!tracked) throw error
+    if (!tracked && !input.requirementsDigest) throw error
     result = { status: 'error', error_message: error instanceof Error ? error.message : String(error) }
   }
+  finally { if (timer) clearTimeout(timer) }
+  if (deadline.signal.aborted && !input.signal.aborted) result = { ...result, status: 'error', error_message: 'HARNESS_DEADLINE_EXCEEDED: 本阶段运行时限已到，已有文件和验证记录保留' }
   if (tracked) {
     if (result.loopResult?.termination_detail?.reason === 'output_token_limit') result.error_message = 'EXPERIMENT_OUTPUT_BUDGET_EXHAUSTED'
     if (result.loopResult?.termination_detail?.reason === 'persistent_tool_budget') result.error_message = 'EXPERIMENT_EXECUTION_BUDGET_EXHAUSTED'

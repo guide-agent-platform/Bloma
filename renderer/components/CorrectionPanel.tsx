@@ -42,11 +42,32 @@ export const CorrectionPanel: React.FC = () => {
   const [sending, setSending] = React.useState(false)
   const [sent, setSent] = React.useState(false)
   const [applyError, setApplyError] = React.useState<string | undefined>(undefined)
+  const [prepared, setPrepared] = React.useState<{ projectId: string; content: string; id: string } | undefined>()
+  const projectRef = React.useRef(projectId)
+  projectRef.current = projectId
+
+  React.useEffect(() => {
+    setPrepared(undefined)
+    setApplyError(undefined)
+    setSending(false)
+    setSent(false)
+    let stopped = false
+    const api = window.electronAPI?.correction
+    if (projectId && api?.finish) {
+      void Promise.resolve(api.finish({ request_id: crypto.randomUUID(), project_id: projectId, recover: true })).then(result => {
+        if (!stopped && result?.ok && result.data.ok && result.data.feedback && result.data.feedback_id) {
+          setPrepared({ projectId, content: result.data.feedback, id: result.data.feedback_id })
+        }
+      }).catch(() => { if (!stopped) setApplyError('上次点选意见暂时无法读取，请稍后重试') })
+    }
+    return () => { stopped = true }
+  }, [projectId])
 
   const active = session.status === 'active'
 
   const onStart = async (): Promise<void> => {
     if (!projectId) return
+    if (prepared?.projectId === projectId) { setApplyError('上次点选意见尚未提交，请先重试提交或取消'); return }
     setSession({ status: 'starting' })
     setPicks([])
     setSent(false)
@@ -55,7 +76,10 @@ export const CorrectionPanel: React.FC = () => {
       setSession({ status: 'error', message: '当前环境不支持修改预览通道' })
       return
     }
-    const result = await api.start({ request_id: crypto.randomUUID(), project_id: projectId })
+    let result
+    try { result = await api.start({ request_id: crypto.randomUUID(), project_id: projectId }) }
+    catch { if (projectRef.current === projectId) setSession({ status: 'error', message: '修改预览暂时无法连接，请重试' }); return }
+    if (projectRef.current !== projectId) return
     if (result.ok && result.data.ok && result.data.session) {
       setSession({ status: 'active', sessionKey: result.data.session.sessionKey, startedAt: result.data.session.startedAt })
     } else {
@@ -66,12 +90,14 @@ export const CorrectionPanel: React.FC = () => {
 
   /* 选区轮询（2s 文件交接） */
   React.useEffect(() => {
-    if (!active || !projectId) return
+    if (!active || !projectId || prepared) return
     let stopped = false
     const poll = async (): Promise<void> => {
       const api = window.electronAPI?.correction
       if (!api || stopped) return
-      const result = await api.picks({ request_id: crypto.randomUUID(), project_id: projectId })
+      let result
+      try { result = await api.picks({ request_id: crypto.randomUUID(), project_id: projectId }) }
+      catch { if (!stopped) setApplyError('点选读取暂时中断，已收到的标记仍保留'); return }
       if (stopped) return
       if (result?.ok && result.data?.ok) {
         setPicks(result.data.picks)
@@ -84,7 +110,7 @@ export const CorrectionPanel: React.FC = () => {
       stopped = true
       clearInterval(timer)
     }
-  }, [active, projectId, setPicks])
+  }, [active, projectId, setPicks, prepared])
 
   /** 收口：finish（主进程组装反馈文本单一来源）→ 代发用户消息 → 回炉链。
    *  假成功防护（批11 审查修复，2026-10-08）：无活跃会话/finish 失败/发送异常均如实呈现
@@ -99,32 +125,47 @@ export const CorrectionPanel: React.FC = () => {
     setApplyError(undefined)
     try {
       const api = window.electronAPI?.correction
-      const agentApi = window.electronAPI?.agent
-      if (!api || !agentApi?.sendMessage) {
+      const agentApi = window.electronAPI?.composer
+      if (!api || !agentApi?.submit) {
         setApplyError('当前环境不支持修改预览通道，点选已保留')
         return
       }
-      const result = await api.finish({ request_id: crypto.randomUUID(), project_id: projectId })
-      if (!result.ok || !result.data.ok || !result.data.feedback) {
-        setApplyError('提交没有成功（预览可能已关闭或没有可提交的点选）——请重试，或直接在左侧对话里说要改哪里')
-        return
+      let submission = prepared?.projectId === projectId ? prepared : undefined
+      if (!submission) {
+        const result = await api.finish({ request_id: crypto.randomUUID(), project_id: projectId })
+        if (projectRef.current !== projectId) return
+        if (!result.ok || !result.data.ok || !result.data.feedback) {
+          setApplyError('提交没有成功，点选意见尚未发送。请重试，或在对话里补充要修改的位置')
+          return
+        }
+        submission = { projectId, content: result.data.feedback, id: result.data.feedback_id ?? crypto.randomUUID() }
+        setPrepared(submission)
       }
-      await agentApi.sendMessage({
+      const sentResult = await agentApi.submit({
         request_id: crypto.randomUUID(),
+        client_message_id: submission.id,
+        draft_id: `correction-${submission.id}`,
+        attachment_refs: [],
         session_id: sessionId,
         project_id: projectId,
-        content: result.data.feedback,
+        content: submission.content,
         mode: project.mode ?? 'longterm',
         current_stage: project.current_stage ?? 'completed',
       })
+      if (projectRef.current !== projectId) return
+      if (!sentResult?.ok) { setApplyError('修改意见未被接收，已保留，可直接重试提交'); return }
+      const acknowledged = await api.finish({ request_id: crypto.randomUUID(), project_id: projectId, acknowledge: submission.id })
+      if (!acknowledged?.ok || !acknowledged.data.ok) { setApplyError('意见已发送，但提交回执尚未确认；重试会复用同一条消息'); return }
+      if (projectRef.current !== projectId) return
+      setPrepared(undefined)
       setSent(true)
       setSession({ status: 'idle' })
       setPicks([])
       setDone(false)
     } catch {
-      setApplyError('提交中断——请直接在左侧对话里告诉我要改哪里（重试可能会重复提交）')
+      if (projectRef.current === projectId) setApplyError('提交中断，修改意见已保留。可重试提交，不必重新点选')
     } finally {
-      setSending(false)
+      if (projectRef.current === projectId) setSending(false)
     }
   }
 
@@ -132,7 +173,15 @@ export const CorrectionPanel: React.FC = () => {
   const onDiscard = async (): Promise<void> => {
     if (!projectId) return
     const api = window.electronAPI?.correction
-    if (api) await api.finish({ request_id: crypto.randomUUID(), project_id: projectId })
+    try {
+      if (api) {
+        const result = await api.finish({ request_id: crypto.randomUUID(), project_id: projectId, discard: true })
+        if (!result?.ok || !result.data.ok) { setApplyError('取消未完成，点选意见仍保留，请重试'); return }
+      }
+    }
+    catch { setApplyError('取消未完成，点选意见仍保留，请重试'); return }
+    if (projectRef.current !== projectId) return
+    setPrepared(undefined)
     setSession({ status: 'idle' })
     setPicks([])
     setDone(false)
@@ -143,6 +192,8 @@ export const CorrectionPanel: React.FC = () => {
   if (session.status !== 'active') {
     return (
       <div style={{ padding: '4px 2px' }}>
+        {prepared?.projectId === projectId && <button data-ai-id="correction-retry-button" disabled={sending} onClick={() => void onApply()}>重试提交上次修改意见</button>}
+        {applyError && <p data-ai-id="correction-apply-error" role="alert">{applyError}</p>}
         <button
           data-ai-id="correction-start-button"
           onClick={() => void onStart()}

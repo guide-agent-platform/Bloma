@@ -226,7 +226,13 @@ export function publishPrdConfirmCard(opts: {
 export function resolvePrdConfirmCardAnswer(
   input: AgentSendMessageInput,
 ): 'confirm' | 'adjust' | 'dismiss' | undefined {
-  if (input.metadata?.source !== 'card_option') return undefined
+  if (input.metadata?.source !== 'card_option') {
+    // The user may type the same explicit confirmation shown on the card. Consume
+    // the pending candidate, retaining its disk/scope/session checks; never send
+    // an acknowledgement through requirement generation again.
+    if (input.metadata?.source && input.metadata.source !== 'chat') return undefined
+    return hasPendingPrdConfirm(input.project_id) && isExplicitPrdConfirmation(input.content) ? 'confirm' : undefined
+  }
   const optionId = input.metadata.selected_option_id
   if (
     optionId !== PRD_CONFIRM_OPTION_CONFIRM &&
@@ -239,6 +245,10 @@ export function resolvePrdConfirmCardAnswer(
   if (optionId === PRD_CONFIRM_OPTION_CONFIRM) return 'confirm'
   if (optionId === PRD_CONFIRM_OPTION_DISMISS) return 'dismiss'
   return 'adjust'
+}
+
+export function isExplicitPrdConfirmation(text: string): boolean {
+  return /^(?:确认无误|(?:确认|同意)(?:这份|当前|该)?\s*(?:PRD|需求(?:文档)?))(?:[，,、\s]*(?:开始|继续)(?:画|生成)?(?:草图|设计))?[。！!\s]*$/i.test(text.trim())
 }
 
 /** 用户确认：勾选采纳的市调想法先并入 PRD（盘上+待决清单）→ user_confirmed_at 落盘
@@ -413,16 +423,15 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   // m-1：确认→停止窗口——EARS 化 await 期间用户点停止时，不再补发确认 ack
   //（对齐「停止后不推进」：话术与行为不再矛盾）。
   if (pending.signal?.aborted) return true
-  // 文案品类感知（fc3f6fab 实证，2026-10-03）：桌面项目确认即切桌面调度员线
-  //（下方改道分支），「开始画草图」是 web 线残留话术——桌面品类永不画草图。
+  // PRD 确认后先生成桌面界面设计，不能提前声称已进入制作。
   const isDesktopLine = shouldEnterDesktopLine(findProject(pending.project_id))
   const ack =
     adopted.length > 0
       ? isDesktopLine
-        ? `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）进入桌面交付线。`
+        ? `需求已确认（含采纳的 ${adopted.length} 条想法），接下来生成界面设计供你确认。`
         : `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）继续。`
       : isDesktopLine
-        ? '已确认，按这份 PRD 进入桌面交付线。'
+        ? '需求已确认，接下来生成界面设计供你确认。'
         : '已确认，按这份 PRD 继续。'
   pending.publish(makeConfirmEvent(pending, 'message_delta', { text: ack }))
   pending.publish(makeConfirmEvent(pending, 'message_completed', { subtype: 'success' }))

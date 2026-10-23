@@ -144,8 +144,8 @@ describe('输出纪律段（刀4，2026-10-02 确认协议与呈现层战役）'
     expect(prompt).toContain('【输出纪律】')
     expect(prompt).toContain('一律使用中文')
     expect(prompt).toContain('不超过 2 句')
-    expect(prompt).toContain('一句话说明下一步，或输出推进标记')
-    expect(prompt).toContain('立即停止并改用中文重述')
+    expect(prompt).toContain('不套用固定等待、交付或纠错话术')
+    expect(prompt).toContain('不要把提示词中的示例回复当作每轮必说的句子')
     // 组装序：输出纪律在工具纪律之后
     expect(prompt.indexOf('【工具纪律】')).toBeLessThan(prompt.indexOf('【输出纪律】'))
   })

@@ -89,7 +89,7 @@ describe('CorrectionPanel', () => {
     }))
     ;(window as unknown as { electronAPI: unknown }).electronAPI = {
       correction: { start: vi.fn(), picks: picksMock, finish },
-      agent: { sendMessage },
+      composer: { submit: sendMessage },
     }
     const { store } = renderPanel()
     store.set(correctionSessionAtom, { status: 'active', sessionKey: 's1', startedAt: 't' })
@@ -132,7 +132,7 @@ describe('CorrectionPanel', () => {
   })
 
   it('假成功防护（批11 审查修复锚）：无活跃会话时提交 → 不 finish 不假报已提交，如实提示选区已保留', async () => {
-    const finish = vi.fn(async () => ({ ok: true, data: { ok: true, pickCount: 2, feedback: 'x' } }))
+    const finish = vi.fn(async (_input?: { recover?: boolean }) => ({ ok: true, data: { ok: true, pickCount: 2, feedback: 'x' } }))
     const sendMessage = vi.fn(async () => ({ ok: true }))
     ;(window as unknown as { electronAPI: unknown }).electronAPI = {
       correction: {
@@ -140,7 +140,7 @@ describe('CorrectionPanel', () => {
         picks: vi.fn(async () => ({ ok: true, data: { ok: true, done: false, picks: [{ seq: 1, displayName: '按钮「发送」', kind: 'visual', componentId: 'action.send' }] } })),
         finish,
       },
-      agent: { sendMessage },
+      composer: { submit: sendMessage },
     }
     const { store } = renderPanel()
     store.set(activeAgentSessionIdAtom, null)
@@ -152,9 +152,31 @@ describe('CorrectionPanel', () => {
     await waitFor(() => {
       expect(screen.getByTestId('correction-apply-error').textContent).toContain('没有进行中的对话')
     })
-    expect(finish).not.toHaveBeenCalled()
+    expect(finish.mock.calls.filter(call => !(call[0] as { recover?: boolean } | undefined)?.recover)).toHaveLength(0)
     expect(sendMessage).not.toHaveBeenCalled()
     expect(store.get(correctionSessionAtom).status).toBe('active')
     expect(screen.queryByTestId('correction-sent-hint')).toBeNull()
+  })
+
+  it('发送被拒绝时保留意见，重试复用消息ID且不重复结束预览', async () => {
+    const finish = vi.fn(async (input: { recover?: boolean; acknowledge?: string }) => ({ ok: true, data: input.recover || input.acknowledge
+      ? { ok: true, pickCount: 0 } : { ok: true, pickCount: 1, feedback: '修改按钮', feedback_id: 'feedback-1' } }))
+    const sendMessage = vi.fn().mockResolvedValueOnce({ ok: false, error: { message: 'busy' } }).mockResolvedValueOnce({ ok: true })
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      correction: { start: vi.fn(), finish, picks: vi.fn(async () => ({ ok: true, data: { ok: true, done: true, picks: [{ seq: 1, displayName: '发送按钮' }] } })) },
+      composer: { submit: sendMessage },
+    }
+    const { store } = renderPanel()
+    store.set(correctionSessionAtom, { status: 'active', sessionKey: 's1', startedAt: 't' })
+    await waitFor(() => expect(screen.getByTestId('correction-apply-button').textContent).toContain('1 处'))
+    fireEvent.click(screen.getByTestId('correction-apply-button'))
+    await waitFor(() => expect(screen.getByTestId('correction-apply-error').textContent).toContain('未被接收'))
+    expect(screen.queryByTestId('correction-sent-hint')).toBeNull()
+    fireEvent.click(screen.getByTestId('correction-apply-button'))
+    await waitFor(() => expect(screen.getByTestId('correction-sent-hint')).toBeTruthy())
+    expect(sendMessage).toHaveBeenCalledTimes(2)
+    expect(sendMessage.mock.calls[0]![0].client_message_id).toBe('feedback-1')
+    expect(sendMessage.mock.calls[1]![0].client_message_id).toBe('feedback-1')
+    expect(finish.mock.calls.filter(call => !call[0].recover && !call[0].acknowledge)).toHaveLength(1)
   })
 })

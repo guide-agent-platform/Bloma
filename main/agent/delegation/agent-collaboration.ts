@@ -328,6 +328,8 @@ async function runChildLoop(opts: {
     requestId: childRequestId,
     maxTokens: record.channelOverride?.maxTokens ?? parentCtx.maxTokens,
     maxTurns,
+    ...(role === 'implement' && parentCtx.executionScope ? { workMode: 'implementation' as const } : {}),
+    executionScope: parentCtx.executionScope,
     permissionMode: parentCtx.permissionMode,
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,

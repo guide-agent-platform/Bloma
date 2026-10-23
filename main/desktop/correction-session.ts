@@ -18,6 +18,7 @@ import { parseLaunchDeclaration } from './launch-smoke'
 import { resolveDriverVenvCommand } from './process-driver'
 import { violatesCommandBlacklist } from './contract-schema'
 import { isMvpConfirmPending } from './mvp-confirm'
+import { clearCorrectionSubmission, readCorrectionSubmission, saveCorrectionSubmission } from './correction-outbox'
 
 /** 会话目录相对项目根（00_ 前缀对齐工程目录惯例；picks/data/outputs 平铺其内）。 */
 export const CORRECTION_DIR_REL = '00_CORRECTION'
@@ -146,6 +147,7 @@ function sanitizePick(raw: unknown): CorrectionPick | { type: 'done' } | null {
  */
 export async function startCorrectionSession(input: { projectId: string }): Promise<CorrectionStartResult> {
   const project = findProject(input.projectId)
+  if (readCorrectionSubmission(input.projectId)) return { ok: false, reason: 'already-running', error: '上次点选意见尚未提交，请先重试提交或取消' }
   // 批11 ②：MVP 门挂起态也允许拉起（「先在程序里点点看」选项）——未交付且无挂起门才拦
   if (project.current_stage !== 'completed' && !isMvpConfirmPending(input.projectId)) {
     return { ok: false, reason: 'not-delivered', error: 'CORRECTION_NOT_DELIVERED: 项目尚未完成交付，不能进入修改预览' }
@@ -306,17 +308,33 @@ export function readCorrectionPicks(input: { projectId: string }): { ok: boolean
 /** 结束会话：kill 进程树（Windows taskkill /T /F——explorer 桥同款）+ 注册表清理。
  *  返回组装好的回炉反馈文本（buildCorrectionFeedback 单一来源——渲染端经
  *  AGENT_SEND_MESSAGE 代发，走 delivered 反馈回炉链）。 */
-export function finishCorrectionSession(input: { projectId: string }): { ok: boolean; feedback?: string; pickCount: number; error?: string } {
+export function finishCorrectionSession(input: { projectId: string; recover?: boolean; discard?: boolean; acknowledge?: string; inline?: boolean }): { ok: boolean; feedback?: string; feedback_id?: string; pickCount: number; error?: string } {
+  findProject(input.projectId)
+  if (input.acknowledge) return { ok: clearCorrectionSubmission(input.projectId, input.acknowledge), pickCount: 0 }
   const session = activeSessions.get(input.projectId)
+  if (input.discard) {
+    const count = session ? readCorrectionPicks(input).picks.length : readCorrectionSubmission(input.projectId)?.pickCount ?? 0
+    if (session) cleanupSession(input.projectId, session)
+    clearCorrectionSubmission(input.projectId)
+    return { ok: true, pickCount: count }
+  }
+  const pending = readCorrectionSubmission(input.projectId)
+  if (pending) return { ok: true, feedback: pending.content, feedback_id: pending.id, pickCount: pending.pickCount }
+  if (input.recover) return { ok: true, pickCount: 0 }
   if (!session) return { ok: false, pickCount: 0, error: 'CORRECTION_NOT_RUNNING' }
   const snapshot = readCorrectionPicks(input)
   const project = findProject(input.projectId)
+  // Persist before killing the instance; failed persistence leaves picks retryable.
+  const feedback = snapshot.picks.length > 0 ? buildCorrectionFeedback(snapshot.picks, project.name ?? '这个应用') : undefined
+  const submission = feedback && !input.inline
+    ? saveCorrectionSubmission(input.projectId, feedback, snapshot.picks.length) : undefined
   cleanupSession(input.projectId, session)
   pruneCorrectionSessions(input.projectId)
   return {
     ok: true,
     pickCount: snapshot.picks.length,
-    feedback: snapshot.picks.length > 0 ? buildCorrectionFeedback(snapshot.picks, project.name ?? '这个应用') : undefined,
+    feedback: submission?.content ?? feedback,
+    feedback_id: submission?.id,
   }
 }
 
@@ -371,10 +389,10 @@ export function attachActiveCorrectionFeedback(projectId: string, userText: stri
   if (!activeSessions.has(projectId)) return undefined
   const snapshot = readCorrectionPicks({ projectId })
   if (snapshot.picks.length === 0) {
-    finishCorrectionSession({ projectId })
+    finishCorrectionSession({ projectId, inline: true })
     return undefined
   }
-  const correctionText = finishCorrectionSession({ projectId }).feedback
+  const correctionText = finishCorrectionSession({ projectId, inline: true }).feedback
   if (!correctionText) return undefined
   const userPart = userText.trim()
   return userPart ? `${correctionText}\n（用户补充：${userPart}）` : correctionText

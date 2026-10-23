@@ -279,12 +279,12 @@ describe('PRD 用户确认门（改造 3）', () => {
     expect(texts.join('\n')).toContain('请你过目')
   })
 
-  it('confirm 回传（非桌面品类，web 线已下线）→ user_confirmed_at 落盘 + 形态引导卡 + 决策留痕', async () => {
+  it.each(['card', 'chat'])('明确确认通过%s入口消费现有PRD，不重新生成与审查', async (source) => {
     await startConfirmFlow()
     vi.mocked(trackAnalytics).mockClear()
 
     await handleGuideMessage(
-      makeInput({ content: '确认这份 PRD，开始画草图。', metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM } }),
+      makeInput({ content: '确认这份 PRD，开始画草图。', metadata: source === 'card' ? { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM } : { source: 'chat' } }),
       (event) => events.push(event),
       makeModel(scriptedQuery()),
     )

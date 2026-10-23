@@ -146,14 +146,27 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
     // 无运行的 generating（旧线项目停在上次中断处）：降级为静态说明卡（B-01），
     // 不再显示进行时动画；数据保留可导出是核心出路 → 保留导出按钮
     cleanup()
+    store.set(currentProjectAtom, { project_id: 'project-exp', template_type: 'web_fullstack' } as never)
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
       events: [],
       content: '',
     } as never)
     renderBanner()
-    expect(screen.getByTestId('mvp-status-banner').textContent).toContain('网页生成线已下线')
+    expect(screen.getByTestId('mvp-status-banner').textContent).toContain('历史项目')
     expect(screen.getByTestId('export-project-btn')).toBeTruthy()
+  })
+
+  it('暂停的桌面制作保留当前阶段，不能误报旧网页项目', () => {
+    store.set(currentProjectAtom, { project_id: 'project-exp', template_type: 'desktop_tool', desktop_phase: 'desktop-implement' } as never)
+    store.set(workflowStageAtom, 'generating_mvp')
+    store.set(agentStreamStateFamily('session-exp'), { running: false, events: [], content: '' } as never)
+    renderBanner()
+    const text = screen.getByTestId('mvp-status-banner').textContent
+    expect(text).toContain('制作已暂停')
+    expect(text).toContain('实现与验证')
+    expect(text).not.toContain('网页')
+    expect(text).not.toContain('已下线')
   })
 })
 

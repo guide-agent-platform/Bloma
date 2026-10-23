@@ -94,7 +94,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
   let runs = 0
   let attemptSeq = 0
   let lastPython: string | undefined
-  const budgetFact = (used: number): ToolBudgetFact => ({ resource: 'script_runs', scope: 'session', used, limit: maxRuns,
+  const budgetFact = (used: number, shared = false): ToolBudgetFact => ({ resource: 'script_runs', scope: shared ? 'project' : 'session', used, limit: maxRuns,
     remaining: Math.max(0, maxRuns - used), resets_on: 'new_run' })
 
   return {
@@ -104,11 +104,11 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       const root = findProject(projectId)?.root_path
       if (!root) return []
       let used: number
-      try { used = readProjectAttempts(projectId).active[`script:${ctx.sessionId}`] ?? 0 } catch {
+      try { used = readProjectAttempts(projectId).active[`script:${ctx.state.execution_scope ?? ctx.sessionId}`] ?? 0 } catch {
         return [{ schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'budget', recovery: 'inspect', reason: 'VERIFICATION_BUDGET_UNREADABLE' }]
       }
       const resources = { schema_version: 1 as const, execution: 'completed' as const, verification: 'not_applicable' as const,
-        source: 'host' as const, scope: 'execution_resources', budget: budgetFact(used) }
+        source: 'host' as const, scope: 'execution_resources', budget: budgetFact(used, Boolean(ctx.state.execution_scope)) }
       const venv = join(root, '.venv', 'Scripts', 'python.exe')
       try {
         const python = existsSync(venv) ? venv : lastPython ?? cachedPython ?? receiptPython(projectId, ctx.sessionId)
@@ -200,9 +200,9 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       const appData = join(getPromaHome(), 'execution-app-data', projectId, ctx.sessionId)
       mkdirSync(appData, { recursive: true })
       try {
-        const attempt = consumeProjectAttempt(projectId, `script:${ctx.sessionId}`, maxRuns)
+        const attempt = consumeProjectAttempt(projectId, `script:${ctx.state.execution_scope ?? ctx.sessionId}`, maxRuns)
         if (!attempt.allowed) return { output: `本任务累计执行预算用尽（${attempt.used}/${maxRuns} 次），续接不会清零。保存未完成项后停止。`, isError: true, budgetExhausted: true,
-          feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'reported_scenarios', category: 'budget', recovery: 'stop', budget: budgetFact(attempt.used) } }
+          feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'reported_scenarios', category: 'budget', recovery: 'stop', budget: budgetFact(attempt.used, Boolean(ctx.state.execution_scope)) } }
         runs = attempt.used
         attemptSeq = attempt.total
       } catch { return { output: '执行计数不可保存，未启动脚本。请恢复执行记录后重试。', isError: true, feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'environment', recovery: 'prepare_environment' } } }
@@ -230,7 +230,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         })
         const durationMs = Date.now() - startedAt
         const parsed = parseDriverStdout(stdout)
-        const facts = scriptExecutionFacts(code, parsed.scenarios, budgetFact(runs))
+        const facts = scriptExecutionFacts(code, parsed.scenarios, budgetFact(runs, Boolean(ctx.state.execution_scope)))
         // An exception or a no-assertion rerun must replace this command's old PASS too.
         const proof = evidence(parsed.scenarios)
         if (parsed.scenarios.length || code !== 0 || hasVerificationReceipt(projectId, ctx.sessionId, proof.key)) facts.feedback.evidence = proof

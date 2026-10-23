@@ -51,6 +51,18 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
 
   const okPython = async () => 'C:/Python313/python.exe'
 
+  it('primary and child share a phase execution budget; another phase has its own allowance', async () => {
+    const spawn = fakeSpawn({ code: 0, stdout: 'PASS isolated\n' })
+    const tool = buildChildScriptRunnerTool(projectId, { spawn, resolvePython: okPython, maxRuns: 1 })
+    const primary = ctxFor(projectId); primary.state.execution_scope = 'prd-v1-desktop-arch'
+    expect((await tool.execute({ script: '自测.py' }, primary)).isError).toBeFalsy()
+    const child = ctxFor(projectId); child.sessionId = 'another-child'; child.state.execution_scope = primary.state.execution_scope
+    expect((await tool.execute({ script: '自测.py' }, child)).feedback).toMatchObject({ category: 'budget', budget: { scope: 'project', remaining: 0 } })
+    child.state.execution_scope = 'prd-v1-desktop-implement'
+    expect((await tool.execute({ script: '自测.py' }, child)).isError).toBeFalsy()
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+
   it('passes complete argument vectors and rejects malformed requests before consuming any execution', async () => {
     const spawn = fakeSpawn({ code: 0 })
     const tool = buildChildScriptRunnerTool(projectId, { spawn, resolvePython: okPython, maxRuns: 1 })

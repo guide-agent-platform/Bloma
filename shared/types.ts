@@ -513,6 +513,9 @@ export interface CorrectionPicksResult {
 /** 点选纠错：收口（kill 实例）。 */
 export interface CorrectionFinishInput extends RequestEnvelope {
   project_id: string
+  recover?: boolean
+  discard?: boolean
+  acknowledge?: string
 }
 
 /** 点选纠错收口结果：主进程组装的回炉反馈文本（单一来源，渲染端代发）。 */
@@ -520,6 +523,7 @@ export interface CorrectionFinishResult {
   ok: boolean
   pickCount: number
   feedback?: string
+  feedback_id?: string
   error?: string
 }
 
@@ -1118,7 +1122,7 @@ export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 
  *  纯增量字段，旧调用方零感知。 */
 /** P2a（2026-09-11）：loop 异常终止真实出口原因（纯增量观测字段，不改 status 语义）。 */
 export interface LoopTerminationDetail {
-  reason: 'degenerate_output' | 'grace_wrap_up' | 'cost_limit' | 'persistent_tool_budget' | 'output_token_limit'
+  reason: 'degenerate_output' | 'grace_wrap_up' | 'cost_limit' | 'persistent_tool_budget' | 'output_token_limit' | 'no_progress'
   /** 成本硬上限终止时的限额与实测（可解释；仅 reason=cost_limit 携带） */
   limit?: number
   observed?: number

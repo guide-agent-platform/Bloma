@@ -106,7 +106,15 @@ const RETIRED_ACTIVE_STAGES = new Set<WorkflowStage>([
 function deriveBannerState(
   stage: WorkflowStage,
   running: boolean,
+  legacyWeb = false,
+  desktopPhase?: string,
 ): BannerState {
+  if (desktopPhase && desktopPhase !== 'delivered' && RETIRED_ACTIVE_STAGES.has(stage)) {
+    const label = ({ 'desktop-arch': '架构准备', 'desktop-scaffold': '工程准备', 'desktop-implement': '实现与验证', 'desktop-verify': '验收检查' } as Record<string, string>)[desktopPhase] ?? '制作'
+    return running
+      ? { visible: true, variant: desktopPhase === 'desktop-verify' ? 'testing' : 'generating', title: `正在${label}`, detail: '正在处理当前任务，结果会记录在工作区。', stage }
+      : { visible: true, variant: 'blocked', title: '制作已暂停', detail: `当前进度：${label}。已有文件和验证记录保留，可继续制作。`, stage }
+  }
   // 2026-10-04 web 线残留清理：mvp_ready/repairing 事件已无发射方（web 生成链 10-01
   // 退役），事件腿删除——横幅现在完全由权威阶段驱动（桌面线 stage_changed 同步）。
   //
@@ -119,7 +127,9 @@ function deriveBannerState(
     case 'sketch_ready':
       return running
         ? { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '草图已生成，确认后即可生成完整功能，或继续对话调整方向', stage }
-        : { visible: true, variant: 'retired', title: '网页草图项目（旧版线）', detail: '草图与项目数据完整保留，可导出查看。旧版网页生成线已下线，如需继续开发建议新建桌面软件项目。', stage }
+        : legacyWeb
+          ? { visible: true, variant: 'retired', title: '历史项目', detail: '这个项目使用旧交付格式，资料与产物保留，可查看或导出。', stage }
+          : { visible: true, variant: 'ready', title: '界面设计待确认', detail: '查看当前设计，确认后开始制作，也可以继续调整。', stage }
     // 2026-10-04 web 线残留清理：mvp_ready 死事件腿删除后，导出/升级入口改由权威阶段
     // 驱动——ready（旧线终态）与 completed（桌面线 delivered）都应能导出项目。
     case 'ready':
@@ -134,11 +144,12 @@ function deriveBannerState(
 
   // 退役前「进行中」阶段：有活跃流 → 原进行时呈现；无活跃流 → 静态降级卡（B-01）
   if (RETIRED_ACTIVE_STAGES.has(stage) && !running) {
+    if (!legacyWeb) return { visible: true, variant: 'blocked', title: '制作已暂停', detail: '当前没有运行中的任务，已有进度保留。', stage }
     return {
       visible: true,
       variant: 'retired',
-      title: '网页生成线已下线',
-      detail: '这个项目停在上次的制作状态。旧版网页生成能力已在本版本下线，数据与产物完整保留——可导出项目，或参考原需求新建桌面软件项目。',
+      title: '历史项目',
+      detail: '这个项目使用旧交付格式，当前支持查看与导出。数据与产物已保留。',
       stage,
     }
   }
@@ -264,8 +275,8 @@ export const MvpStatusBanner: React.FC<{ suppressBlocked?: boolean }> = ({ suppr
       return { visible: false, variant: 'none', title: '', stage }
     }
     // B-01：会话级运行态参与判定——无活跃流时，退役前「进行中」阶段降级为静态卡
-    return deriveBannerState(stage, streamState?.running ?? false)
-  }, [sessionId, streamState?.running, stage])
+    return deriveBannerState(stage, streamState?.running ?? false, project?.template_type === 'web_fullstack', project?.desktop_phase)
+  }, [sessionId, streamState?.running, stage, project?.template_type, project?.desktop_phase])
 
   if (!banner.visible || suppressBlocked && project?.desktop_blocked) return null
 

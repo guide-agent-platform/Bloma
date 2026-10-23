@@ -339,7 +339,7 @@ export async function handleDesktopDispatchMessage(
     // 收口矩阵补齐（批11 审查修复，2026-10-08）：确认交付时若仍有活跃纠错会话——kill 实例；
     // 有未发送选区则如实告知已丢弃（不静默吞掉用户的点选，也不拦住交付决策）。
     if (hasActiveCorrectionSession(input.projectId)) {
-      const finished = finishCorrectionSession({ projectId: input.projectId })
+      const finished = finishCorrectionSession({ projectId: input.projectId, discard: true })
       if (finished.pickCount > 0) {
         deps.publish(input, 'message_delta', {
           text: `注意：修改预览里点选的 ${finished.pickCount} 处标记没有发送，本次未按它们修改，已按当前版本交付。`,

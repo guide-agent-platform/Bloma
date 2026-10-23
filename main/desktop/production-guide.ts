@@ -11,7 +11,7 @@ export function productionGuide(role: 'dispatcher' | 'executor', limits: Desktop
     '独立GUI验收的控件身份用read_production_context(topic=verification-gui)读取；实现保留这些选择器和已确认UX交互标记，业务期望由宿主冻结，不在生成目录重写验收。',
     '【现成平台入口】项目工作根使用相对路径。保留app.py正常启动、from app import Logic门面、--self-check、--drive-port及/eval、/call、纠错协议；修改相关接口前先读现有生产者与消费者。界面使用既有App.call桥和App.show状态反馈，不从草图示意数据生成业务结果。',
     '测试数据统一走独立APP_DATA_DIR，不读取或覆盖项目正常data。已有.venv与00_ENV资格事实优先复用，不因子任务接手重新安装或创建异名环境。只写本次授权范围；共用接口变化和未完成项必须交接给集成负责人。',
-    `【真实执行资源】每名执行者脚本累计${limits.script_runs}次、安装累计${limits.install_calls}次，续接不清零；脚本缺省90秒、可显式设置至180秒。剩余额度和验证新鲜度以工具反馈为准，模型轮数由本次委派预算给出。`,
+    `【真实执行资源】当前执行范围脚本累计${limits.script_runs}次、安装累计${limits.install_calls}次，续接不清零；主执行生产链按项目需求与阶段共享，委派也消费同一范围。脚本缺省90秒、可显式设置至180秒；实际范围、剩余额度和验证新鲜度以宿主反馈为准。`,
     '逻辑自测与真实GUI业务链分别记录；数据隔离，关闭自己启动的进程。只补失败、缺失或版本过期的证据，不因交接重复全量自测。完成摘要交接：改动文件、接口、真实命令与结果、未完成项/阻塞；自报完成和平台验收分开。',
   ].join('\n')
 }

@@ -35,7 +35,9 @@ export function registerCorrectionIpc(ipcMain: IpcMain): void {
   ipcMain.handle(IPC_CHANNELS.CORRECTION_FINISH, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<CorrectionFinishInput>(payload, ['project_id'])
-      return finishCorrectionSession({ projectId: input.project_id })
+      if ((input.recover !== undefined && typeof input.recover !== 'boolean') || (input.discard !== undefined && typeof input.discard !== 'boolean')
+        || (input.acknowledge !== undefined && typeof input.acknowledge !== 'string')) throw new Error('CORRECTION_FINISH_INVALID')
+      return finishCorrectionSession({ projectId: input.project_id, recover: input.recover, discard: input.discard, acknowledge: input.acknowledge })
     })
   })
 }

@@ -387,7 +387,7 @@ describe('故障注入：推进伪造', () => {
 })
 
 describe('故障注入：围栏与挂起', () => {
-  it('误装配 write_file 被围栏硬拦（execute 永不触达，模型收到教育文案）', async () => {
+  it('主执行者可直接写入，工具结果正常回流；旧调度员围栏另有独立测试', async () => {
     let executeTouched = false
     const rogueTool: AgentLoopTool = {
       name: 'write_file',
@@ -403,7 +403,7 @@ describe('故障注入：围栏与挂起', () => {
       [textMessage('好的，改用委派。')],
     ])
     const result = await runDesktopDispatcherLoop(baseInput({ query, artifactExists: allExist, toolsOverride: [rogueTool] }))
-    expect(executeTouched).toBe(false)
+    expect(executeTouched).toBe(true)
     expect(result.status).toBe('completed')
     // 第二轮模型收到 is_error 教育文案（tool_result 回填进 user 轮的 content 块数组；
     // 同轮 user 还有 task 消息——取最后一个 user 轮即 tool_result 批）
@@ -411,7 +411,7 @@ describe('故障注入：围栏与挂起', () => {
     const toolResultTurn = userTurns[userTurns.length - 1]
     const blocks = Array.isArray(toolResultTurn?.content) ? toolResultTurn.content : []
     const toolResults = blocks.filter((b) => b.type === 'tool_result')
-    expect(toolResults.some((b) => (b as { is_error?: boolean }).is_error === true)).toBe(true)
+    expect(toolResults.some((b) => (b as { is_error?: boolean }).is_error === true)).toBe(false)
   })
 
   it('挂起工具模式：白名单内工具 execute 永不 resolve——abort 后 loop 停在工具执行位（既有设计：工具裸 await 不响应 abort；调度员运行器不改变 loop 语义，仅验证透传与不 crash）', async () => {

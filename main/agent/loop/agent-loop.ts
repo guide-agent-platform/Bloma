@@ -23,6 +23,7 @@ import { userFacingWrapUp } from '../prompting/user-facing-output'
 import { isHostControlText } from '../../../shared/message-presentation'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from './steer-queue'
+import { createWorkProgress, pruneDuplicateReads } from './work-progress'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -48,6 +49,8 @@ import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pen
 
 /** 工具执行期共享状态（同一 loop 会话内跨工具可变；agent-tools 维护语义字段）。 */
 export interface AgentLoopToolState {
+  /** Host-owned work scope, shared across executors in one production phase. */
+  execution_scope?: string
   latest_tool_feedback?: Record<string, ToolFeedback>
   terminal_budget_feedback?: Record<string, ToolFeedback>
   successful_file_changes?: string[]
@@ -203,6 +206,9 @@ export interface AgentLoopInput {
   /** 非写型 loop（调度员等）关闭 B3 进度对账三守卫注入（守卫假设具备写/自测工具；
    *  首跑实证：纯委派调度员触发只读失速误注入。缺省 false=现状）。 */
   disableProgressNudge?: boolean
+  /** Writable executors opt in; read-only research is never forced to edit. */
+  workMode?: 'implementation'
+  executionScope?: string
   /** 续跑重放历史轮次（delegation continue 阶段 3，2026-08-28 队友）：作为 messages 开头
    * 传入模型，task 仍是最新 user 轮；不写入 JSONL——重放轮已在子会话文件里 */
   historyTurns?: ConversationTurn[]
@@ -819,6 +825,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     signal: input.signal,
     state: createToolState(input.delegationDepth ?? 0),
   }
+  if (input.executionScope) ctx.state.execution_scope = input.executionScope
   // 如实化预置（全链路审查 P1，2026-10-01）：工具面未装配的验证位豁免——与 D1 的
   // 「无契约豁免 true」同构。web 线拆除后 run_gwt_tests/run_api_contract_tests 已退役：
   // 未装配而要求置位会把收口判定变死条件（永不收口，只能靠 maxTurns 耗尽）。
@@ -978,6 +985,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let transportRecoveries = 0
   // B3（P0-B，2026-09-11）：进度对账三守卫状态（BLOMA_LOOP_PROGRESS_NUDGE off=零注入）
   let readOnlyStreak = 0
+  const workProgress = input.workMode === 'implementation' ? createWorkProgress() : undefined
   const writtenFiles = new Set<string>()
   let verificationSeen = false
   let planNudgeDone = false
@@ -1241,6 +1249,15 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     messages.push({ role: 'user', content: resultBlocks })
     if (terminalBudgetStop) return attachUsage({ status: 'budget_exhausted', turns, finalText, toolCalls,
       termination_detail: { reason: 'persistent_tool_budget' } })
+    if (workProgress) pruneDuplicateReads(messages)
+    const progress = workProgress?.observe(turnCalls)
+    if (progress?.stalled) return attachUsage({ status: 'budget_exhausted', turns,
+      finalText: '本轮连续只读或失败操作，未产生有效修改或执行验证；已停止空转。请按已有失败和文件位置继续最小修复。', toolCalls,
+      termination_detail: { reason: 'no_progress', limit: 24, observed: progress.idleTurns } })
+    if (progress?.nudge) {
+      appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: progress.nudge }])
+      messages.push({ role: 'user', content: progress.nudge })
+    }
 
     // W2-E3：验证工具执行后事件驱动保存（检查点的验证状态/候选指纹随之更新）
     if (turnCalls.some((call) => call.name === 'run_gwt_tests')) emitCheckpoint('gwt', turn)
@@ -1295,7 +1312,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         const untouched = input.planFiles.filter((path) => !writtenFiles.has(normalizeProgressPath(path)))
         if (untouched.length > 0) {
           nudges.push(
-            `轮次已消耗 ${turn}/${input.maxTurns}，技术合同清单中以下文件尚未写入：${untouched.join('、')}。若确已不需要请在旁白说明原因；否则优先补齐（注意：index.html 未引用构建产物 dist/app.js 时页面无法加载功能）。`,
+            `轮次已消耗 ${turn}/${input.maxTurns}，技术合同清单中以下文件尚未写入：${untouched.join('、')}。若确已不需要请说明原因；否则优先补齐并核对实际入口与调用关系。`,
           )
           planNudgeDone = true
         }
