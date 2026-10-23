@@ -65,7 +65,7 @@ export function maybeRenameUnnamedProject(projectId: string, message: string | u
   }
 }
 
-export function createProject(input: ProjectCreateInput): Project {
+export function createProject(input: ProjectCreateInput, options?: { workflowVersion: 'lean-v1' }): Project {
   const now = new Date().toISOString()
   const projectId = randomUUID()
   const rootPath = getGeneratedProjectPath(WORKSPACE_SLUG, projectId)
@@ -73,6 +73,7 @@ export function createProject(input: ProjectCreateInput): Project {
   getSnapshotsDir(WORKSPACE_SLUG, projectId)
 
   const project: Project = {
+    ...(options ? { workflow_version: options.workflowVersion } : {}),
     project_id: projectId,
     workspace_slug: WORKSPACE_SLUG,
     name: deriveProjectDisplayName(input.initial_message) ?? input.initial_message?.slice(0, 32) ?? '未命名项目',

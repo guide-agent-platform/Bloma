@@ -44,7 +44,7 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_CREATE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateProjectCreate(payload)
-      const project = createProject(input)
+      const project = createProject(input, { workflowVersion: 'lean-v1' })
       trackAnalytics({
         request_id: input.request_id,
         event: {
