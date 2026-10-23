@@ -1,8 +1,8 @@
 # Bloma 完整流程缩减计划
 
-状态：计划完成，尚未实施。日期：2026-10-23。源码基线：`sprint2 / 250aab8`。
+状态：已获批准并实施，收口结果见[实施记录](workflow-reduction-implementation-20261023.md)。日期：2026-10-23。原计划源码基线：`sprint2 / 250aab8`。
 
-本计划依据当前实际接线，覆盖需求、草图、实现、验证、交付、纠错与恢复。目标是只保留能直接帮助做对产品、避免损失、证明结果的机制；减少模型准备工作和人为仪式。本轮仅提交计划，不改变运行策略，不启动付费实验。
+本计划依据批准时实际接线，覆盖需求、草图、实现、验证、交付、纠错与恢复。目标是只保留能直接帮助做对产品、避免损失、证明结果的机制；减少模型准备工作和人为仪式。以下保留原定范围和完成标准；后续实施经用户另行批准，不启动付费实验。
 
 核对入口：[需求整理](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/guide/pipeline.ts)、[需求后置链](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/guide/stages/prd-pipeline.ts)、[草图确认](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/guide/ux-confirm.ts)、[视觉管线](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/guide/ux-visual-pipeline.ts)、[桌面交付路由](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/desktop/desktop-route.ts)、[交付策略](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/desktop/delivery-policy.ts)、[Pi执行内核](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/main/agent/loop/pi-runtime.ts)。
 
