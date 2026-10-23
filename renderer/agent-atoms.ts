@@ -1083,7 +1083,7 @@ export const hasActiveStreamAtom = atom((get) => {
 
 export const canUpgradeAtom = atom((get) => {
   const project = get(currentProjectAtom)
-  return project?.mode === 'quick' && project?.status === 'completed'
+  return project?.workflow_version !== 'lean-v1' && project?.mode === 'quick' && project?.status === 'completed'
 })
 
 // =========================================================================

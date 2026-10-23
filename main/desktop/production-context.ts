@@ -14,7 +14,9 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
   if (featureIds.some(id => !known.has(id))) throw new Error('PRODUCTION_UNKNOWN_FEATURE')
   const selected = new Set(featureIds.length ? featureIds : known)
   if (topic === 'prd') return { prd_document: backplane.prd_document ?? '', note: '正文与结构化需求冲突时报告，不能自行扩大或削减范围。' }
-  if (topic === 'verification') return { protocol: CORE_DECLARATION_BRIEF }
+  if (topic === 'verification') return { protocol: backplane.lean_brief
+    ? '用register_gui_check或register_cli_check登记固定输入与任务单预期，宿主操作实际入口。无需另写自报PASS脚本；CORE_CHECK.json只在特殊能力需要时登记llm或speech入口。数据目录使用APP_DATA_DIR。'
+    : CORE_DECLARATION_BRIEF }
   if (topic === 'verification-llm') return { protocol: MODEL_VERIFICATION_BRIEF }
   if (topic === 'verification-speech') return { protocol: SPEECH_VERIFICATION_BRIEF }
   if (topic === 'overview') return {

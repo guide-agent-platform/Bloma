@@ -124,7 +124,15 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
   if (existsSync(path)) {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
-      if (parsed && Array.isArray(parsed.requirements)) return reconcilePrdBackplane(parsed)
+      if (parsed && Array.isArray(parsed.requirements)) {
+        if (project.workflow_version === 'lean-v1' && (!parsed.lean_brief || parsed.lean_brief.version !== 1
+          || !['none', 'required'].includes(parsed.lean_brief.ui) || typeof parsed.positioning !== 'string'
+          || parsed.project_id !== projectId || !parsed.requirements.length || parsed.requirements.some(row => !row?.id || !row.description)
+          || !parsed.acceptance || !Array.isArray(parsed.out_of_scope) || !Array.isArray(parsed.assumptions)
+          || parsed.lean_brief.preview !== undefined && !['skip', 'reuse'].includes(parsed.lean_brief.preview)
+          || parsed.lean_brief.preview === 'reuse' && !/^[a-f0-9]{64}$/.test(parsed.lean_brief.reference_html_hash ?? ''))) throw new Error('LEAN_BRIEF_INVALID')
+        return reconcilePrdBackplane(parsed)
+      }
       if (project.workflow_version === 'lean-v1') throw new Error('LEAN_BRIEF_INVALID')
     } catch {
       if (project.workflow_version === 'lean-v1') throw new Error('LEAN_BRIEF_UNREADABLE: 需求记录损坏，未重建或覆盖')

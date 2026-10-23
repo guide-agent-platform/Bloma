@@ -22,6 +22,6 @@ export async function guardDispatcherCompletion(ctx: ToolContext, limitMs = 1_80
   }
   ctx.signal.throwIfAborted()
   const summaries = deps.list(ctx.sessionId).map(r => deps.summary(r))
-  return '【宿主完成条件】上一条无工具回复时仍有子任务在运行，不能据此结束阶段。宿主已等待完成或待回答问题，没有取消执行器。以下是实际状态与交接；请只处理缺口、必要代答或完成收口，不无变化重复验证。执行结束不等于产品验收通过，推进标记必须由你依据事实给出。\n'
+  return '【宿主完成条件】上一条无工具回复时仍有子任务在运行，不能据此结束制作。宿主已等待完成或待回答问题，没有取消执行器。以下是实际状态与交接；请只处理缺口、必要代答或完成收口，不无变化重复验证。执行结束不等于产品验收通过，请依据实际结果处理剩余工作。\n'
     + JSON.stringify(summaries.map(s => ({ ...s, result_summary: s.result_summary?.slice(0, 3000) })))
 }

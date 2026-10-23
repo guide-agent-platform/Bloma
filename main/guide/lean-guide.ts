@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { getDocumentsDir } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import type { AgentEvent, AgentSendMessageInput } from '../../shared/types'
 import type { GuideModelOptions } from '../orchestration/stages/orchestration-contracts'
@@ -10,10 +11,11 @@ import { syncDocuments } from '../project/document-sync'
 import { applyGeneratedProjectName, findProject, updateProject } from '../project/project-service'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { readGuideConfirmation, saveGuideConfirmation } from './confirmation-journal'
-import { LEAN_BRIEF_PROMPT, parseLeanBrief, renderLeanBrief } from './lean-brief'
-import { createProductionBudget } from '../desktop/production-budget'
+import { LEAN_BRIEF_PROMPT, parseLeanBrief } from './lean-brief'
+import { authorizesDirectBuild, authorizesSkipPreview, publishLeanScope, stageLeanScope } from './lean-scope'
+import { leanBudget, withLeanRuntime } from '../desktop/lean-budget'
 import { renderMaterialContext, materialImageRefs } from '../platform/attachments/material-context'
-import { runUxConfirmGate, restoreUxConfirmation, hasPendingUxConfirm, resolveUxConfirmCardAnswer, resumeUxConfirmConfirmed, retryUxSketch,
+import { runUxConfirmGate, restoreUxConfirmation, replayUxConfirmation, hasPendingUxConfirm, resolveUxConfirmCardAnswer, resumeUxConfirmConfirmed, retryUxSketch,
   consumeUxConfirmDismiss, startUxAdjustAwait, takeUxAdjustFeedback, takeUxSketchCorrection, runUxAdjustRound } from './ux-confirm'
 import { enterDesktopLine } from '../desktop/desktop-route'
 
@@ -26,18 +28,20 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   const brief = readPrdBackplane(input.project_id)
   const saved = readGuideConfirmation('prd', input.project_id)
   if (saved && (saved.session_id !== input.session_id || saved.data.lean !== true)) throw new Error('LEAN_CONFIRMATION_OWNER_MISMATCH')
-  const publishScope = () => {
-    emit('user_decision_required', { kind: 'lean_scope', title: '确认这次要做的内容', summary: renderLeanBrief(brief),
-      questions: [{ id: `lean_confirm:${prdScopeFingerprint(brief)}`, label: '按这份做', description: '确认目标和范围' },
-        { id: 'lean_adjust', label: '补充或修改', description: '说明需要调整的内容' }, { id: 'lean_pause', label: '稍后再说', description: '保留任务单' }] })
-    updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
-    emit('stage_changed', { stage: 'blocked_for_user_decision' })
-  }
+  const publishScope = () => publishLeanScope(brief, emit)
   const begin = async () => {
-    if (brief.lean_brief?.ui !== 'none') {
+    if (brief.lean_brief?.ui !== 'none' && !brief.lean_brief?.preview) {
       await runUxConfirmGate({ ...input, mode: project.mode, query: model.query, env: model.env, publish, signal: model.signal,
         round: 1, positioning: brief.positioning, requirements: brief.requirements })
     } else {
+      if (brief.lean_brief?.preview === 'skip') updateProject(input.project_id, { ux_confirmation: {
+        prd_fingerprint: prdScopeFingerprint(brief), design_hash: prdScopeFingerprint(brief), html_hash: null } })
+      if (brief.lean_brief?.preview === 'reuse') {
+        const hash = createHash('sha256').update(readFileSync(join(project.root_path, '00_UX/confirmed.html'))).digest('hex')
+        if (hash !== brief.lean_brief.reference_html_hash || hash !== project.ux_confirmation?.html_hash) throw new Error('UX_REFERENCE_CHANGED')
+        writeTextFileAtomic(join(project.root_path, '00_UX/confirmed.json'), JSON.stringify({ version: 2, mode: 'lean', scope_hash: prdScopeFingerprint(brief), html_hash: hash }))
+        updateProject(input.project_id, { ux_confirmation: { prd_fingerprint: prdScopeFingerprint(brief), design_hash: hash, html_hash: hash } })
+      }
       await enterDesktopLine({ projectId: input.project_id, sessionId: input.session_id, requestId: input.request_id,
         content: '按已确认目标制作', signal: model.signal, maxTokens: model.maxTokens }, model.query, model.env, {
         publish: (_target, type, payload) => emit(type, payload), persistAssistant: () => {}, persistSystem: () => {},
@@ -50,6 +54,10 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   if (selected?.startsWith('lean_confirm:') || confirm && saved) {
     if (!saved || saved.scope_hash !== prdScopeFingerprint(brief) || selected && selected !== `lean_confirm:${saved.scope_hash}`) throw new Error('LEAN_CONFIRMATION_STALE')
     model.signal.throwIfAborted()
+    if (authorizesDirectBuild(input.content) && brief.lean_brief?.ui === 'required') {
+      brief.lean_brief.preview = 'skip'
+      syncDocuments({ ...input, checkpoint: 'requirement_confirmed' }, brief)
+    }
     if (!markPrdUserConfirmed(input.project_id, saved.scope_hash)) throw new Error('LEAN_CONFIRMATION_NOT_SAVED')
     saveGuideConfirmation({ ...saved, state: 'consumed' })
     await begin(); return
@@ -63,6 +71,7 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
     restoreUxConfirmation(input, publish, { query: model.query, env: model.env, signal: model.signal })
     const decision = resolveUxConfirmCardAnswer(input)
     if (!decision && confirm && hasPendingUxConfirm(input.project_id)) { await resumeUxConfirmConfirmed(input); return }
+    if (!decision && /^(?:继续|查看草图|看看草图)$/.test(input.content.trim()) && hasPendingUxConfirm(input.project_id)) { replayUxConfirmation(input.project_id); return }
     if (decision === 'confirm') { await resumeUxConfirmConfirmed(input); return }
     if (decision === 'retry') { await retryUxSketch(input); return }
     if (decision === 'dismiss') { consumeUxConfirmDismiss(input); return }
@@ -78,13 +87,13 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   const source = humanTexts.join('\n\n')
   const materials = model.materials ? renderMaterialContext(model.materials, input.session_id, true) : ''
   const images = [...(input.images ?? []), ...(model.materials ? materialImageRefs(model.materials) : [])]
-  const budget = createProductionBudget(input.project_id, 'lean-v1', 'prepare')
+  const budget = leanBudget(input.project_id, 'prepare')
   const query = budget.wrap(model.query)
-  const result = await callLlmForJson({ systemPrompt: LEAN_BRIEF_PROMPT,
+  const result = await withLeanRuntime(input.project_id, 'prepare', model.signal, signal => callLlmForJson({ systemPrompt: LEAN_BRIEF_PROMPT,
     prompt: JSON.stringify({ previous: brief.lean_brief ? brief : undefined, conversation: source, materials, latest: input.content }),
     query: (text, options) => query(text, { ...options, images, accounting: { projectId: input.project_id, runId: input.request_id, role: 'brief', scope: 'prepare' } }),
-    env: model.env, signal: model.signal, sessionId: input.session_id, maxTokens: Math.min(model.maxTokens, 8192), temperature: .1, attempts: 2,
-    parse: text => parseLeanBrief(text, { projectId: input.project_id, sessionId: input.session_id, source, previous: brief }) })
+    env: model.env, signal, sessionId: input.session_id, maxTokens: Math.min(model.maxTokens, 8192), temperature: .1, attempts: 2,
+    parse: text => parseLeanBrief(text, { projectId: input.project_id, sessionId: input.session_id, source, previous: brief }) }))
   model.signal.throwIfAborted()
   if (!result) { emit('message_delta', { text: '任务整理未完成，原始需求已保留；可重试，不会自动开工。' }); emit('message_completed', { subtype: 'incomplete' }); return }
   if (result.action === 'clarify') {
@@ -94,19 +103,12 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
     return
   }
   const next = result.brief
-  if (brief.requirements.length) writeTextFileAtomic(join(getDocumentsDir(project.workspace_slug, project.project_id), 'history',
-    `brief-${prdScopeFingerprint(brief)}.json`), JSON.stringify(brief, null, 2))
-  syncDocuments({ ...input, checkpoint: 'requirement_confirmed' }, next)
+  if (authorizesSkipPreview(input.content) && next.lean_brief?.ui === 'required') next.lean_brief.preview = 'skip'
+  stageLeanScope(input.project_id, input.session_id, input.request_id, brief, next, emit)
   applyGeneratedProjectName(input.project_id, project.name, next.name)
-  saveGuideConfirmation({ version: 1, kind: 'prd', id: randomUUID(), project_id: input.project_id, session_id: input.session_id,
-    scope_hash: prdScopeFingerprint(next), state: 'pending', data: { lean: true } })
-  const removed = brief.requirements.filter(old => !next.requirements.some(row => row.id === old.id))
-  if (removed.length) emit('message_delta', { text: '本次任务单移除了：' + removed.map(row => row.description).join('；') + '。请核对是否符合你的修改要求。' })
-  const removedConstraints = [...(brief.constraints ?? []), ...brief.out_of_scope].filter(text => ![...(next.constraints ?? []), ...next.out_of_scope].includes(text))
-  if (removedConstraints.length) emit('message_delta', { text: '本次取消了原有限制：' + removedConstraints.join('；') + '。确认前请核对。' })
-  emit('user_decision_required', { kind: 'lean_scope', title: '确认这次要做的内容', summary: renderLeanBrief(next),
-    questions: [{ id: `lean_confirm:${prdScopeFingerprint(next)}`, label: '按这份做', description: '确认目标和范围' },
-      { id: 'lean_adjust', label: '补充或修改', description: '保留原话并更新任务单' }, { id: 'lean_pause', label: '稍后再说', description: '暂不开工' }] })
-  updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
-  emit('stage_changed', { stage: 'blocked_for_user_decision' })
+  if (authorizesDirectBuild(input.content)) {
+    model.signal.throwIfAborted()
+    // Read the just-accepted sheet, rather than the prior closure snapshot.
+    await handleLeanGuide({ ...input, content: '按这份做', metadata: { source: 'chat' } }, publish, model)
+  }
 }

@@ -185,6 +185,8 @@ export interface AgentLoopInput {
   runtimeScope?: string
   /** Host prerequisite check after a no-tool final response; feedback keeps the loop open. */
   beforeComplete?: (ctx: ToolContext) => Promise<string | undefined>
+  /** Host decision pending: end this turn before another tool or request. */
+  shouldPause?: () => boolean
   parentSessionId?: string
   accountingRole?: string
   materials?: import('../../../shared/attachment-types').MaterialContext

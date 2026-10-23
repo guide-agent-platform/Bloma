@@ -11,7 +11,7 @@ import { savePastedImage, cleanupPastedImages } from '../platform/shell/pasted-i
 import { loadPromptWithSource } from '../agent/prompting/prompt-config'
 import { UX_SKETCH_SYSTEM_PROMPT } from '../agent/prompting/ux-sketch-prompt'
 import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
-import { createProductionBudget } from '../desktop/production-budget'
+import { leanBudget, withLeanRuntime } from '../desktop/lean-budget'
 
 interface Direction { id: string; concept: string; composition: string; visual_language: string }
 interface Candidate { id: string; result: UxSketchResult; shots?: HtmlPreviewShot[] }
@@ -36,8 +36,9 @@ const words = (value: unknown): value is string => typeof value === 'string' && 
 export async function generateUxVisualDesign(options: UxSketchOptions & { progress?: (text: string) => void }, overrides: Partial<Dependencies> = {}): Promise<UxVisualResult> {
   const deps = { ...defaults, ...overrides }
   if (options.backplane?.lean_brief) {
-    const budget = createProductionBudget(options.project_id, 'lean-v1', 'prepare')
-    return deps.generate({ ...options, query: budget.wrap(options.query), maxTokens: Math.min(options.maxTokens, 16384), attempts: 2 })
+    const budget = leanBudget(options.project_id, 'prepare')
+    return withLeanRuntime(options.project_id, 'prepare', options.signal, signal => deps.generate({ ...options, signal,
+      query: budget.wrap(options.query), maxTokens: Math.min(options.maxTokens, 16384), attempts: 2 }))
   }
   if (!options.backplane || !deps.available() || process.env.BLOMA_UX_VISUAL === '0') return deps.generate(options)
   const experimentPreparation = process.env.BLOMA_DISPATCH_EXPERIMENT === '1'

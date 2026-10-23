@@ -115,7 +115,11 @@ export function mapStageToRunSteps(stage: string): RunStep[] | null {
  * 按模式选模板（quick 跳过选型/骨架/验收），按当前阶段定位 in_progress；
  * delivered 全部完成。未知阶段 id 返回 null（回退活体行模式，与 web 路径同口径）。
  */
-export function mapDesktopPhaseToSteps(phase: string, mode: 'quick' | 'longterm' | null | undefined): RunStep[] | null {
+export function mapDesktopPhaseToSteps(phase: string, mode: 'quick' | 'longterm' | null | undefined, workflow?: string): RunStep[] | null {
+  if (workflow === 'lean-v1') {
+    const steps = [{ id: 'prepare', label: '准备' }, { id: 'build', label: '制作' }, { id: 'verify', label: '验证' }, { id: 'deliver', label: '已交付' }]
+    return withStatus(steps, ({ 'desktop-implement': 2, 'desktop-verify': 3, delivered: 4 } as Record<string, number>)[phase] ?? 1, phase === 'delivered')
+  }
   const template = mode === 'quick' ? DESKTOP_QUICK_STEPS : DESKTOP_LONGTERM_STEPS
   const stepIndexOf: Record<string, number> = {
     'desktop-arch': 1,

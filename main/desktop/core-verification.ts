@@ -1,3 +1,4 @@
+import { runLeanCliCheck, type LeanCliResult } from './lean-cli-check'
 import { findProject } from '../project/project-service'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve, relative, isAbsolute } from 'node:path'
@@ -16,6 +17,7 @@ import { coreVerificationCacheKey, withCoreVerificationCache } from './core-veri
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
+  host_cli?: LeanCliResult
   reused?: boolean
   host_gui?: GuiAcceptanceResult
   llm?: LlmVerificationResult
@@ -71,6 +73,13 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     const fingerprint = verificationFingerprint(root, context)
     result.fingerprint = fingerprint
     if (!fingerprint) throw new Error('验证输入不可完整读取，不能运行或复用未知版本证据')
+    if (backplane.lean_brief) {
+      await verifyLeanBehavior(options, root, backplane, result)
+      if (verificationFingerprint(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
+        result.status = 'unverified'; result.missing.push('验证期间目标或产物变化，本次结果作废')
+        for (const row of result.requirements ?? []) row.verification = 'unverified'
+      }
+    } else {
     if (!existsSync(join(root, CORE_MANIFEST_REL))) throw new Error('缺少核心业务验证入口 CORE_CHECK.json')
     const raw = JSON.parse(readFileSync(join(root, CORE_MANIFEST_REL), 'utf8')) as Record<string, unknown>
     if (raw.schema_version !== 1 && raw.schema_version !== 2) throw new Error('核心验证声明版本不支持')
@@ -176,8 +185,13 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
           ? '程序已保留，功能实现情况尚未确认，不能完整交付。' : '已生成，核心功能仍有待验证项。'
     }
     else { result.status = 'passed'; result.summary = '核心业务驱动已通过，验证范围见报告。' }
+    }
   } catch (error) {
     if (options.signal?.aborted) throw error
+    if (result.status === 'passed') {
+      result.status = 'unverified'; result.summary = '验证未能完整收口，产物已保留。'
+      for (const row of result.requirements ?? []) row.verification = 'unverified'
+    }
     result.missing.push(error instanceof Error ? error.message : String(error))
   } finally {
     if (dataRoot) { try { rmSync(dataRoot, { recursive: true, force: true }) } catch { /* owned test fixture only */ } }
@@ -187,6 +201,55 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     catch { result.status = 'environment_blocked'; result.summary = '验证记录未能保存，不能确认交付。' }
   }
   return result
+}
+
+/** Lean projects observe the actual application, without requiring a second
+ * product-authored script to print PASS. Specialized adapters remain mandatory. */
+async function verifyLeanBehavior(options: CoreVerificationOptions, root: string, brief: import('../model/prd-backplane').PrdBackplane, result: CoreVerificationResult): Promise<void> {
+  if (!brief.user_confirmed_at) throw new Error('LEAN_SCOPE_NOT_CONFIRMED')
+  const scope = prdScopeFingerprint(brief)
+  const states = new Map(brief.requirements.map(row => [row.id, 'unverified' as CoreVerificationStatus]))
+  let behavior: CoreVerificationStatus = 'unverified'
+  if (brief.lean_brief!.ui === 'none') {
+    const cli = result.host_cli = await runLeanCliCheck(options.projectId, root, options.signal)
+    behavior = cli.status
+    if (cli.status !== 'passed') result.missing.push(`实际命令入口检查：${cli.error ?? cli.status}`)
+    for (const check of cli.cases) for (const fid of check.covers) {
+      result.evidence.push({ fid, scenario: check.name, input: 'cli', outcome: check.passed ? 'pass' : 'fail' })
+      states.set(fid, check.passed && states.get(fid) !== 'failed' ? 'passed' : 'failed')
+    }
+  } else {
+    // Confirmed direction must also be current at verification, not only at build entry.
+    const { readConfirmedUxBinding } = await import('../project/ux-binding')
+    readConfirmedUxBinding(options.projectId, brief)
+    const gui = await runGuiAcceptance({ projectId: options.projectId, root, scopeHash: scope,
+      designHash: findProject(options.projectId).ux_confirmation?.design_hash, signal: options.signal })
+    if (!gui) result.missing.push('缺少宿主GUI操作，使用register_gui_check登记后重验')
+    else {
+      result.host_gui = gui; behavior = gui.status
+      if (gui.covers.some(id => !states.has(id))) throw new Error('GUI_COVERAGE_UNKNOWN_REQUIREMENT')
+      if (gui.status !== 'passed') result.missing.push(`实际界面业务检查：${gui.error ?? gui.status}`)
+      for (const fid of gui.covers) {
+        states.set(fid, gui.status)
+        result.evidence.push({ fid, scenario: 'host-native-gui', input: 'gui', outcome: gui.status === 'passed' ? 'pass' : gui.status === 'failed' ? 'fail' : 'unverified' })
+      }
+    }
+  }
+  const manifest = existsSync(join(root, CORE_MANIFEST_REL)) ? JSON.parse(readFileSync(join(root, CORE_MANIFEST_REL), 'utf8')) as Record<string, unknown> : {}
+  const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane: brief, manifest, signal: options.signal }, options.capabilityVerifiers)
+  for (const outcome of capabilities) {
+    result.missing.push(...outcome.missing); Object.assign(result, outcome.report)
+    behavior = combineVerification(behavior, outcome.status)
+    for (const [fid, state] of Object.entries(outcome.features)) states.set(fid, combineVerification(states.get(fid) ?? 'unverified', state))
+  }
+  result.requirements = brief.requirements.map(row => {
+    const verification = states.get(row.id) ?? 'unverified'
+    if (verification !== 'passed') result.missing.push(`${row.id}: ${verification}`)
+    return { id: row.id, requirement_hash: requirementEvidenceHash(brief, row), implementation: verification === 'passed' ? 'implemented' : 'unverified', verification }
+  })
+  result.status = result.requirements.reduce((status, row) => combineVerification(status, row.verification), behavior)
+  if (result.missing.length && result.status === 'passed') result.status = 'unverified'
+  result.summary = result.status === 'passed' ? '实际入口与本次承诺功能检查通过，验证范围见报告。' : '实际功能检查尚未全部通过，产物已保留。'
 }
 
 export const CORE_DECLARATION_BRIEF = `

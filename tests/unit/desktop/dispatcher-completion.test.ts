@@ -17,7 +17,8 @@ describe('dispatcher end response with active work', () => {
       summary: r => ({ delegation_id: r.delegationId, role: r.role, status: r.status, goal: r.goal, started_at: 0 }) })
     expect(wait).toHaveBeenCalledTimes(1); expect(abort).not.toHaveBeenCalled()
     expect(feedback).toContain('"status":"completed"')
-    expect(feedback).toContain('推进标记必须由你依据事实给出')
+    expect(feedback).toContain('请依据实际结果处理剩余工作')
+    expect(feedback).not.toContain('推进标记')
     expect(await guardDispatcherCompletion(ctx(), 1000, { list: () => [child], wait, summary: () => { throw Error('not called') } })).toBeUndefined()
   })
   it('surfaces pending questions without busy waiting or inventing an answer', async () => {

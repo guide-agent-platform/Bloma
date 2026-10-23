@@ -1,5 +1,6 @@
 import { desktopDeliveryPolicy } from './delivery-policy'
 import { commitDesktopDelivery } from './delivery-state'
+import { isLeanProject } from './workflow-policy'
 /**
  * 桌面线路由器（接线批，2026-09-24）——runAgent 意图分流 + PRD 确认改道 + 凭据链。
  *
@@ -48,7 +49,7 @@ import { recordDeliveryOutcomeTelemetry } from './dispatcher-telemetry'
  *  有 window_title 时走联合判定档（探针：窗口可见/消息循环响应/稳定期/优雅关闭/错误框），
  *  截图落 00_VERIFY/screenshots（delivered 卡自动嵌图）。项目根缺失/异常返回 null 跳过
  *  留痕（冒烟门不做可用性单点）。 */
-async function defaultLaunchSmokeGate(projectId: string, signal?: AbortSignal): Promise<LaunchSmokeResult | null> {
+export async function defaultLaunchSmokeGate(projectId: string, signal?: AbortSignal): Promise<LaunchSmokeResult | null> {
   try {
     const project = findProject(projectId)
     if (!project?.root_path) return null
@@ -88,6 +89,8 @@ import { runSecurityScan } from '../verification/security-scan'
 
 /** 项目记录的最小判定面（Project 子集——测试可不落盘构造）。 */
 export interface DesktopLineProjectLike {
+  project_id?: string
+  workflow_version?: 'lean-v1'
   template_type: string
   desktop_phase?: string
 }
@@ -100,7 +103,8 @@ export const DESKTOP_LINE_TEMPLATE_TYPES: ReadonlySet<string> = new Set(['deskto
 
 /** 桌面线是否接管该项目的消息路由（开关 + 品类 + 已进入桌面阶段）。 */
 export function isDesktopLineActive(project: DesktopLineProjectLike | undefined): boolean {
-  if (!isDesktopDispatchEnabled()) return false
+  const lean = project?.workflow_version === 'lean-v1' && (!project.project_id || isLeanProject(project.project_id))
+  if (!lean && !isDesktopDispatchEnabled()) return false
   if (!project || !DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)) return false
   const phase = project.desktop_phase
   return typeof phase === 'string' && getDesktopPhase(phase) !== undefined
@@ -108,7 +112,8 @@ export function isDesktopLineActive(project: DesktopLineProjectLike | undefined)
 
 /** 改道判定（PRD 确认点用）：开关 + 品类即改道（desktop_phase 未设也进——正在进入）。 */
 export function shouldEnterDesktopLine(project: DesktopLineProjectLike | undefined): boolean {
-  return isDesktopDispatchEnabled() && DESKTOP_LINE_TEMPLATE_TYPES.has(project?.template_type ?? '')
+  const lean = project?.workflow_version === 'lean-v1' && (!project.project_id || isLeanProject(project.project_id))
+  return (lean || isDesktopDispatchEnabled()) && DESKTOP_LINE_TEMPLATE_TYPES.has(project?.template_type ?? '')
 }
 
 // =========================================================================
@@ -188,7 +193,7 @@ export interface QuickSecurityGateResult {
 /** 快速通道安全门生产实现：对产物根跑静态扫描（高危/严重 fail-closed）；
  *  扫描器异常或无项目上下文返回 null（跳过留痕——安全门不做可用性单点，与
  *  dispatcher-loop runHostSecurityGate 同哲学）。 */
-function defaultQuickSecurityGate(projectId: string): QuickSecurityGateResult | null {
+export function defaultQuickSecurityGate(projectId: string): QuickSecurityGateResult | null {
   let rootPath: string | undefined
   try {
     rootPath = findProject(projectId).root_path
@@ -227,6 +232,11 @@ export async function enterDesktopLine(
   const project = findProject(input.projectId)
   if (!shouldEnterDesktopLine(project)) return false
   if (input.signal?.aborted) return true
+  if (isLeanProject(input.projectId)) {
+    const { runLeanProduction } = await import('./lean-production')
+    await runLeanProduction({ ...input, query, env, maxTokens: input.maxTokens ?? GENERATION_MAX_TOKENS }, deps)
+    return true
+  }
   try { readConfirmedUxBinding(input.projectId, readPrdBackplane(input.projectId)) }
   catch (error) {
     deps.publish(input, 'message_delta', { text: `当前设计不能开工：${error instanceof Error ? error.message : String(error)}。请重新确认需求和设计。` })
@@ -305,6 +315,11 @@ export async function handleDesktopDispatchMessage(
   deps: DesktopRouteDeps,
 ): Promise<void> {
   input.signal?.throwIfAborted()
+  if (isLeanProject(input.projectId)) {
+    const { runLeanProduction } = await import('./lean-production')
+    await runLeanProduction(input, deps)
+    return
+  }
   if (!input.cardOptionId) clearCoreDeliveryRetries(input.projectId)
   const project = findProject(input.projectId)
   const projectName = project?.name ?? input.projectId

@@ -39,6 +39,8 @@ export function parseLeanBrief(raw: string, context: { projectId: string; sessio
 
 export function renderLeanBrief(brief: PrdBackplane): string {
   return [brief.positioning, ...brief.requirements.map(row => `${row.id} ${row.description}\n完成应看到：${brief.acceptance[row.id] ?? ''}`),
+    ...(brief.lean_brief?.preview === 'reuse' ? ['界面沿用已确认外观，在制作时按新增功能调整。'] : []),
+    ...(brief.lean_brief?.preview === 'skip' ? ['按你的授权直接制作，不再生成草图。'] : []),
     ...(brief.constraints?.length ? ['约束：' + brief.constraints.join('；')] : []),
     ...(brief.out_of_scope.length ? ['不做：' + brief.out_of_scope.join('；')] : []),
     ...(brief.assumptions.length ? ['假设：' + brief.assumptions.join('；')] : [])].join('\n\n')

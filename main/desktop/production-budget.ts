@@ -10,6 +10,8 @@ interface BudgetState {
   output: number
   phases: Record<string, number>
   phaseStarts?: Record<string, number>
+  runtimeMs?: number
+  runtimeStartedAt?: number
 }
 export interface ProductionLimits { requests: number; output: number; perResponse: number; phaseRequests: number }
 const PHASE_REQUESTS: Record<string, number> = { 'desktop-arch': 64, 'desktop-scaffold': 32, 'desktop-implement': 160, 'desktop-verify': 64 }
@@ -29,6 +31,8 @@ export function createProductionBudget(projectId: string, scope: string, phase: 
     let value: BudgetState
     try { value = readJsonFile<BudgetState>(file, { version: 1, requests: 0, output: 0, phases: {} }) }
     catch { throw new Error('HARNESS_BUDGET_UNREADABLE: 运行预算记录损坏，未发起请求') }
+    if (value.runtimeMs !== undefined && (!Number.isSafeInteger(value.runtimeMs) || value.runtimeMs < 0)) throw new Error('HARNESS_BUDGET_UNREADABLE')
+    if (value.runtimeStartedAt !== undefined && (!Number.isSafeInteger(value.runtimeStartedAt) || value.runtimeStartedAt < 0)) throw new Error('HARNESS_BUDGET_UNREADABLE')
     if (value.version !== 1 || !Number.isSafeInteger(value.requests) || value.requests < 0 || !Number.isSafeInteger(value.output)
       || value.output < 0 || !value.phases || typeof value.phases !== 'object' || Array.isArray(value.phases)
       || Object.values(value.phases).some(n => !Number.isSafeInteger(n) || n < 0)
@@ -84,7 +88,22 @@ export function createProductionBudget(projectId: string, scope: string, phase: 
       }
     }
   }
-  return { wrap, executionScope: `${key}-${phase}`, snapshot: () => ({ ...load(), limits, file }), phaseStartedAt: () => {
+  return { wrap, executionScope: `${key}-${phase}`, snapshot: () => ({ ...load(), limits, file }), recordRuntime: (milliseconds: number) => {
+    if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) throw new Error('HARNESS_RUNTIME_INVALID')
+    const state = load(); state.runtimeMs = (state.runtimeMs ?? 0) + milliseconds; persist(state)
+  }, startRuntime: () => {
+    const state = load(), now = Date.now()
+    // A crashed process has no completed interval. Charge its outstanding time
+    // conservatively instead of clearing the limit on restart.
+    if (state.runtimeStartedAt !== undefined) state.runtimeMs = (state.runtimeMs ?? 0) + Math.max(0, now - state.runtimeStartedAt)
+    state.runtimeStartedAt = now; persist(state)
+    return state.runtimeMs ?? 0
+  }, finishRuntime: () => {
+    const state = load()
+    if (state.runtimeStartedAt === undefined) throw new Error('HARNESS_RUNTIME_NOT_STARTED')
+    state.runtimeMs = (state.runtimeMs ?? 0) + Math.max(0, Date.now() - state.runtimeStartedAt)
+    delete state.runtimeStartedAt; persist(state)
+  }, phaseStartedAt: () => {
     const state = load()
     if (!state.phaseStarts?.[phase]) {
       state.phaseStarts = { ...state.phaseStarts, [phase]: Date.now() }

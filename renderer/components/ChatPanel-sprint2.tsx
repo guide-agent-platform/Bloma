@@ -112,6 +112,7 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
     if (event.type === 'sketch_ready' || event.type === 'mvp_ready') return null
+    if (event.type === 'stage_changed' && ['desktop-implement', 'desktop-verify', 'delivered'].includes(String(event.payload.stage))) return null
     if (event.type !== 'user_decision_required') continue
 
     const payload = event.payload as UserDecisionPayload

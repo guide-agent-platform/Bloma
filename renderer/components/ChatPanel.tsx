@@ -24,6 +24,7 @@ import {
   agentMessagesFamily,
   agentStreamStateFamily,
   desktopPhaseAtom,
+  currentProjectAtom,
   hasActiveStreamAtom,
   globalUserErrorAtom,
   projectModeAtom,
@@ -130,6 +131,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const globalError = useAtomValue(globalUserErrorAtom)
   const workflowStage = useAtomValue(workflowStageAtom)
   const desktopPhase = useAtomValue(desktopPhaseAtom)
+  const project = useAtomValue(currentProjectAtom)
 
   /** 忙碌 = 外部等待或本地流式运行中。输入框保持可编辑（草稿），只禁发，不再整体锁死。 */
   const busy = isWaiting || hasActiveStream
@@ -242,7 +244,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   // B-11：桌面阶段话术优先（桌面线运行期间 workflowStage 停在 clarifying，web 条目不命中）；
   // 非桌面线沿web 阶段→回退外部传入的 waitActionLabel
-  const busyActionLabel = desktopPhase
+  const busyActionLabel = project?.workflow_version === 'lean-v1'
+    ? desktopPhase === 'desktop-verify' ? '验证程序' : desktopPhase === 'delivered' ? '已交付' : desktopPhase ? '制作程序' : '准备任务'
+    : desktopPhase
     ? DESKTOP_PHASE_ACTION_LABELS[desktopPhase] ?? waitActionLabel
     : STAGE_ACTION_LABELS[workflowStage] ?? waitActionLabel
 
@@ -421,7 +425,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             {viewingProgress && busy && streamState && activeSessionId && (
               <ProgressCard
                 stageLabel={busyActionLabel}
-                steps={(desktopPhase ? mapDesktopPhaseToSteps(desktopPhase, mode) : null) ?? mapStageToRunSteps(workflowStage) ?? []}
+                steps={(desktopPhase || project?.workflow_version === 'lean-v1' ? mapDesktopPhaseToSteps(desktopPhase ?? 'prepare', mode, project?.workflow_version) : null) ?? mapStageToRunSteps(workflowStage) ?? []}
                 lines={buildProgressLines(streamState.events, delegations)}
                 doneSteps={countDoneSteps(streamState.events, delegations)}
                 onClose={() => setViewingProgress(false)}

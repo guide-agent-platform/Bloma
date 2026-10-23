@@ -31,14 +31,16 @@ export const DesktopStageBar: React.FC = () => {
   const project = useAtomValue(currentProjectAtom)
   const eventPhase = useAtomValue(desktopPhaseAtom)
 
-  const inDesktopLine = project?.template_type === 'desktop_tool' && typeof project.desktop_phase === 'string'
+  const lean = project?.workflow_version === 'lean-v1'
+  const inDesktopLine = lean || project?.template_type === 'desktop_tool' && typeof project.desktop_phase === 'string'
   if (!inDesktopLine) return null
-  const phase = eventPhase ?? (project?.desktop_phase as string)
+  const phase = eventPhase ?? project?.desktop_phase ?? 'prepare'
   const paused = project?.desktop_blocked != null
-  const quickSkipped = project?.mode === 'quick' ? QUICK_SKIPPED_PHASES : new Set<string>()
+  const quickSkipped = !lean && project?.mode === 'quick' ? QUICK_SKIPPED_PHASES : new Set<string>()
 
   // 节点序：固定五节点 + 未知 id 追加尾部（降级显示）
-  const nodes = phase && !DESKTOP_PHASE_ORDER.includes(phase)
+  const leanLabels: Record<string, string> = { prepare: '准备', 'desktop-implement': '制作', 'desktop-verify': '验证', delivered: '已交付' }
+  const nodes = lean ? Object.keys(leanLabels) : phase && !DESKTOP_PHASE_ORDER.includes(phase)
     ? [...DESKTOP_PHASE_ORDER, phase]
     : DESKTOP_PHASE_ORDER
   const currentIndex = phase ? Math.max(0, nodes.indexOf(phase)) : -1
@@ -94,7 +96,7 @@ export const DesktopStageBar: React.FC = () => {
             )}
             <span
               data-ai-id={`desktop-stage-node-${id}`}
-              title={isSkipped ? `快速模式跳过的阶段：${desktopPhaseFullLabel(id)}` : desktopPhaseFullLabel(id)}
+              title={lean ? leanLabels[id] : isSkipped ? `快速模式跳过的阶段：${desktopPhaseFullLabel(id)}` : desktopPhaseFullLabel(id)}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -127,7 +129,7 @@ export const DesktopStageBar: React.FC = () => {
                   ✓
                 </span>
               )}
-              {desktopPhaseLabel(id)}
+              {lean ? leanLabels[id] : desktopPhaseLabel(id)}
               {isSkipped && (
                 <span
                   aria-hidden

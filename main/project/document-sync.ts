@@ -41,10 +41,14 @@ interface ManifestEntry {
   status: DocumentRef['status']
 }
 
-import { buildPrdBackplane, readManifest, writeManifest, renderPrdJson, renderPrdDraft, renderPrdFull, renderTestReportMount, renderGwtSkeleton, renderChangelog, renderModeUpgraded, renderArchitecturePuml, renderSprintPlan, readPersistedUserConfirmedAt } from './prd-store';
+import { readPrdBackplane, buildPrdBackplane, readManifest, writeManifest, renderPrdJson, renderPrdDraft, renderPrdFull, renderTestReportMount, renderGwtSkeleton, renderChangelog, renderModeUpgraded, renderArchitecturePuml, renderSprintPlan, readPersistedUserConfirmedAt } from './prd-store';
 
 export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdBackplane): DocumentSyncResult {
   const project = findProject(input.project_id)
+  if (project.workflow_version === 'lean-v1' && !backplaneOverride) {
+    const saved = readPrdBackplane(input.project_id)
+    if (saved.lean_brief) backplaneOverride = saved
+  }
   const dir = getDocumentsDir(project.workspace_slug, project.project_id)
   const requirements = readLastSketchRequirements(input.project_id)
   const previous = readManifest(dir)

@@ -23,6 +23,7 @@ import { abandonProject, archiveProject, createProject, deleteProject, finalizeP
 import { exportProjectHandoff } from '../delivery/project-export'
 import { upgradeExport } from '../coding/export-manifest'
 import { readExperimentSwitches } from '../platform/shell/experiment-switches'
+import { isLeanProject } from '../desktop/workflow-policy'
 import { dirname } from 'node:path'
 
 
@@ -230,7 +231,7 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
       // mode/stage 不触发 syncDocuments，导致升级项目的 plantuml/sprint 缺失（老项目 64747c51
       // 有、后升级项目缺，升级路径未补）。upgradeProject 已把 mode 置 longterm，此处 syncDocuments
       // 的 longterm 分支会补产出 plantuml/architecture.puml + sprint/sprint-plan.md。
-      syncDocuments({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, checkpoint: 'mode_upgraded' })
+      if (!isLeanProject(input.project_id)) syncDocuments({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, checkpoint: 'mode_upgraded' })
       return project
     })
   })

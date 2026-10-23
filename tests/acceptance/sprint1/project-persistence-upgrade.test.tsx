@@ -7,7 +7,7 @@ import { createStore, Provider } from 'jotai'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../../renderer/components/App'
-import { updateProject } from '../../../main/project/project-service'
+import { createProject, updateProject } from '../../../main/project/project-service'
 import { IPC_CHANNELS, type ApiResult, type ElectronAPI, type Project } from '../../../shared/types'
 import { createIpcHarness } from '../support/ipc-harness'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
@@ -47,13 +47,13 @@ describe('Sprint 1 project persistence and upgrade acceptance', () => {
     expect(screen.getByRole('textbox')).toBeTruthy()
   })
 
-  it('[S1-PROJECT-009] 快消项目升级前应先创建 upgrade 快照再切换模式', async () => {
+  it.each(['legacy', 'lean'])('[S1-PROJECT-009] %s 快消项目升级前先创建快照，新链保留交付状态', async workflow => {
     environment = useTemporaryPromaHome('bloma-role-c-upgrade-')
     const harness = createIpcHarness()
-    const created = await harness.invoke(IPC_CHANNELS.PROJECT_CREATE, {
+    const created = (workflow === 'legacy' ? { ok: true, request_id: 'legacy-create', data: createProject({ request_id: 'legacy-create', mode: 'quick' }) } : await harness.invoke(IPC_CHANNELS.PROJECT_CREATE, {
       request_id: 'role-c-create-before-upgrade',
       mode: 'quick',
-    }) as ApiResult<Project>
+    })) as ApiResult<Project>
     expect(created.ok).toBe(true)
     if (!created.ok) throw new Error(created.error.message)
     updateProject(created.data.project_id, { status: 'completed', current_stage: 'completed' })
@@ -80,7 +80,7 @@ describe('Sprint 1 project persistence and upgrade acceptance', () => {
     expect(snapshots.some((snapshot) => snapshot.kind === 'upgrade')).toBe(true)
     expect(upgraded.data.mode).toBe('longterm')
     // M-16：升级是瞬时切换，直接落在合法停留态 ready（不再置无出口的 upgrading）
-    expect(upgraded.data.current_stage).toBe('ready')
+    expect(upgraded.data.current_stage).toBe(workflow === 'legacy' ? 'ready' : 'completed')
   })
 })
 

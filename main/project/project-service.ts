@@ -73,7 +73,7 @@ export function createProject(input: ProjectCreateInput, options?: { workflowVer
   getSnapshotsDir(WORKSPACE_SLUG, projectId)
 
   const project: Project = {
-    ...(options ? { workflow_version: options.workflowVersion } : {}),
+    ...(options ? { workflow_version: options.workflowVersion, lean_operation_id: randomUUID() } : {}),
     project_id: projectId,
     workspace_slug: WORKSPACE_SLUG,
     name: deriveProjectDisplayName(input.initial_message) ?? input.initial_message?.slice(0, 32) ?? '未命名项目',
@@ -114,7 +114,8 @@ export function upgradeProject(input: ProjectUpgradeInput): Project {
   // 此前置 upgrading 后 main 侧无任何流转消费点：打字修改诉求落无工具聊天路径
   // （迭代链不可达）、点选纠错话术与行为双落空，永久停留直至重启。
   // 渲染端话术「已升级为长期迭代模式…随时可以继续完善」与 ready+longterm 语义对齐。
-  const project = updateProject(input.project_id, { mode: 'longterm', current_stage: 'ready' })
+  const current = findProject(input.project_id)
+  const project = updateProject(input.project_id, { mode: 'longterm', current_stage: current.workflow_version === 'lean-v1' ? current.current_stage : 'ready' })
   appendProjectEvent(project, 'mode_upgraded', input)
   return project
 }

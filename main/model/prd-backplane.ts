@@ -548,7 +548,7 @@ export interface GenerationGuardrails {
  */
 export interface PrdBackplane {
   /** Small production brief, with source provenance; no synthetic requirements graph. */
-  lean_brief?: { version: 1; ui: 'required' | 'none'; source_session_id: string; source_sha256: string }
+  lean_brief?: { version: 1; ui: 'required' | 'none'; preview?: 'skip' | 'reuse'; reference_html_hash?: string; source_session_id: string; source_sha256: string }
   /** Structured business requirements; old projects without this field remain readable. */
   requirements_model?: import('./requirements-model').RequirementsModel
   project_id: string

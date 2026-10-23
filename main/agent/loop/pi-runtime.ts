@@ -27,7 +27,7 @@ import { openPiSession, recoverInterruptedTools } from './pi-session-store'
 export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResult> {
   let cwd: string
   try { cwd = findProject(input.projectId).root_path || process.cwd() } catch { cwd = process.cwd() }
-  const scope = `${input.runtimeScope ?? 'default'}:${input.executionScope ?? ''}`
+  const scope = input.runtimeScope === 'lean-build' ? 'lean-build' : `${input.runtimeScope ?? 'default'}:${input.executionScope ?? ''}`
   const opened = await openPiSession(input.projectId, input.sessionId, scope, cwd)
   let session: AgentSession | undefined
   let unsubscribe: (() => void) | undefined
@@ -129,13 +129,16 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
       sessionManager: opened.manager, model, thinkingLevel: input.thinkingLevel ?? 'low', noTools: 'builtin', customTools }))
     const activeSession = session
     activeSession.agent.toolExecution = 'sequential'
-    activeSession.agent.beforeToolCall = async () => status === 'budget_exhausted' || input.signal.aborted
+    activeSession.agent.beforeToolCall = async () => input.shouldPause?.()
+      ? { block: true, reason: '任务范围等待用户确认，后续工具未执行。', terminate: true }
+      : status === 'budget_exhausted' || input.signal.aborted
       ? { block: true, reason: '宿主预算已耗尽或运行已取消，后续工具未执行。', terminate: true } : undefined
     activeSession.agent.afterToolCall = async ({ toolCall, isError }) => ({ isError: outcomes.get(toolCall.id)?.isError ?? isError })
     activeSession.agent.streamFunction = createPiTransport(input, {
       isCompacting: () => compacting,
       beforeRequest: auxiliary => {
         input.signal.throwIfAborted()
+        if (input.shouldPause?.()) throw new Error('BLOMA_HOST_DECISION_PENDING')
         if (status !== 'completed') throw new Error('BLOMA_RUNTIME_STOPPED')
         if (auxiliary) { auxiliaryCalls += 1; return }
         if (turns >= input.maxTurns) { status = 'turn_limit'; throw new Error('BLOMA_TURN_LIMIT') }
@@ -162,6 +165,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     }
     const queue = (text: string) => activeSession.agent.followUp({ role: 'user', content: text, timestamp: Date.now() })
     activeSession.agent.shouldStopAfterTurn = async ({ message, toolResults }) => {
+      if (input.shouldPause?.()) return true
       if (input.signal.aborted) { status = 'cancelled'; return true }
       if (status !== 'completed') return true
       if (ctx.state.compact_requested && turns < input.maxTurns) return true

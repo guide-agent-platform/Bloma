@@ -9,6 +9,12 @@ import { uxDesignFingerprint, uxDesignIssues, type UxDesign } from '../model/ux-
 export function readConfirmedUxBinding(projectId: string, prd: PrdBackplane): { html_path?: string; design_path?: string } | undefined {
   const project = findProject(projectId), root = project.root_path
   if (prd.lean_brief?.ui === 'none') return undefined
+  if (prd.lean_brief?.preview === 'skip') {
+    const scope = prdScopeFingerprint(prd)
+    if (!prd.user_confirmed_at || project.ux_confirmation?.prd_fingerprint !== scope
+      || project.ux_confirmation.design_hash !== scope || project.ux_confirmation.html_hash !== null) throw new Error('UX_DELEGATION_UNCONFIRMED')
+    return undefined
+  }
   if (!root) {
     if (prd.requirements_model) throw new Error('UX_CONFIRMATION_MISSING: 项目目录缺失')
     return undefined

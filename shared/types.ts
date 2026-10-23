@@ -1245,6 +1245,8 @@ export interface RepairLedgerEntry {
 export interface Project {
   /** Host-selected production workflow. Missing = historical compatibility. */
   workflow_version?: 'lean-v1'
+  /** Stable during a task/repair/resume; a new user task after delivery gets a new allowance. */
+  lean_operation_id?: string
   gui_acceptance?: { status: 'pending' | 'sealed' | 'unverified'; scope_hash: string; reason?: string }
   /** Host-owned UX confirmation; generated project files cannot grant a new confirmation. */
   ux_confirmation?: { prd_fingerprint: string; design_hash: string; html_hash: string | null }

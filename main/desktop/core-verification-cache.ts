@@ -12,6 +12,8 @@ import { buildDriverEnv, resolveDriverVenvCommand } from './process-driver'
 import { captureVerificationVersion } from './verification-receipts'
 import { verificationFingerprint } from './verification-fingerprint'
 import { guiSuitePath } from './gui-acceptance'
+import { cliSuitePath } from './lean-cli-check'
+import { readLaunchDeclaration } from './launch-smoke'
 import type { CoreVerificationResult } from './core-verification'
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -20,7 +22,8 @@ export function coreVerificationCacheKey(projectId: string, root: string): strin
     const backplane = readPrdBackplane(projectId)
     // Hardware attestations and external model artifacts have their own lifetime.
     if (backplane.requirements.some(item => requirementCapabilities(item).has('speech'))) return
-    const python = resolveDriverVenvCommand(['python'], root)[0]
+    const launch = backplane.lean_brief ? readLaunchDeclaration(root) : undefined
+    const python = resolveDriverVenvCommand([launch?.ok ? launch.launch.command[0] : 'python'], root)[0]
     if (!existsSync(python)) return // unknown system PATH interpreter cannot certify reuse
     const source = verificationFingerprint(root, prdScopeFingerprint(backplane))
     if (!source) return
@@ -28,7 +31,7 @@ export function coreVerificationCacheKey(projectId: string, root: string): strin
     const version = captureVerificationVersion(root, python, env, projectId)
     const host = mainRootDir(), assets = ['gui_acceptance_probe.py', 'gui_storage_faults.py', 'prefix_rename_probe.py', 'llm_entry_probe.py']
       .map(name => digest(readFileSync(join(host, 'templates/tools', name))))
-    const modules = ['core-verification.ts', 'capability-verifiers.ts', 'gui-acceptance.ts', 'process-driver.ts', 'core-verification-cache.ts']
+    const modules = ['core-verification.ts', 'capability-verifiers.ts', 'gui-acceptance.ts', 'process-driver.ts', 'core-verification-cache.ts', 'lean-cli-check.ts', 'lean-gui-tool.ts', '../project/ux-binding.ts']
     const implementation = existsSync(join(host, 'desktop', modules[0])) ? modules.map(name => digest(readFileSync(join(host, 'desktop', name)))) : [digest(readFileSync(join(host, 'index.js')))]
     const suite = guiSuitePath(projectId)
     let requiredProtocol: unknown = null
@@ -37,7 +40,8 @@ export function coreVerificationCacheKey(projectId: string, root: string): strin
       requiredProtocol = { gui_acceptance: project.gui_acceptance ?? null, ux_confirmation: project.ux_confirmation ?? null }
     } catch { /* no project in isolated key tests */ }
     return digest({ protocol: 1, fixture: 'fresh-empty-data-v1', source, version, assets, implementation, requiredProtocol,
-      gui: existsSync(suite) ? digest(readFileSync(suite)) : null })
+      gui: existsSync(suite) ? digest(readFileSync(suite)) : null,
+      ...(backplane.lean_brief ? { cli: existsSync(cliSuitePath(projectId)) ? digest(readFileSync(cliSuitePath(projectId))) : null } : {}) })
   } catch { return undefined }
 }
 export function coreCachePath(projectId: string): string {

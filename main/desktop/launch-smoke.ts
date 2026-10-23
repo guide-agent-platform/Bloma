@@ -35,6 +35,7 @@ export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
 export const SMOKE_SCREENSHOT_RELATIVE_PATH = '00_VERIFY/screenshots/LAUNCH.png'
 
 export interface LaunchDeclaration {
+  mode?: 'command' | 'resident'
   command: string[]
   /** GUI 窗口标题提示（联合判定档触发条件 + 截图窗口匹配；缺省走纯存活档） */
   window_title?: string
@@ -66,6 +67,8 @@ export function parseLaunchDeclaration(raw: string): LaunchDeclarationParse {
     return { ok: false, error: 'LAUNCH.json command 须为非空字符串数组（如 ["python","calculator.py"]）' }
   }
   const windowTitle = obj.window_title
+  if (obj.mode !== undefined && !['command', 'resident'].includes(String(obj.mode))) return { ok: false, error: 'LAUNCH.json mode 须为command或resident' }
+  if (obj.mode === 'command' && windowTitle !== undefined) return { ok: false, error: '一次性命令不能同时声明桌面窗口' }
   if (windowTitle !== undefined && typeof windowTitle !== 'string') {
     return { ok: false, error: 'LAUNCH.json window_title 须为字符串（窗口标题提示，可省略）' }
   }
@@ -77,6 +80,7 @@ export function parseLaunchDeclaration(raw: string): LaunchDeclarationParse {
     ok: true,
     launch: {
       command,
+      ...(obj.mode !== undefined ? { mode: obj.mode as 'command' | 'resident' } : {}),
       ...(windowTitle !== undefined ? { window_title: windowTitle } : {}),
       ...(obj.ui !== undefined ? { ui: obj.ui as 'webview' } : {}),
     },
@@ -140,6 +144,8 @@ export interface LaunchSmokeResult {
 }
 
 export interface LaunchSmokeDeps {
+  /** Only the lean non-UI route can authorize a declared one-shot command. */
+  allowCleanExit?: boolean
   signal?: AbortSignal
   /** 注入 spawn（缺省 nodeSpawn 包装）；测试用 */
   spawnImpl?: (command: string[], cwd: string, env?: Record<string, string>) => ChildProcess
@@ -272,6 +278,52 @@ def main() -> int:
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     result = {'pid': pid}
+    # Win64 handles/results are pointer-sized. ctypes defaults truncate them;
+    # DWORD_PTR is not defined by ctypes.wintypes (including Python 3.13).
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                         wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+    user32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    class PROCESSENTRY32(ctypes.Structure):
+        _fields_ = [('dwSize', wintypes.DWORD), ('cntUsage', wintypes.DWORD), ('th32ProcessID', wintypes.DWORD),
+                    ('th32DefaultHeapID', ctypes.c_size_t), ('th32ModuleID', wintypes.DWORD), ('cntThreads', wintypes.DWORD),
+                    ('th32ParentProcessID', wintypes.DWORD), ('pcPriClassBase', wintypes.LONG), ('dwFlags', wintypes.DWORD),
+                    ('szExeFile', wintypes.WCHAR * 260)]
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32)]
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32)]
+
+    def owned_pids():
+        owned, rows = {pid}, []
+        snapshot = kernel32.CreateToolhelp32Snapshot(2, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            return owned
+        try:
+            row = PROCESSENTRY32(); row.dwSize = ctypes.sizeof(row)
+            more = kernel32.Process32FirstW(snapshot, ctypes.byref(row))
+            while more:
+                rows.append((row.th32ProcessID, row.th32ParentProcessID))
+                more = kernel32.Process32NextW(snapshot, ctypes.byref(row))
+            while True:
+                children = {child for child, parent in rows if parent in owned}
+                if children <= owned:
+                    return owned
+                owned.update(children)
+        finally:
+            kernel32.CloseHandle(snapshot)
 
     def enum_hwnds():
         found = []
@@ -311,7 +363,7 @@ def main() -> int:
     def error_dialogs(pid_val):
         out = []
         for hwnd in enum_hwnds():
-            if win_pid(hwnd) == pid_val and win_class(hwnd) == '#32770' and user32.IsWindowVisible(hwnd):
+            if win_pid(hwnd) in pid_val and win_class(hwnd) == '#32770' and user32.IsWindowVisible(hwnd):
                 text = win_text(hwnd) or '(无标题)'
                 low = text.lower()
                 if any(hint in low or hint in text for hint in ERROR_HINTS):
@@ -323,28 +375,25 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False))
         return 0
 
-    # 1) ready 窗口等待（PID 匹配优先，标题兜底——tk messagebox 子线程等罕见形态）
+    # 1) Only this launch's process tree; titles must never select a user's
+    # unrelated running window. Windows venv launchers may own a child Python.
     main_hwnd = 0
     deadline = time.monotonic() + ready_ms / 1000.0
     while time.monotonic() < deadline and not main_hwnd:
+        owned = owned_pids()
         for hwnd in enum_hwnds():
-            if user32.IsWindow(hwnd) and win_pid(hwnd) == pid and visible_nonzero(hwnd):
+            if user32.IsWindow(hwnd) and win_pid(hwnd) in owned and visible_nonzero(hwnd) and (not title or title in win_text(hwnd)):
                 main_hwnd = hwnd
                 break
         if not main_hwnd:
             time.sleep(0.25)
-    if not main_hwnd and title:
-        for hwnd in enum_hwnds():
-            if user32.IsWindow(hwnd) and visible_nonzero(hwnd) and title in win_text(hwnd):
-                main_hwnd = hwnd
-                break
     if not main_hwnd:
         return bail(window_found=False, responsive=False, stable=False, closed_gracefully=False,
                     crash_dialog=[], screenshot=False, fail_code='no_window',
                     detail='%dms 内未找到属于进程 %d 的可见主窗口' % (ready_ms, pid))
 
     # 2) 消息循环响应探测（挂起窗口 SendMessageTimeout 超时——冻结循环在此现形）
-    res = wintypes.DWORD_PTR(0)
+    res = ctypes.c_size_t(0)
     ok = user32.SendMessageTimeoutW(main_hwnd, 0x0000, 0, 0, 0x0001 | 0x0002, 1000, ctypes.byref(res))
     if not ok:
         return bail(window_found=True, responsive=False, stable=False, closed_gracefully=False,
@@ -352,7 +401,7 @@ def main() -> int:
                     detail='主窗口消息循环无响应（SendMessageTimeout 1s 超时，疑似启动路径卡死）')
 
     # 3) 启动期错误/崩溃对话框（标题特征过滤防误报：正常模态弹窗不算）
-    dlgs = error_dialogs(pid)
+    dlgs = error_dialogs(owned_pids())
     if dlgs:
         return bail(window_found=True, responsive=True, stable=False, closed_gracefully=False,
                     crash_dialog=dlgs, screenshot=False, fail_code='crash_dialog',
@@ -369,6 +418,19 @@ def main() -> int:
     screenshot = False
     try:
         gdi32 = ctypes.windll.gdi32
+        user32.GetWindowDC.argtypes = [wintypes.HWND]
+        user32.GetWindowDC.restype = wintypes.HANDLE
+        user32.PrintWindow.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.UINT]
+        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HANDLE]
+        gdi32.CreateCompatibleDC.argtypes = [wintypes.HANDLE]
+        gdi32.CreateCompatibleDC.restype = wintypes.HANDLE
+        gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int]
+        gdi32.CreateCompatibleBitmap.restype = wintypes.HANDLE
+        gdi32.SelectObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        gdi32.SelectObject.restype = wintypes.HANDLE
+        gdi32.GetDIBits.argtypes = [wintypes.HANDLE, wintypes.HANDLE, wintypes.UINT, wintypes.UINT, ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+        gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+        gdi32.DeleteDC.argtypes = [wintypes.HANDLE]
         r = wintypes.RECT()
         user32.GetWindowRect(main_hwnd, ctypes.byref(r))
         w, h = r.right - r.left, r.bottom - r.top
@@ -398,11 +460,13 @@ def main() -> int:
 
     # 6) 优雅关闭（WM_CLOSE → 等进程退出；关不掉= wont_close，宿主兜底 kill）
     user32.PostMessageW(main_hwnd, 0x0010, 0, 0)
-    exited = True
+    exited = False
     h = kernel32.OpenProcess(0x00100000, False, pid)
     if h:
         exited = kernel32.WaitForSingleObject(h, close_ms) == 0
         kernel32.CloseHandle(h)
+    else:
+        exited = kernel32.GetLastError() == 87  # already gone, not access denied
     if not exited:
         return bail(window_found=True, responsive=True, stable=True, closed_gracefully=False,
                     crash_dialog=[], screenshot=screenshot, fail_code='wont_close',
@@ -498,6 +562,7 @@ async function defaultRunProbe(input: ProbeRunInput): Promise<ProbeRun> {
   }
   return await new Promise<ProbeRun>((resolve) => {
     let stdout = ''
+    let stderr = ''
     const child = nodeSpawn('python', [
       probeHelperPath as string,
       String(input.pid),
@@ -506,7 +571,7 @@ async function defaultRunProbe(input: ProbeRunInput): Promise<ProbeRun> {
       String(input.readyMs),
       String(input.stableMs),
       String(input.closeMs),
-    ], { windowsHide: true, signal: input.signal, stdio: ['ignore', 'pipe', 'ignore'] })
+    ], { windowsHide: true, signal: input.signal, stdio: ['ignore', 'pipe', 'pipe'] })
     const timer = setTimeout(() => {
       child.kill()
       resolve({ json: null, error: `探针超时（${input.watchdogMs}ms 看门狗）` })
@@ -514,10 +579,11 @@ async function defaultRunProbe(input: ProbeRunInput): Promise<ProbeRun> {
     child.stdout?.on('data', (chunk: Buffer) => {
       if (stdout.length < 32_768) stdout += chunk.toString('utf8')
     })
+    child.stderr?.on('data', (chunk: Buffer) => { if (stderr.length < 2048) stderr += chunk.toString('utf8') })
     child.once('exit', () => {
       clearTimeout(timer)
       const json = parseProbeJson(stdout)
-      resolve(json !== null ? { json } : { json: null, error: stdout.trim() ? '探针输出无法解析为判据' : '探针无输出' })
+      resolve(json !== null ? { json } : { json: null, error: stderr.trim() ? tail(stderr.trim()) : stdout.trim() ? '探针输出无法解析为判据' : '探针无输出' })
     })
     child.once('error', (error) => {
       clearTimeout(timer)
@@ -661,6 +727,9 @@ async function runOwnedLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps): Pro
   }
   if (outcome.kind === 'exit') {
     const output = [spawned.stderr, spawned.stdout].filter(Boolean).join('\n').trim()
+    if (deps.allowCleanExit && declaration.launch.mode === 'command' && outcome.code === 0) return {
+      passed: true, detail: '一次性命令从正常入口执行并以0退出', outputExcerpt: output ? tail(output) : undefined,
+    }
     return {
       passed: false,
       detail: `启动冒烟未通过：程序启动后 ${outcome.code === 0 ? '立即正常退出（桌面 GUI 程序应保持运行）' : `异常退出（退出码 ${outcome.code}）`}`,

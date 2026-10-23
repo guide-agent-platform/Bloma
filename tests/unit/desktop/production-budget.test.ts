@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProductionBudget } from '../../../main/desktop/production-budget'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/stages/orchestration-contracts'
+import { leanBudget, withLeanRuntime } from '../../../main/desktop/lean-budget'
+import { createProject } from '../../../main/project/project-service'
 
 beforeEach(() => vi.stubEnv('PROMA_HOME', mkdtempSync(join(tmpdir(), 'bloma-production-budget-'))))
 afterEach(() => vi.unstubAllEnvs())
@@ -56,5 +58,22 @@ describe('production admission is shared and durable', () => {
     const a = createProductionBudget('p', 'v', 'desktop-arch', limits).phaseStartedAt()
     expect(createProductionBudget('p', 'v', 'desktop-arch', limits).phaseStartedAt()).toBe(a)
     expect(createProductionBudget('p', 'v', 'desktop-implement', limits).phaseStartedAt()).toBeGreaterThanOrEqual(a)
+  })
+  it('lean preparation, revision and execution share active runtime, including an interrupted interval', async () => {
+    const p = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'lean-v1' })
+    const prepare = leanBudget(p.project_id, 'prepare')
+    prepare.recordRuntime(17)
+    const execution = leanBudget(p.project_id, 'desktop-implement')
+    expect(execution.snapshot().runtimeMs).toBe(17)
+    const saved = execution.snapshot()
+    writeFileSync(saved.file, JSON.stringify({ ...saved, runtimeStartedAt: Date.now() - 100 }))
+    await withLeanRuntime(p.project_id, 'prepare', undefined, async () => {})
+    expect(execution.snapshot().runtimeMs).toBeGreaterThanOrEqual(117)
+    expect(execution.snapshot().runtimeStartedAt).toBeUndefined()
+    const end = execution.snapshot()
+    writeFileSync(end.file, JSON.stringify({ ...end, runtimeMs: 1800000 }))
+    const work = vi.fn(async () => true)
+    await expect(withLeanRuntime(p.project_id, 'desktop-implement', undefined, work)).rejects.toThrow('HARNESS_DEADLINE_EXCEEDED')
+    expect(work).not.toHaveBeenCalled()
   })
 })
