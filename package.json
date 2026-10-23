@@ -8,7 +8,7 @@
     "dev:renderer": "vite --host 127.0.0.1",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
-    "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --external:playwright --format=esm --outfile=dist-main/main/index.js && esbuild main/platform/speech/speech-worker.ts --bundle --platform=node --external:electron --external:sherpa-onnx-node --format=esm --outfile=dist-main/main/platform/speech/worker.mjs && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs && node -e \"const{cpSync,mkdirSync}=require('node:fs');mkdirSync('dist-main/main/templates',{recursive:true});cpSync('main/templates','dist-main/main/templates',{recursive:true})\"",
+    "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --external:playwright --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-agent-core --external:@earendil-works/pi-ai --format=esm --outfile=dist-main/main/index.js && esbuild main/platform/speech/speech-worker.ts --bundle --platform=node --external:electron --external:sherpa-onnx-node --format=esm --outfile=dist-main/main/platform/speech/worker.mjs && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs && node -e \"const{cpSync,mkdirSync}=require('node:fs');mkdirSync('dist-main/main/templates',{recursive:true});cpSync('main/templates','dist-main/main/templates',{recursive:true})\"",
     "start": "npm run build && electron .",
     "start:auto": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
@@ -33,6 +33,9 @@
     "seed:skills": "node scripts/seed-skills.cjs"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
     "electron": "^39.0.0",
     "jotai": "^2.12.5",
     "lucide-react": "1.55.0",

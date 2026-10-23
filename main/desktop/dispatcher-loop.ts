@@ -270,6 +270,8 @@ export class AssistantTurnCollector {
     }
   }
 
+  readonly discardCurrentTurn = (): void => { this.buffer = '' }
+
   /** 收尾：残余 buffer（收工轮——无 tool_use 不触发 onTurn）收为最后一轮。 */
   flush(): ReadonlyArray<ReadonlyArray<{ type: 'text'; text?: string }>> {
     this.onTurnBoundary()
@@ -312,7 +314,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   if (!configuration && input.requirementsDigest) {
     const budget = createProductionBudget(input.projectId, input.requirementsDigest, node.id)
     input = { ...input, query: budget.wrap(input.query), maxTokens: Math.min(input.maxTokens, 16384),
-      ...(primaryExecutor ? { historyTurns: loadProductionHistory(input.sessionId, budget.phaseStartedAt()), executionScope: budget.executionScope } : {}) }
+      executionScope: budget.executionScope,
+      ...(primaryExecutor ? { historyTurns: loadProductionHistory(input.sessionId, budget.phaseStartedAt()) } : {}) }
   }
   const executionLimits = configuration?.execution_limits ?? DEFAULT_DESKTOP_EXECUTION_LIMITS
   const childTools = (projectId: string, role: DelegationRunRole, format: 'diff' | 'whole') => buildDesktopChildTools(projectId, role, format, executionLimits)
@@ -387,6 +390,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     maxTokens: input.maxTokens,
     ...delegationBudgets,
     executionScope: input.executionScope,
+    ...(!configuration ? { runtime: 'pi' as const, runtimeScope: node.id } : {}),
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
     system: buildDesktopChildBaseSystem(promptNode, {
@@ -509,6 +513,7 @@ async function runAgentLoopSafe(
   try {
     const standalone = node.id === 'desktop-implement' && readExperiment(input.projectId)?.policy === 'standalone'
     return await runAgentLoop({
+      ...(!readExperiment(input.projectId) ? { runtime: 'pi' as const, runtimeScope: node.id } : {}),
       system,
       task: input.task,
       images: input.images,
@@ -542,7 +547,7 @@ async function runAgentLoopSafe(
       } } : {}),
       signal: input.signal,
       publish,
-      onTurn: () => collector.onTurnBoundary(),
+      onTurn: info => info.failed ? collector.discardCurrentTurn() : collector.onTurnBoundary(),
     })
   } catch (error) {
     // 断流等 query 异常：fail-soft 转 error 状态（调度员是无人值守自动化，不向上冒泡）

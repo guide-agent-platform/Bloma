@@ -170,6 +170,8 @@ export interface AgentLoopCompactionInfo {
 }
 
 export interface AgentLoopTurnInfo {
+  /** Failed/truncated provider output is observable, never stage-advance evidence. */
+  failed?: boolean
   turn: number
   toolCalls: AgentLoopToolCallRecord[]
   inputTokens?: number
@@ -177,6 +179,10 @@ export interface AgentLoopTurnInfo {
 }
 
 export interface AgentLoopInput {
+  /** Production desktop sessions use the upstream Pi session/agent runtime. */
+  runtime?: 'pi'
+  /** A stage boundary must never resume another stage's native transcript. */
+  runtimeScope?: string
   /** Host prerequisite check after a no-tool final response; feedback keeps the loop open. */
   beforeComplete?: (ctx: ToolContext) => Promise<string | undefined>
   parentSessionId?: string
@@ -736,6 +742,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const isMainLoop = (input.delegationDepth ?? 0) === 0
   if (isMainLoop) markLoopActive(input.sessionId)
   try {
+    if (input.runtime === 'pi') {
+      const { runPiSession } = await import('./pi-runtime')
+      return await runPiSession(input)
+    }
     return await runAgentLoopImpl(input)
   } finally {
     // W1（Phase 10，预览浏览器工具族）：loop 结束即关同会话的持久浏览器句柄
@@ -1708,7 +1718,7 @@ async function runGraceWrapUpTurn(
  * 单次工具调用：门禁（canUseTool）→ 预算 → 执行。
  * 任何失败都转 tool_result 回给模型（拒绝/超预算/异常），绝不崩循环。
  */
-async function executeToolCall(
+export async function executeToolCall(
   input: AgentLoopInput,
   toolByName: Map<string, AgentLoopTool>,
   budgetUsed: Record<string, number>,

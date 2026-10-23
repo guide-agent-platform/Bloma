@@ -48,20 +48,31 @@ describe('primary agent execution', () => {
     vi.stubEnv('PROMA_HOME', mkdtempSync(join(tmpdir(), 'bloma-primary-deadline-')))
     vi.stubEnv('BLOMA_DESKTOP_DISPATCH', '1')
     vi.spyOn(productionBudget, 'productionDeadlineMs').mockReturnValue(25)
+    // Start the clock after the provider is actually listening. SDK startup is
+    // real asynchronous work and can itself exceed 25ms on a busy machine.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       const project = createProject({ request_id: 'deadline', mode: 'quick' })
       let aborted = false
+      let providerStarted!: () => void
+      const started = new Promise<void>(resolve => { providerStarted = resolve })
       const query: SDKQuery = async function* (_prompt, options) {
-        await new Promise<void>((_resolve, reject) => options.signal.addEventListener('abort', () => { aborted = true; reject(options.signal.reason) }, { once: true }))
+        await new Promise<void>((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => { aborted = true; reject(options.signal.reason) }, { once: true })
+          providerStarted()
+        })
         yield { type: 'result', subtype: 'success' }
       }
-      const result = await runDesktopDispatcherLoop({ projectId: project.project_id, sessionId: 'primary', requestId: 'deadline',
+      const running = runDesktopDispatcherLoop({ projectId: project.project_id, sessionId: 'primary', requestId: 'deadline',
         currentPhase: 'desktop-arch', task: 'probe', projectName: 'probe', sandboxRoot: findProject(project.project_id).root_path,
         query, env: {}, requirementsDigest: 'F-001', maxTokens: 1024, signal: new AbortController().signal, publish: () => {} })
+      expect(await Promise.race([started.then(() => true), running.then(() => false)])).toBe(true)
+      await vi.advanceTimersByTimeAsync(25)
+      const result = await running
       expect(aborted).toBe(true)
       expect(result.status).toBe('error')
       expect(result.error_message).toContain('HARNESS_DEADLINE_EXCEEDED')
       expect(result.advance).toBeUndefined()
-    } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() }
+    } finally { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs() }
   })
 })
