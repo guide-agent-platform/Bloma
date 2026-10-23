@@ -11,6 +11,7 @@ import { savePastedImage, cleanupPastedImages } from '../platform/shell/pasted-i
 import { loadPromptWithSource } from '../agent/prompting/prompt-config'
 import { UX_SKETCH_SYSTEM_PROMPT } from '../agent/prompting/ux-sketch-prompt'
 import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
+import { createProductionBudget } from '../desktop/production-budget'
 
 interface Direction { id: string; concept: string; composition: string; visual_language: string }
 interface Candidate { id: string; result: UxSketchResult; shots?: HtmlPreviewShot[] }
@@ -34,6 +35,10 @@ const words = (value: unknown): value is string => typeof value === 'string' && 
 /** Same confirmation gate, bounded exploration. A failed optional stage never destroys a valid draft. */
 export async function generateUxVisualDesign(options: UxSketchOptions & { progress?: (text: string) => void }, overrides: Partial<Dependencies> = {}): Promise<UxVisualResult> {
   const deps = { ...defaults, ...overrides }
+  if (options.backplane?.lean_brief) {
+    const budget = createProductionBudget(options.project_id, 'lean-v1', 'prepare')
+    return deps.generate({ ...options, query: budget.wrap(options.query), maxTokens: Math.min(options.maxTokens, 16384), attempts: 2 })
+  }
   if (!options.backplane || !deps.available() || process.env.BLOMA_UX_VISUAL === '0') return deps.generate(options)
   const experimentPreparation = process.env.BLOMA_DISPATCH_EXPERIMENT === '1'
   const budget = createRequestBudget(options.env, { requests: experimentPreparation ? 12 : 8, outputTokens: 16384, rmb: 5 })

@@ -16,6 +16,8 @@ import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
  * No source/file tools are available to this independent, bounded role. */
 export async function prepareGuiAcceptance(input: { projectId: string; sessionId: string; query: SDKQuery; env: Record<string, string>; signal?: AbortSignal }): Promise<boolean> {
   const project = findProject(input.projectId)
+  // Installed rules are still enforced by core verification after editing.
+  if (readPrdBackplane(input.projectId).lean_brief) return true
   if (!project.gui_acceptance) return true // legacy projects keep their recorded protocol
   const backplane = readPrdBackplane(input.projectId), scope = prdScopeFingerprint(backplane)
   const path = guiSuitePath(input.projectId)

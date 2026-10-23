@@ -52,6 +52,12 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
   const documents: DocumentRef[] = []
   const files: Array<{ relativePath: string; content: string; type: DocumentRef['type'] }> = []
 
+  if (backplaneOverride?.lean_brief) {
+    const brief = backplaneOverride
+    files.push({ relativePath: 'prd.json', content: renderPrdJson(brief), type: 'prd' },
+      { relativePath: 'task.md', content: [brief.positioning, ...brief.requirements.map(row => `${row.id} ${row.description}\n完成应看到：${brief.acceptance[row.id] ?? ''}`),
+        ...(brief.constraints ?? []), ...brief.out_of_scope.map(text => `不做：${text}`)].join('\n\n'), type: 'prd' })
+  } else {
   switch (input.checkpoint) {
     case 'requirement_confirmed': {
       // PRD 前移检查点（2026-08-26）：需求确认弹窗通过后立即形成 PRD，早于草图；
@@ -127,6 +133,7 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
       { relativePath: 'plantuml/architecture.puml', content: renderArchitecturePuml(project.name), type: 'plantuml' },
       { relativePath: 'sprint/sprint-plan.md', content: renderSprintPlan(project.name), type: 'user_story' },
     )
+  }
   }
 
   for (const file of files) {

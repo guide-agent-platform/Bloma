@@ -125,7 +125,9 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
       if (parsed && Array.isArray(parsed.requirements)) return reconcilePrdBackplane(parsed)
+      if (project.workflow_version === 'lean-v1') throw new Error('LEAN_BRIEF_INVALID')
     } catch {
+      if (project.workflow_version === 'lean-v1') throw new Error('LEAN_BRIEF_UNREADABLE: 需求记录损坏，未重建或覆盖')
       // 损坏则回退到按当前需求重建
     }
   }

@@ -30,6 +30,7 @@ import { appendJsonLine } from '../../storage/json-store'
 import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
 import { readFallbackContext } from '../platform/llm/runtime-fallback'
 import { renderUxStateReview } from './ux-state-review'
+import { renderLeanBrief } from './lean-brief'
 
 const UX_SKETCH_DIR = '00_UX'
 const UX_SKETCH_FILENAME = 'ux-sketch.html'
@@ -50,6 +51,8 @@ PRD中明确not_applicable的场景无需设计界面状态或引用其AC编号�
 原始功能是必须保留的底线，模型主动提出的合理附加能力可以加分，但须遵守用户明确的约束与范围外事项。在design.enhancements中单独声明 [{"id":"E-001","name":"能力名称","description":"新增什么操作或能力","benefit":"对用户的价值"}]；没有则空数组。原有F/W/AC关联仍须完整，不用新增能力替代原功能，不把提案写成已实现。若用户明确要求在原PRD中新增/删除必备功能，或修改原有业务规则、数据含义、验收行为，输出 {"action":"revise_requirements","reason":"需要修订什么"}；不能把用户明确要求的新功能降级为可选E提案。可选增强及其调整不改写原PRD。视觉重构输出design，按用户要求决定局部调整或整体重新设计。`
 
 const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，不要解释或代码围栏。'
+const LEAN_HTML_PROTOCOL = `${HTML_OUTPUT_PROTOCOL}。不输出design或验收映射JSON。若用户要求改变必需能力或业务含义，改为输出 {"action":"revise_requirements","reason":"需改变什么"}，不要把范围变更伪装成外观调整。`
+const LEAN_SKETCH_PROMPT = '为用户设计真实产品的静态界面，展示正常使用的内容与主操作，布局与视觉服务产品目标。只用完整单文件HTML、内联CSS和离线资源，禁止脚本、事件属性和可执行URL。不要把需求清单、验收编号或平台说明画进产品；不声称业务已运行。'
 
 export interface UxSketchGeneration {
   run_id: string
@@ -90,6 +93,9 @@ function buildSketchPrompt(options: {
   previousHtml?: string
   previousDesign?: UxDesign
 }): string {
+  if (options.backplane?.lean_brief) return [renderLeanBrief(options.backplane),
+    options.previousHtml ? `当前界面（静态修订底稿）：\n${options.previousHtml}` : '',
+    options.feedback ? `用户修改意见：${options.feedback}` : '', '按目标输出一份可视界面。'].filter(Boolean).join('\n\n')
   const lines = options.requirements.map((item) => {
     const priority = item.priority ? ` [${item.priority}]` : ''
     const story = item.story ? `（${item.story}）` : ''
@@ -200,11 +206,12 @@ export interface UxSketchOptions {
 export async function generateUxSketch(options: UxSketchOptions): Promise<UxSketchResult> {
   if (options.signal?.aborted) throw new Error('UX_SKETCH_ABORTED')
   const prompt = buildSketchPrompt(options)
-  const structured = Boolean(options.backplane)
-  const resolvedPrompt = loadPromptWithSource('sketch-system', UX_SKETCH_SYSTEM_PROMPT)
+  const lean = Boolean(options.backplane?.lean_brief)
+  const structured = Boolean(options.backplane && !lean)
+  const resolvedPrompt = loadPromptWithSource('sketch-system', lean ? LEAN_SKETCH_PROMPT : UX_SKETCH_SYSTEM_PROMPT)
   const systemPrompt = resolvedPrompt.content +
     '\n示例数据必须自洽：列表数量、筛选范围、合计与示例行对应；不能确定真实数据路径时写「程序的数据目录」，不得编造用户绝对路径。' +
-    `\n\n${structured ? DESIGN_OUTPUT_PROTOCOL : HTML_OUTPUT_PROTOCOL}`
+    `\n\n${lean ? LEAN_HTML_PROTOCOL : structured ? DESIGN_OUTPUT_PROTOCOL : HTML_OUTPUT_PROTOCOL}`
   const generation: UxSketchGeneration = { run_id: randomUUID(), source: 'llm', failures: [] }
   const hash = (text: string) => createHash('sha256').update(text).digest('hex')
   const routing = readFallbackContext(options.env)
@@ -274,10 +281,10 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
     diagnostic({ event: 'generation_finished', source: 'llm', requested_prd_revision: Boolean(llm.requires_prd_revision) })
     return { ...llm, generation }
   }
-  generation.source = structured ? 'failed' : 'template'
-  diagnostic({ event: 'generation_finished', source: structured ? options.feedback ? 'previous_version_retained' : 'failed' : 'template', failures: generation.failures,
+  generation.source = options.backplane ? 'failed' : 'template'
+  diagnostic({ event: 'generation_finished', source: options.backplane ? options.feedback ? 'previous_version_retained' : 'failed' : 'template', failures: generation.failures,
     validation_issues: lastIssues })
-  if (structured) throw new Error(`UX_DESIGN_FAILED: ${options.feedback ? '未能可靠完成调整，保留上一版和用户意见' : '未生成可确认的完整界面设计'}；${lastIssues.slice(0, 4).join('；') || generation.failures.map(row => row.kind).join('、')}`)
+  if (options.backplane) throw new Error(`UX_DESIGN_FAILED: ${options.feedback ? '未能可靠完成调整，保留上一版和用户意见' : '未生成可确认的完整界面设计'}；${lastIssues.slice(0, 4).join('；') || generation.failures.map(row => row.kind).join('、')}`)
   const project = findProject(options.project_id)
   return {
     html: buildTemplateSketch(project?.name ?? '未命名项目', options.positioning, options.requirements),
@@ -288,6 +295,16 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
 
 function parseUxOutput(raw: string, backplane: PrdBackplane | undefined, onIssues: (issues: string[]) => void,
   candidateHtml?: string, onCandidate?: (html: string) => void): UxSketchResult | undefined {
+  if (backplane?.lean_brief) {
+    const html = parseSketchHtml(raw)
+    if (html) return html
+    try {
+      const value = JSON.parse(raw.trim()) as Record<string, unknown>
+      if (value.action === 'revise_requirements' && typeof value.reason === 'string' && value.reason.trim()) return { html: '', source: 'llm', requires_prd_revision: value.reason }
+    } catch { /* A failed sketch is never replaced by a requirements list. */ }
+    onIssues(['未返回完整、安全的HTML界面'])
+    return undefined
+  }
   if (!backplane) return parseSketchHtml(raw)
   let value: Record<string, unknown>
   const json = raw.replace(/^```(?:json)?\s*\n?|\n?```$/g, '').trim()
@@ -370,6 +387,16 @@ export function freezeConfirmedUxSketch(projectId: string, expected?: { prd: Prd
   if (expected && (htmlHash !== expected.html_hash || expected.design.prd_fingerprint !== prdScopeFingerprint(expected.prd))) throw new Error('UX_SKETCH_VERSION_CHANGED')
   writeTextFileAtomic(join(root, UX_SKETCH_DIR, 'confirmed.html'), html)
   if (expected) writeTextFileAtomic(join(root, UX_SKETCH_DIR, 'confirmed.json'), JSON.stringify({ version: 1, html_hash: htmlHash, design: expected.design }, null, 2))
+}
+
+export function freezeLeanUxSketch(projectId: string, expected: { prd: PrdBackplane; html_hash: string }): void {
+  const root = findProject(projectId).root_path
+  if (!expected.prd.lean_brief || !expected.prd.user_confirmed_at) throw new Error('LEAN_UX_SCOPE_INVALID')
+  const html = readFileSync(join(root, UX_SKETCH_DIR, UX_SKETCH_FILENAME), 'utf8')
+  if (createHash('sha256').update(html).digest('hex') !== expected.html_hash) throw new Error('UX_SKETCH_VERSION_CHANGED')
+  writeTextFileAtomic(join(root, UX_SKETCH_DIR, 'confirmed.html'), html)
+  writeTextFileAtomic(join(root, UX_SKETCH_DIR, 'confirmed.json'), JSON.stringify({ version: 2, mode: 'lean',
+    scope_hash: prdScopeFingerprint(expected.prd), html_hash: expected.html_hash }, null, 2))
 }
 
 export function readUxSketchVersion(projectId: string): { html: string; html_hash: string } | undefined {

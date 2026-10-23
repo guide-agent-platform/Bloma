@@ -57,6 +57,7 @@ import {
 } from '../ux-confirm'
 import { classifyUserDesktopIntent } from '../../desktop/user-intent-lexicon'
 import { runPrdPipeline } from './prd-pipeline'
+import { isLeanProject } from '../../desktop/workflow-policy'
 
 export async function handleGuideMessage(
   input: AgentSendMessageInput,
@@ -68,6 +69,10 @@ export async function handleGuideMessage(
   persistSystem?: (text: string) => void,
 ): Promise<void> {
   const project = findProject(input.project_id)
+  if (isLeanProject(input.project_id)) {
+    const { handleLeanGuide } = await import('../lean-guide')
+    return handleLeanGuide(input, publish, model)
+  }
   // 挂起弹窗失效（全链路审查 P1-8，2026-10-02）：新用户消息进入即作废旧需求确认弹窗——
   // 弹窗携带的是弹出时点的需求快照，用户继续聊意味着需求已演化，旧快照确认会静默丢弃
   // 期间的新需求（stale 覆盖）；失效后旧弹窗点击返回 started:false，新对话会收敛出新弹窗。

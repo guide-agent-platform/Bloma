@@ -547,6 +547,8 @@ export interface GenerationGuardrails {
  * F-001 固定为"主题锚点"（用户最初想做什么），澄清/纠错/迭代只追加后续项、不覆盖主题。
  */
 export interface PrdBackplane {
+  /** Small production brief, with source provenance; no synthetic requirements graph. */
+  lean_brief?: { version: 1; ui: 'required' | 'none'; source_session_id: string; source_sha256: string }
   /** Structured business requirements; old projects without this field remain readable. */
   requirements_model?: import('./requirements-model').RequirementsModel
   project_id: string
