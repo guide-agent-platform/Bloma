@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../shared/workflow-version'
 /**
  * Agent Atoms — Jotai 状态管理
  *
@@ -1083,7 +1084,7 @@ export const hasActiveStreamAtom = atom((get) => {
 
 export const canUpgradeAtom = atom((get) => {
   const project = get(currentProjectAtom)
-  return project?.workflow_version !== 'lean-v1' && project?.mode === 'quick' && project?.status === 'completed'
+  return !isModernWorkflowVersion(project?.workflow_version) && project?.mode === 'quick' && project?.status === 'completed'
 })
 
 // =========================================================================

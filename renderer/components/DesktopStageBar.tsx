@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../../shared/workflow-version'
 import React from 'react'
 import { useAtomValue } from 'jotai'
 import { currentProjectAtom, desktopPhaseAtom } from '../agent-atoms'
@@ -31,7 +32,7 @@ export const DesktopStageBar: React.FC = () => {
   const project = useAtomValue(currentProjectAtom)
   const eventPhase = useAtomValue(desktopPhaseAtom)
 
-  const lean = project?.workflow_version === 'lean-v1'
+  const lean = isModernWorkflowVersion(project?.workflow_version)
   const inDesktopLine = lean || project?.template_type === 'desktop_tool' && typeof project.desktop_phase === 'string'
   if (!inDesktopLine) return null
   const phase = eventPhase ?? project?.desktop_phase ?? 'prepare'

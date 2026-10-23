@@ -1244,7 +1244,7 @@ export interface RepairLedgerEntry {
 
 export interface Project {
   /** Host-selected production workflow. Missing = historical compatibility. */
-  workflow_version?: 'lean-v1'
+  workflow_version?: import('./workflow-version').ModernWorkflowVersion
   /** Stable during a task/repair/resume; a new user task after delivery gets a new allowance. */
   lean_operation_id?: string
   gui_acceptance?: { status: 'pending' | 'sealed' | 'unverified'; scope_hash: string; reason?: string }

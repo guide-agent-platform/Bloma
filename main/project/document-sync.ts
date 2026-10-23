@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../../shared/workflow-version'
 /**
  * 文档同步与文档 IO（PR4d 自 document-engine 拆出）：syncDocuments 全量同步、
  * 文档清单/读取、安全扫描/意图清单/视觉审计/计划文档写入、loop log、决策文档。
@@ -45,7 +46,7 @@ import { readPrdBackplane, buildPrdBackplane, readManifest, writeManifest, rende
 
 export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdBackplane): DocumentSyncResult {
   const project = findProject(input.project_id)
-  if (project.workflow_version === 'lean-v1' && !backplaneOverride) {
+  if (isModernWorkflowVersion(project.workflow_version) && !backplaneOverride) {
     const saved = readPrdBackplane(input.project_id)
     if (saved.lean_brief) backplaneOverride = saved
   }

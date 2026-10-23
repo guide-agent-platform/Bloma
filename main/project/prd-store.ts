@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../../shared/workflow-version'
 /**
  * 需求追加/断言更新/PRD 渲染；对外契约经 document-engine re-export 保持不变。
  * 纯机械搬移；对外契约经 document-engine re-export 保持不变。
@@ -125,7 +126,7 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
       if (parsed && Array.isArray(parsed.requirements)) {
-        if (project.workflow_version === 'lean-v1' && (!parsed.lean_brief || parsed.lean_brief.version !== 1
+        if (isModernWorkflowVersion(project.workflow_version) && (!parsed.lean_brief || parsed.lean_brief.version !== 1
           || !['none', 'required'].includes(parsed.lean_brief.ui) || typeof parsed.positioning !== 'string'
           || parsed.project_id !== projectId || !parsed.requirements.length || parsed.requirements.some(row => !row?.id || !row.description)
           || !parsed.acceptance || !Array.isArray(parsed.out_of_scope) || !Array.isArray(parsed.assumptions)
@@ -133,9 +134,9 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
           || parsed.lean_brief.preview === 'reuse' && !/^[a-f0-9]{64}$/.test(parsed.lean_brief.reference_html_hash ?? ''))) throw new Error('LEAN_BRIEF_INVALID')
         return reconcilePrdBackplane(parsed)
       }
-      if (project.workflow_version === 'lean-v1') throw new Error('LEAN_BRIEF_INVALID')
+      if (isModernWorkflowVersion(project.workflow_version)) throw new Error('LEAN_BRIEF_INVALID')
     } catch {
-      if (project.workflow_version === 'lean-v1') throw new Error('LEAN_BRIEF_UNREADABLE: 需求记录损坏，未重建或覆盖')
+      if (isModernWorkflowVersion(project.workflow_version)) throw new Error('LEAN_BRIEF_UNREADABLE: 需求记录损坏，未重建或覆盖')
       // 损坏则回退到按当前需求重建
     }
   }

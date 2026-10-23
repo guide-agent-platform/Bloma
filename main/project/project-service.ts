@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../../shared/workflow-version'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { rmSyncWithRetry } from '../platform/storage/fs-retry'
@@ -65,7 +66,7 @@ export function maybeRenameUnnamedProject(projectId: string, message: string | u
   }
 }
 
-export function createProject(input: ProjectCreateInput, options?: { workflowVersion: 'lean-v1' }): Project {
+export function createProject(input: ProjectCreateInput, options?: { workflowVersion: import('../../shared/workflow-version').ModernWorkflowVersion }): Project {
   const now = new Date().toISOString()
   const projectId = randomUUID()
   const rootPath = getGeneratedProjectPath(WORKSPACE_SLUG, projectId)
@@ -115,7 +116,7 @@ export function upgradeProject(input: ProjectUpgradeInput): Project {
   // （迭代链不可达）、点选纠错话术与行为双落空，永久停留直至重启。
   // 渲染端话术「已升级为长期迭代模式…随时可以继续完善」与 ready+longterm 语义对齐。
   const current = findProject(input.project_id)
-  const project = updateProject(input.project_id, { mode: 'longterm', current_stage: current.workflow_version === 'lean-v1' ? current.current_stage : 'ready' })
+  const project = updateProject(input.project_id, { mode: 'longterm', current_stage: isModernWorkflowVersion(current.workflow_version) ? current.current_stage : 'ready' })
   appendProjectEvent(project, 'mode_upgraded', input)
   return project
 }

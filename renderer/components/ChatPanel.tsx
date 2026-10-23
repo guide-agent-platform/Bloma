@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../../shared/workflow-version'
 import React from 'react'
 import { atom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
@@ -244,7 +245,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   // B-11：桌面阶段话术优先（桌面线运行期间 workflowStage 停在 clarifying，web 条目不命中）；
   // 非桌面线沿web 阶段→回退外部传入的 waitActionLabel
-  const busyActionLabel = project?.workflow_version === 'lean-v1'
+  const busyActionLabel = isModernWorkflowVersion(project?.workflow_version)
     ? desktopPhase === 'desktop-verify' ? '验证程序' : desktopPhase === 'delivered' ? '已交付' : desktopPhase ? '制作程序' : '准备任务'
     : desktopPhase
     ? DESKTOP_PHASE_ACTION_LABELS[desktopPhase] ?? waitActionLabel
@@ -425,7 +426,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             {viewingProgress && busy && streamState && activeSessionId && (
               <ProgressCard
                 stageLabel={busyActionLabel}
-                steps={(desktopPhase || project?.workflow_version === 'lean-v1' ? mapDesktopPhaseToSteps(desktopPhase ?? 'prepare', mode, project?.workflow_version) : null) ?? mapStageToRunSteps(workflowStage) ?? []}
+                steps={(desktopPhase || isModernWorkflowVersion(project?.workflow_version) ? mapDesktopPhaseToSteps(desktopPhase ?? 'prepare', mode, project?.workflow_version) : null) ?? mapStageToRunSteps(workflowStage) ?? []}
                 lines={buildProgressLines(streamState.events, delegations)}
                 doneSteps={countDoneSteps(streamState.events, delegations)}
                 onClose={() => setViewingProgress(false)}

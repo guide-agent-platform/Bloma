@@ -1,3 +1,4 @@
+import { isModernWorkflowVersion } from '../../shared/workflow-version'
 import { desktopDeliveryPolicy } from './delivery-policy'
 import { commitDesktopDelivery } from './delivery-state'
 import { isLeanProject } from './workflow-policy'
@@ -90,7 +91,7 @@ import { runSecurityScan } from '../verification/security-scan'
 /** 项目记录的最小判定面（Project 子集——测试可不落盘构造）。 */
 export interface DesktopLineProjectLike {
   project_id?: string
-  workflow_version?: 'lean-v1'
+  workflow_version?: import('../../shared/workflow-version').ModernWorkflowVersion
   template_type: string
   desktop_phase?: string
 }
@@ -103,7 +104,7 @@ export const DESKTOP_LINE_TEMPLATE_TYPES: ReadonlySet<string> = new Set(['deskto
 
 /** 桌面线是否接管该项目的消息路由（开关 + 品类 + 已进入桌面阶段）。 */
 export function isDesktopLineActive(project: DesktopLineProjectLike | undefined): boolean {
-  const lean = project?.workflow_version === 'lean-v1' && (!project.project_id || isLeanProject(project.project_id))
+  const lean = isModernWorkflowVersion(project?.workflow_version) && (!project.project_id || isLeanProject(project.project_id))
   if (!lean && !isDesktopDispatchEnabled()) return false
   if (!project || !DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)) return false
   const phase = project.desktop_phase
@@ -112,7 +113,7 @@ export function isDesktopLineActive(project: DesktopLineProjectLike | undefined)
 
 /** 改道判定（PRD 确认点用）：开关 + 品类即改道（desktop_phase 未设也进——正在进入）。 */
 export function shouldEnterDesktopLine(project: DesktopLineProjectLike | undefined): boolean {
-  const lean = project?.workflow_version === 'lean-v1' && (!project.project_id || isLeanProject(project.project_id))
+  const lean = isModernWorkflowVersion(project?.workflow_version) && (!project.project_id || isLeanProject(project.project_id))
   return (lean || isDesktopDispatchEnabled()) && DESKTOP_LINE_TEMPLATE_TYPES.has(project?.template_type ?? '')
 }
 
