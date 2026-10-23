@@ -47,6 +47,7 @@ import {
   isUxResumeIntent,
   republishUxCardFromArchive,
   resolveUxConfirmCardAnswer,
+  retryUxSketch,
   resumeUxConfirmConfirmed,
   runUxAdjustRound,
   startUxAdjustAwait,
@@ -462,6 +463,10 @@ export async function handleGuideMessage(
   if (consumeUxPauseIntent(input)) return
   if (uxConfirmDecision === 'confirm') {
     await resumeUxConfirmConfirmed(input)
+    return
+  }
+  if (uxConfirmDecision === 'retry') {
+    await retryUxSketch(input)
     return
   }
   if (uxConfirmDecision === 'adjust') {

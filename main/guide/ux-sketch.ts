@@ -23,7 +23,7 @@ import type { SketchRequirement } from "../model/prd-backplane";
 import { injectSketchCorrector } from './sketch-corrector'
 import { createHash, randomUUID } from 'node:crypto'
 import type { PrdBackplane } from '../model/prd-backplane'
-import { buildFallbackUxDesign, parseUxDesign, type UxDesign } from '../model/ux-design';
+import { parseUxDesign, type UxDesign } from '../model/ux-design';
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { appendJsonLine } from '../../storage/json-store'
@@ -53,7 +53,7 @@ const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文�
 
 export interface UxSketchGeneration {
   run_id: string
-  source: 'llm' | 'template'
+  source: 'llm' | 'template' | 'failed'
   failures: Array<{ attempt: number; kind: string }>
 }
 
@@ -243,7 +243,7 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
       ? `上次设计校验未通过：${lastIssues.join('；')}。请修正JSON中的design及必需的HTML标记，核对验收关联索引与页面/交互标记。${candidateHtml
         ? lastIssues.some(issue => issue.startsWith('HTML 未呈现'))
           ? `已有候选HTML缺少页面或交互标记，本次必须同时输出完整html，在对应真实控件或语义容器上补齐缺少的data-page-id/data-interaction-id；不得省略html或只改design。`
-          : `已有安全候选HTML（sha256=${hash(candidateHtml)}），本次可省略html字段以原样复用；若须补充页面/交互元素则提供完整html。`
+          : `已有完整安全候选HTML（sha256=${hash(candidateHtml)}），本次只输出action与design，不要重发html，宿主将原样复用已保存视图。若设计必须新增HTML中不存在的控件标记，才输出完整html。`
         : '没有可复用的安全HTML，必须同时输出完整html。'}原任务：\n${prompt}`
       : `${UX_SKETCH_RETRY_FEEDBACK}\n原任务：\n${prompt}` },
     signal: options.signal,
@@ -274,16 +274,15 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
     diagnostic({ event: 'generation_finished', source: 'llm', requested_prd_revision: Boolean(llm.requires_prd_revision) })
     return { ...llm, generation }
   }
-  generation.source = 'template'
-  diagnostic({ event: 'generation_finished', source: structured && options.feedback ? 'previous_version_retained' : 'template', failures: generation.failures })
-  if (structured && options.feedback) throw new Error('UX_DESIGN_FAILED: 未能可靠判断或完成调整，保留上一版，不采纳新范围')
+  generation.source = structured ? 'failed' : 'template'
+  diagnostic({ event: 'generation_finished', source: structured ? options.feedback ? 'previous_version_retained' : 'failed' : 'template', failures: generation.failures,
+    validation_issues: lastIssues })
+  if (structured) throw new Error(`UX_DESIGN_FAILED: ${options.feedback ? '未能可靠完成调整，保留上一版和用户意见' : '未生成可确认的完整界面设计'}；${lastIssues.slice(0, 4).join('；') || generation.failures.map(row => row.kind).join('、')}`)
   const project = findProject(options.project_id)
-  const design = options.backplane ? buildFallbackUxDesign(options.backplane) : undefined
   return {
-    html: buildTemplateSketch(project?.name ?? '未命名项目', options.positioning, options.requirements, design),
+    html: buildTemplateSketch(project?.name ?? '未命名项目', options.positioning, options.requirements),
     source: 'template',
     generation,
-    ...(design ? { design } : {}),
   }
 }
 
@@ -291,7 +290,20 @@ function parseUxOutput(raw: string, backplane: PrdBackplane | undefined, onIssue
   candidateHtml?: string, onCandidate?: (html: string) => void): UxSketchResult | undefined {
   if (!backplane) return parseSketchHtml(raw)
   let value: Record<string, unknown>
-  try { value = JSON.parse(raw.replace(/^```(?:json)?\s*\n?|\n?```$/g, '').trim()) } catch { onIssues(['设计输出不是合法 JSON']); return undefined }
+  const json = raw.replace(/^```(?:json)?\s*\n?|\n?```$/g, '').trim()
+  try { value = JSON.parse(json) } catch {
+    // The protocol writes HTML before metadata. Preserve only a complete JSON
+    // string value; never invent missing bytes or accept an incomplete design.
+    const prefix = /^\{\s*"action"\s*:\s*"design"\s*,\s*"html"\s*:\s*("(?:[^"\\]|\\.)*")\s*[,}]/s.exec(json)
+    if (prefix) {
+      try {
+        const html = parseSketchHtml(JSON.parse(prefix[1]))
+        if (html) onCandidate?.(html.html)
+      } catch { /* Incomplete or invalid string values cannot be reused. */ }
+    }
+    onIssues(['设计输出不是合法 JSON，可能在设计记录处被截断'])
+    return undefined
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) { onIssues(['设计输出须为对象']); return undefined }
   if (value.action === 'revise_requirements' && typeof value.reason === 'string' && value.reason.trim()) return { html: '', source: 'llm', requires_prd_revision: value.reason }
   if (value.action !== 'design') { onIssues(['缺少 design 动作']); return undefined }

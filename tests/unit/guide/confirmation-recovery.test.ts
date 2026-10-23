@@ -45,6 +45,7 @@ function setup() {
   syncDocuments({ request_id: 'setup', project_id: project.project_id, session_id: 's', checkpoint: 'requirement_confirmed' }, prd)
   markPrdUserConfirmed(project.project_id)
   const current = readPrdBackplane(project.project_id), design = buildFallbackUxDesign(current)
+  design.summary = '记录管理界面：表单与记录列表，保存后重开可见'
   const html = '<!DOCTYPE html><html><body>' + design.pages.map(page => `<section data-page-id="${page.id}"></section>`).join('')
     + design.interactions.map(item => `<button data-interaction-id="${item.id}">${item.action}</button>`).join('') + '</body></html>'
   vi.mocked(generateUxVisualDesign).mockResolvedValue({ design, html, source: 'llm' } as never)

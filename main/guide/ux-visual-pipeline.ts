@@ -56,7 +56,6 @@ export async function generateUxVisualDesign(options: UxSketchOptions & { progre
     evidence.selected = candidate.id
     return { ...candidate.result, visual: { ...evidence, reasons: [...evidence.reasons], budget: budget.snapshot() } }
   }
-  let fallback: UxSketchResult | undefined
   const draft = async (id: string, direction?: Direction, previous?: UxSketchResult, feedback?: string): Promise<UxSketchResult> => {
     signal.throwIfAborted()
     const result = await deps.generate({ ...options, query, signal, attempts: previous ? 1 : experimentPreparation ? 4 : 3, maxTokens: Math.min(options.maxTokens, 16384),
@@ -65,7 +64,6 @@ export async function generateUxVisualDesign(options: UxSketchOptions & { progre
         feedback: options.feedback ? `必须保留用户本轮要求：${options.feedback}\n以下截图建议不得违背该要求：${feedback ?? ''}` : feedback,
         feedbackSource: 'visual_review' } : {}) })
     persist(`${id}-result.json`, result)
-    if (result.source === 'template') fallback ??= result
     return result
   }
   const capture = async (candidate: Candidate) => {
@@ -117,7 +115,6 @@ export async function generateUxVisualDesign(options: UxSketchOptions & { progre
       } catch { options.signal?.throwIfAborted(); note(`draft_unavailable_${direction?.id ?? 'single'}`) }
     }
     if (!candidates.length) {
-      if (fallback) return { ...fallback, visual: { ...evidence, budget: budget.snapshot() } }
       throw new Error('UX_DESIGN_FAILED: 没有可确认的完整设计，保留上一版')
     }
     let selected = candidates[0]

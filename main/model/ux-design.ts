@@ -108,10 +108,12 @@ export function uxDesignIssues(design: UxDesign, prd: PrdBackplane): string[] {
   return [...new Set(issues)]
 }
 
-/** Honest fallback, mechanically describing all requirements/states rather than promising model-designed layout. */
+export const FALLBACK_UX_SUMMARY = '简易方案：分区呈现各项操作，显示正常结果、输入边界与失败反馈；具体布局可继续调整。'
+
+/** Historical mechanical requirements view, not a generated visual design. */
 export function buildFallbackUxDesign(prd: PrdBackplane): UxDesign {
   const scenarios = prd.requirements_model?.scenarios ?? []
-  return { version: 1, prd_fingerprint: prdScopeFingerprint(prd), summary: '简易方案：分区呈现各项操作，显示正常结果、输入边界与失败反馈；具体布局可继续调整。',
+  return { version: 1, prd_fingerprint: prdScopeFingerprint(prd), summary: FALLBACK_UX_SUMMARY,
     pages: [{ id: 'P-001', name: '主工作区', purpose: prd.positioning, feature_ids: prd.requirements.map(row => row.id) }],
     flows: (prd.requirements_model?.workflows ?? []).map(flow => ({ workflow_id: flow.id, page_ids: ['P-001'] })),
     interactions: prd.requirements.map((feature, index) => ({ id: `UI-${String(index + 1).padStart(3, '0')}`, page_id: 'P-001', feature_id: feature.id,

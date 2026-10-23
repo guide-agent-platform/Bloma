@@ -37,12 +37,15 @@ import { enterDesktopLine } from '../../../main/desktop/desktop-route'
 import { findProject } from '../../../main/project/project-service'
 import { readPrdBackplane } from '../../../main/project/prd-store'
 import { recordDecision } from '../../../main/project/decision-log'
+import { FALLBACK_UX_SUMMARY } from '../../../main/model/ux-design'
 import {
   isUxResumeIntent,
   resetUxConfirmForTests,
   UX_CONFIRM_OPTION_ADJUST,
   UX_CONFIRM_OPTION_CONFIRM,
   UX_CONFIRM_OPTION_DISMISS,
+  UX_CONFIRM_OPTION_RETRY,
+  retryUxSketch,
   UX_SKETCH_ADJUST_LIMIT,
   resolveUxConfirmCardAnswer,
   republishUxCardFromArchive,
@@ -110,7 +113,9 @@ function plainInput(content: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   resetUxConfirmForTests()
-  mockGenerate.mockResolvedValue({ html: '<!DOCTYPE html><html></html>', source: 'llm' } as never)
+  mockGenerate.mockResolvedValue({ html: '<!DOCTYPE html><html></html>', source: 'llm', design: {
+    version: 1, summary: '计算器界面', pages: [], flows: [], interactions: [], non_ui_features: [],
+  } } as never)
   mockStage.mockResolvedValue({ preview_url: 'http://localhost:41000/00_UX/ux-sketch.html', sketch_path: '/tmp/ux-sketch.html', html_hash: 'mock-hash' } as never)
   mockFindProject.mockImplementation(() => ({ project_id: 'p1', template_type: 'desktop_tool', mode: 'quick', name: '计算器' }) as never)
   mockReadPrd.mockImplementation(() => ({ project_id: 'p1', name: '计算器', user_confirmed_at: '2026-10-04T00:00:00Z', positioning: 'x', requirements: [{ id: 'F-001', description: '做一个计算器' }], acceptance: {}, assumptions: [], out_of_scope: [] }) as never)
@@ -137,13 +142,32 @@ describe('runUxConfirmGate（发门）', () => {
     expect(resolveUxConfirmCardAnswer(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)).toBe('confirm')
   })
 
-  it('沙箱失败：降级文字版（无 ux_sketch_ready，卡照发、门不挂死）', async () => {
+  it('预览失败：明确未就绪，只能重试或调整，不能以文字代替界面确认', async () => {
     mockStage.mockRejectedValue(new Error('UX_SKETCH_SANDBOX_FAILED: down') as never)
     const { events, publish } = makePublish()
     await runUxConfirmGate({ ...basePending({ publish }) })
     expect(events.map((e) => e.type)).not.toContain('ux_sketch_ready')
     expect(events.map((e) => e.type)).toContain('user_decision_required')
-    expect(events.some((e) => e.type === 'message_delta' && String(e.payload.text).includes('文字版'))).toBe(true)
+    expect(events.some((e) => e.type === 'message_delta' && String(e.payload.text).includes('失败'))).toBe(true)
+    const questions = events.find(e => e.type === 'user_decision_required')!.payload.questions as Array<{ id: string }>
+    expect(questions.map(q => q.id)).toContain(UX_CONFIRM_OPTION_RETRY)
+    expect(questions.map(q => q.id)).not.toContain(UX_CONFIRM_OPTION_CONFIRM)
+    expect(events.at(-1)?.payload.subtype).toBe('incomplete')
+    await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM))
+    expect(mockEnter).not.toHaveBeenCalled()
+  })
+
+  it('模板需求列表不能进入草图确认；明确重试后才展示成功草图', async () => {
+    mockGenerate.mockResolvedValueOnce({ html: '<!DOCTYPE html><html>F-001 需求清单</html>', source: 'template', design: { summary: FALLBACK_UX_SUMMARY } } as never)
+    const { events, publish } = makePublish()
+    await runUxConfirmGate({ ...basePending({ publish }) })
+    expect(mockStage).not.toHaveBeenCalled()
+    expect(events.some(e => e.type === 'ux_sketch_ready')).toBe(false)
+    expect(resolveUxConfirmCardAnswer(cardInput(UX_CONFIRM_OPTION_RETRY))).toBe('retry')
+    expect(mockGenerate).toHaveBeenCalledTimes(1)
+    await retryUxSketch(cardInput(UX_CONFIRM_OPTION_RETRY))
+    expect(mockGenerate).toHaveBeenCalledTimes(2)
+    expect(events.some(e => e.type === 'ux_sketch_ready')).toBe(true)
   })
 })
 

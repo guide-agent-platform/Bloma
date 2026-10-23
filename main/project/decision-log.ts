@@ -43,6 +43,7 @@ export type DecisionType =
   | 'prd_review_round_limit'
   | 'prd_confirm'
   | 'ux_sketch_staged'
+  | 'ux_sketch_failed'
   | 'ux_confirm'
   | 'mvp_confirm'
   | 'judge_semantic'

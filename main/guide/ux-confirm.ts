@@ -22,12 +22,10 @@ import { classifyUserDesktopIntent } from '../desktop/user-intent-lexicon'
 import type { PrdBackplane } from '../model/prd-backplane'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { prdStructureIssues } from '../model/requirements-model'
-import { buildFallbackUxDesign, renderUxDesignSummary, uxDesignFingerprint, type UxDesign } from '../model/ux-design'
-import { writeTextFileAtomic } from '../../storage/json-store'
-import { join } from 'node:path'
+import { FALLBACK_UX_SUMMARY, renderUxDesignSummary, uxDesignFingerprint, type UxDesign } from '../model/ux-design'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import { resolveGenerationMaxTokens } from '../platform/llm/model-resolution'
-import { generateUxVisualDesign, type UxVisualEvidence } from './ux-visual-pipeline'
+import { generateUxVisualDesign, type UxVisualEvidence, type UxVisualResult } from './ux-visual-pipeline'
 
 /** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
  *  但回门只认 USER_CONTINUE_KEYWORDS（继续/确认……）不含「开工」——用户照提示操作
@@ -55,6 +53,7 @@ export const UX_CONFIRM_OPTION_CONFIRM = 'ux_confirm_go'
 export const UX_CONFIRM_OPTION_ADJUST = 'ux_adjust'
 export const UX_CONFIRM_OPTION_DISMISS = 'ux_dismiss'
 export const UX_CONFIRM_OPTION_DELEGATE = 'ux_delegate'
+export const UX_CONFIRM_OPTION_RETRY = 'ux_retry'
 
 /** UX 门挂起上下文：与 PRD 卡 pending 同构（续跑桌面线所需全量）。 */
 export interface PendingUxConfirm {
@@ -67,6 +66,8 @@ export interface PendingUxConfirm {
   adjustmentLimit?: number
   limitReached?: boolean
   unappliedFeedback?: string
+  generationFailed?: boolean
+  previewFailed?: boolean
   request_id: string
   session_id: string
   project_id: string
@@ -119,7 +120,9 @@ export function restoreUxConfirmation(input: AgentSendMessageInput, publish: Gui
       throw new Error('UX_CONFIRMATION_SCOPE_CHANGED_ARCHIVED')
     }
     const data = saved.data as unknown as PendingUxConfirm
-    if (!data.design || data.project_id !== input.project_id || data.session_id !== input.session_id || !Number.isSafeInteger(data.round) || data.round < 1
+    if ((!data.design && data.generationFailed !== true) || data.generationFailed !== undefined && typeof data.generationFailed !== 'boolean'
+      || data.previewFailed !== undefined && typeof data.previewFailed !== 'boolean'
+      || data.project_id !== input.project_id || data.session_id !== input.session_id || !Number.isSafeInteger(data.round) || data.round < 1
       || data.prdFingerprint !== saved.scope_hash || data.sketchHtml !== undefined && typeof data.sketchHtml !== 'string'
       || data.sketchHash !== undefined && !/^[a-f0-9]{64}$/.test(data.sketchHash)) throw new Error('UX_CONFIRMATION_INVALID')
     pending = { ...data, confirmationId: saved.id, ...context, publish }
@@ -147,10 +150,10 @@ function makeUxEvent(pending: Pick<PendingUxConfirm, 'session_id' | 'project_id'
 
 /**
  * UX 门主流程（PRD 确认后调用）：旁白 → 生成草图（调整轮带反馈）→ 沙箱预览 +
- * ux_sketch_ready → 确认卡挂起。草图生成/沙箱失败如实降级（模板兜底 / 卡改文字版
- * 方案确认），门不挂死、不阻断开工路径。
+ * ux_sketch_ready → 确认卡挂起。生成或预览失败保留需求与意见，允许明确重试，
+ * 不能以需求列表或文字替代用户要确认的界面。
  */
-export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: string): Promise<void> {
+export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: string, retryPreview = false): Promise<void> {
   if (pending.signal?.aborted) return
   if (feedback && pending.unappliedFeedback && feedback !== pending.unappliedFeedback) feedback = /^(?:重试|再试一次|再试)$/.test(feedback.trim())
     ? pending.unappliedFeedback : `${pending.unappliedFeedback}\n补充意见：${feedback}`
@@ -181,11 +184,12 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
   let sketchUrl: string | null = null
   let reviewUrl: string | undefined
   let sketchSource = 'llm'
-  let sandboxFailure: string | undefined
   let generation: UxSketchGeneration | undefined
   let visual: UxVisualEvidence | undefined
   try {
-    const sketch = await generateUxVisualDesign({
+    const sketch: UxVisualResult = retryPreview && pending.previewFailed && pending.sketchHtml && pending.design
+      ? { html: pending.sketchHtml, design: pending.design, source: 'llm' as const, generation: undefined, visual: undefined }
+      : await generateUxVisualDesign({
       project_id: pending.project_id,
       session_id: pending.session_id,
       query: pending.query,
@@ -211,8 +215,9 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
       await returnToPrd(pending, feedback ?? sketch.requires_prd_revision)
       return
     }
-    const design = sketch.design ?? buildFallbackUxDesign(current)
-    pending = { ...pending, design, sketchHtml: sketch.html, sketchSummary: renderUxDesignSummary(design), unappliedFeedback: undefined }
+    if (sketch.source !== 'llm' || !sketch.design) throw new Error('UX_DESIGN_FAILED: 未生成完整界面设计，不能用需求清单代替草图')
+    const design = sketch.design
+    pending = { ...pending, design, sketchHtml: sketch.html, sketchSummary: renderUxDesignSummary(design), unappliedFeedback: undefined, generationFailed: false, previewFailed: false }
     sketchSource = sketch.source
     generation = sketch.generation
     visual = sketch.visual
@@ -226,21 +231,23 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     reviewUrl = staged.review_url
   } catch (error) {
     if (pending.signal?.aborted) return
-    console.error('[ux-confirm] 草图生成/沙箱失败（降级文字版方案确认）:', error)
-    sandboxFailure = error instanceof Error ? error.message : String(error)
-    if (feedback) {
-      pending = { ...revisionBase, sketchHash: undefined, unappliedFeedback: feedback }
-      publish(makeUxEvent(pending, 'ux_sketch_closed', {}))
-      publish(makeUxEvent(pending, 'message_delta', { text: '这次调整未完成，已保留上一版和你的意见；本次不会开工，可重试调整。' }))
-      pendingUxConfirms.set(pending.project_id, pending)
-      publishUxCard(pending)
-      return
-    }
+    console.error('[ux-confirm] 草图生成/预览失败，未进入设计确认:', error)
+    const retainedDraft = pending.design && pending.sketchHtml && pending.generationFailed === false ? pending : revisionBase
+    pending = { ...retainedDraft, sketchHash: undefined, generationFailed: true, previewFailed: retainedDraft !== revisionBase,
+      ...(feedback ? { unappliedFeedback: feedback } : {}) }
+    publish(makeUxEvent(pending, 'ux_sketch_closed', {}))
+    publish(makeUxEvent(pending, 'message_delta', { text: feedback
+      ? '这次调整未完成，已保留上一版和你的意见；本次不会开工，可重试调整。'
+      : '这次界面草图生成或预览失败，已保留确认的需求；尚未开工。可以重新生成草图，或稍后再试。' }))
+    recordDecision({ project_id: pending.project_id, session_id: pending.session_id, entry: { type: 'ux_sketch_failed',
+      title: '界面草图未就绪，等待明确重试', why: error instanceof Error ? error.message : String(error), detail: { round: pending.round } } })
+    pendingUxConfirms.set(pending.project_id, pending)
+    publishUxCard(pending)
+    publish(makeUxEvent(pending, 'message_completed', { subtype: 'incomplete' }))
+    return
   }
 
   if (pending.signal?.aborted) return
-  pending.design ??= buildFallbackUxDesign(current)
-  pending.sketchSummary ??= renderUxDesignSummary(pending.design)
 
   const round = pending.round
   pendingUxConfirms.set(pending.project_id, { ...pending, round })
@@ -250,7 +257,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     session_id: pending.session_id,
     entry: {
       type: 'ux_sketch_staged',
-      title: `UX 外观草图已出（第 ${round} 轮${sketchSource === 'template' ? '，模板兜底' : ''}）`,
+      title: `UX 外观草图已出（第 ${round} 轮）`,
       why: 'PRD 确认后、开工前，交用户过目界面方向（确认门矩阵：quick/longterm 均设 UX 门）',
       detail: {
         round,
@@ -259,7 +266,6 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
         ...(visual ? { visual } : {}),
         preview_url: sketchUrl ?? undefined,
         sandbox_ok: sketchUrl !== null,
-        ...(sandboxFailure ? { sandbox_failure: sandboxFailure.slice(0, 200) } : {}),
       },
     },
   })
@@ -267,11 +273,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
   if (sketchUrl) {
     publish(makeUxEvent(eventInput, 'ux_sketch_ready', { preview_url: sketchUrl, ...(reviewUrl ? { review_url: reviewUrl } : {}), round }))
     publish(makeUxEvent(eventInput, 'message_delta', {
-      text: `草图画好了，已在右侧预览展示（第 ${round} 轮${sketchSource === 'template' ? '；当前使用简易方案' : ''}）。看看界面方向对不对——确认后我就开工。`,
-    }))
-  } else {
-    publish(makeUxEvent(eventInput, 'message_delta', {
-      text: `草图预览暂不可用，以下是可过目的文字版方案：\n${pending.sketchSummary}\n确认后按这份设计开工。`,
+      text: `草图画好了，已在右侧预览展示（第 ${round} 轮）。看看界面方向对不对——确认后我就开工。`,
     }))
   }
 
@@ -279,19 +281,34 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
 }
 
 function publishUxCard(pending: PendingUxConfirm): void {
+  const ready = confirmableSketch(pending)
   updateProject(pending.project_id, { current_stage: 'blocked_for_user_decision' })
   pending.publish(makeUxEvent(pending, 'stage_changed', { stage: 'blocked_for_user_decision' }))
   pending.publish(makeUxEvent(pending, 'user_decision_required', {
     kind: 'ux_confirm',
-    title: pending.unappliedFeedback ? '当前设计仍有未处理意见，请选择下一步' : '请确认界面草图',
-    summary: pending.sketchSummary ?? '',
+    title: !ready ? '草图尚未就绪，请选择下一步' : pending.unappliedFeedback ? '当前设计仍有未处理意见，请选择下一步' : '请确认界面草图',
+    summary: ready ? pending.sketchSummary ?? '' : '已保留确认的需求和已有意见，尚未开始实现。',
     questions: [
-      { id: UX_CONFIRM_OPTION_CONFIRM, label: '确认草图，开工', description: '按这个界面方向开始实现' },
+      ...(ready ? [{ id: UX_CONFIRM_OPTION_CONFIRM, label: '确认草图，开工', description: '按这个界面方向开始实现' }]
+        : [{ id: UX_CONFIRM_OPTION_RETRY, label: '重新生成草图', description: '沿用已确认需求和修改意见重试' }]),
       { id: UX_CONFIRM_OPTION_ADJUST, label: pending.limitReached ? '再调整一次' : '有要调整的', description: '说说哪里要改，我重新画' },
-      { id: UX_CONFIRM_OPTION_DELEGATE, label: '你帮我定', description: '按当前版本直接开工' },
+      ...(ready ? [{ id: UX_CONFIRM_OPTION_DELEGATE, label: '你帮我定', description: '按当前版本直接开工' }] : []),
       { id: UX_CONFIRM_OPTION_DISMISS, label: '稍后再说', description: '先不确认，回对话继续' },
     ],
   }))
+}
+
+function confirmableSketch(pending: PendingUxConfirm): boolean {
+  return !pending.generationFailed && !pending.unappliedFeedback && Boolean(pending.sketchHash && pending.design)
+    // Historical requirements-list templates did not persist a source flag.
+    && pending.design?.summary !== FALLBACK_UX_SUMMARY
+}
+
+export async function retryUxSketch(input: AgentSendMessageInput): Promise<boolean> {
+  const pending = takePendingUxConfirm(input.project_id)
+  if (!pending) return false
+  await runUxConfirmGate({ ...pending, request_id: input.request_id }, pending.unappliedFeedback, true)
+  return true
 }
 
 /** 测试隔离：清两个 pending（生产无用）。 */
@@ -331,7 +348,7 @@ export function seedUxAdjustWaitForTests(pending: { project_id: string; session_
 }
 
 /** 确认卡回传识别：card_option 且选项 id 专属、pending 仍存活时才拦截。 */
-export function resolveUxConfirmCardAnswer(input: AgentSendMessageInput): 'confirm' | 'adjust' | 'dismiss' | undefined {
+export function resolveUxConfirmCardAnswer(input: AgentSendMessageInput): 'confirm' | 'adjust' | 'dismiss' | 'retry' | undefined {
   if (input.metadata?.source !== 'card_option') return undefined
   const optionId = input.metadata.selected_option_id
   if (
@@ -339,10 +356,12 @@ export function resolveUxConfirmCardAnswer(input: AgentSendMessageInput): 'confi
     && optionId !== UX_CONFIRM_OPTION_ADJUST
     && optionId !== UX_CONFIRM_OPTION_DISMISS
     && optionId !== UX_CONFIRM_OPTION_DELEGATE
+    && optionId !== UX_CONFIRM_OPTION_RETRY
   ) {
     return undefined
   }
   if (!hasPendingUxConfirm(input.project_id)) return undefined
+  if (optionId === UX_CONFIRM_OPTION_RETRY) return 'retry'
   if (optionId === UX_CONFIRM_OPTION_CONFIRM || optionId === UX_CONFIRM_OPTION_DELEGATE) return 'confirm'
   if (optionId === UX_CONFIRM_OPTION_DISMISS) return 'dismiss'
   return 'adjust'
@@ -357,13 +376,14 @@ export async function resumeUxConfirmConfirmed(input: AgentSendMessageInput): Pr
   try {
     const current = readPrdBackplane(input.project_id)
     if (!current.user_confirmed_at || prdStructureIssues(current).length || pending.prdFingerprint !== prdScopeFingerprint(current)) throw new Error('UX_PRD_VERSION_CHANGED: 当前需求尚未确认或版本已变化，请重新生成设计')
+    if (!confirmableSketch(pending)) throw new Error('UX_SKETCH_NOT_READY: 没有可确认的完整界面草图，请重新生成')
     if (pending.sketchHash && pending.design) freezeConfirmedUxSketch(pending.project_id, { prd: current, design: pending.design, html_hash: pending.sketchHash })
-    else if (pending.design) preserveTextDesign(pending, current)
     else throw new Error('UX_DESIGN_MISSING')
     updateProject(input.project_id, { ux_confirmation: { prd_fingerprint: prdScopeFingerprint(current), design_hash: uxDesignFingerprint(pending.design), html_hash: pending.sketchHash ?? null } })
   } catch (error) {
     pendingUxConfirms.set(pending.project_id, pending)
     pending.publish(makeUxEvent(pending, 'message_delta', { text: `保存已确认草图失败，尚未开工，请重试确认：${error instanceof Error ? error.message : String(error)}` }))
+    publishUxCard(pending)
     pending.publish(makeUxEvent(pending, 'message_completed', { subtype: 'incomplete' }))
     return true
   }
@@ -556,12 +576,6 @@ async function enterDesktopLineFromPending(pending: PendingUxConfirm): Promise<v
       complete: (_sessionId, _projectId, outcome) => pending.publish(makeUxEvent(pending, 'message_completed', { subtype: outcome ?? 'success' })),
     },
   )
-}
-
-function preserveTextDesign(pending: PendingUxConfirm, prd: PrdBackplane): void {
-  if (!pending.design || pending.design.prd_fingerprint !== prdScopeFingerprint(prd)) throw new Error('UX_TEXT_DESIGN_VERSION_CHANGED')
-  const root = findProject(pending.project_id).root_path
-  writeTextFileAtomic(join(root, '00_UX/confirmed.json'), JSON.stringify({ version: 1, mode: 'text', html_hash: null, design: pending.design }, null, 2))
 }
 
 async function returnToPrd(pending: PendingUxConfirm, feedback: string): Promise<void> {

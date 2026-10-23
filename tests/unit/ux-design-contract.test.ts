@@ -11,7 +11,7 @@ import { projectRequirementsModel } from '../../main/model/requirements-model'
 import { uxDesignIssues, parseUxDesign, type UxDesign } from '../../main/model/ux-design'
 import { generateUxSketch } from '../../main/guide/ux-sketch'
 import { readConfirmedUxBinding } from '../../main/project/ux-binding'
-import { runUxConfirmGate, startUxAdjustAwait, takeUxAdjustFeedback, runUxAdjustRound, resumeUxConfirmConfirmed, tryResumeUxAdjustAsConfirm, isUxResumeIntent, consumeUxPauseIntent, resetUxConfirmForTests, UX_SKETCH_ADJUST_LIMIT } from '../../main/guide/ux-confirm'
+import { runUxConfirmGate, startUxAdjustAwait, takeUxAdjustFeedback, runUxAdjustRound, resumeUxConfirmConfirmed, tryResumeUxAdjustAsConfirm, isUxResumeIntent, consumeUxPauseIntent, resetUxConfirmForTests, UX_SKETCH_ADJUST_LIMIT, retryUxSketch, clearUxConfirmationMemoryForTests, restoreUxConfirmation } from '../../main/guide/ux-confirm'
 import type { SDKQuery } from '../../main/orchestration/orchestrator'
 
 vi.mock('../../main/desktop/desktop-route', () => ({ enterDesktopLine: vi.fn(async () => true), DESKTOP_LINE_TEMPLATE_TYPES: new Set(['desktop_tool', 'game']) }))
@@ -113,7 +113,7 @@ describe('UX 设计、确认与真实存储边界', () => {
     expect(result.source).toBe('llm')
     expect(result.html).toBe(html)
     expect(result.design).toEqual(design)
-    expect(prompts[1]).toContain('可省略html字段')
+    expect(prompts[1]).toContain('本次只输出action与design，不要重发html')
     const dir = join(home, 'agent-workspaces', project.workspace_slug, 'documents', project.project_id, 'diagnostics')
     const rows = readFileSync(join(dir, 'ux-design-attempts.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
     expect(rows.filter(row => row.event === 'output_checked').map(row => row.accepted_for_preview)).toEqual([false, true])
@@ -134,7 +134,7 @@ describe('UX 设计、确认与真实存储边界', () => {
         : { action: 'design', design: broken, html: mode === 'unsafe' ? html.replace('</body>', '<script>bad()</script></body>') : html }
       yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(text) }] } }
     }
-    expect((await generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })).source).toBe('template')
+    await expect(generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })).rejects.toThrow('UX_DESIGN_FAILED')
   })
 
   it('结构化调用只有JSON协议，记录同一次读取的覆盖哈希和白名单运行元数据', async () => {
@@ -207,9 +207,7 @@ describe('UX 设计、确认与真实存储边界', () => {
     const { pending, prd, design } = setup()
     const query: SDKQuery = async function* () { yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ action: 'design', design,
       html: '<!DOCTYPE html><html><body>没有实际对应区域<!-- data-page-id="P-001" data-interaction-id="UI-001" --></body></html>' }) }] } } }
-    const result = await generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 1000 })
-    expect(result.source).toBe('template')
-    expect(result.html).toContain('<section class="req" data-interaction-id="UI-001"')
+    await expect(generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 1000 })).rejects.toThrow('UX_DESIGN_FAILED')
   })
 
   it.each(['不要开工', '取消开工', '继续改，不要开始', '不确认，先调整', '不要按草图'])('否定确认“%s”不进入桌面流程', async text => {
@@ -265,13 +263,64 @@ describe('UX 设计、确认与真实存储边界', () => {
     expect(enterDesktopLine).not.toHaveBeenCalled()
   })
 
-  it('预览失效显示真实文字方案并绑定文字版本，不沿用旧HTML', async () => {
-    const { pending, project, events } = setup()
+  it('预览失败不产生文字确认；恢复后重试复用已生成设计，不再花模型调用', async () => {
+    const { pending, project, events, calls, query } = setup()
     vi.mocked(mintProjectPreviewUrl).mockImplementationOnce(() => { throw new Error('preview unavailable') })
     await runUxConfirmGate(pending)
-    expect(events.some(event => String(event.payload.text).includes('左侧输入参数'))).toBe(true)
+    expect(events.some(event => event.type === 'ux_sketch_ready')).toBe(false)
+    expect(events.some(event => event.type === 'message_delta' && String(event.payload.text).includes('失败'))).toBe(true)
     await resumeUxConfirmConfirmed({ project_id: pending.project_id, content: '确认' } as never)
-    expect(readConfirmedUxBinding(project.project_id, readPrdBackplane(project.project_id))?.html_path).toBeUndefined()
+    expect(enterDesktopLine).not.toHaveBeenCalled()
+    expect(() => readConfirmedUxBinding(project.project_id, readPrdBackplane(project.project_id))).toThrow('UX_CONFIRMATION_MISSING')
+    expect(calls).toHaveLength(1)
+    clearUxConfirmationMemoryForTests()
+    expect(restoreUxConfirmation({ project_id: pending.project_id, session_id: 's' } as never, pending.publish,
+      { query, env: {} })).toBe(true)
+    await retryUxSketch({ project_id: pending.project_id, request_id: 'retry' } as never)
+    expect(calls).toHaveLength(1)
+    expect(events.some(event => event.type === 'ux_sketch_ready')).toBe(true)
+    expect(events.filter(event => event.type === 'user_decision_required').at(-1)?.payload.title).toBe('请确认界面草图')
+  })
+
+  it('HTML完整而设计JSON被截断时保留视图，下一轮只补记录且仍要求完整覆盖', async () => {
+    const { pending, prd, html, design, project } = setup()
+    const prompts: string[] = []
+    const query: SDKQuery = async function* (prompt) {
+      prompts.push(prompt)
+      const raw = prompts.length === 1 ? `{"action":"design","html":${JSON.stringify(html)},"design":{"interactions":[{"id":"UI-001"`
+        : JSON.stringify({ action: 'design', design })
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: raw }] } }
+      yield { type: 'result', stop_reason: prompts.length === 1 ? 'max_tokens' : 'end_turn' }
+    }
+    const result = await generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })
+    expect(result.html).toBe(html)
+    expect(uxDesignIssues(result.design!, prd)).toEqual([])
+    expect(prompts[1]).toContain('本次只输出action与design，不要重发html')
+    expect(existsSync(join(project.root_path!, '00_UX/confirmed.html'))).toBe(false)
+  })
+
+  it('预览失败后提出新意见，必须重新生成处理意见，不能仅重发旧预览', async () => {
+    const { pending, calls } = setup()
+    vi.mocked(mintProjectPreviewUrl).mockImplementationOnce(() => { throw new Error('preview unavailable') })
+    await runUxConfirmGate(pending)
+    startUxAdjustAwait({ project_id: pending.project_id } as never)
+    const input = { project_id: pending.project_id, content: '把结果区移动到左侧' } as never
+    const feedback = takeUxAdjustFeedback(input)!
+    await runUxAdjustRound(input, feedback)
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toContain('把结果区移动到左侧')
+  })
+
+  it('HTML字符串本身截断时不能把残片当作可复用视图', async () => {
+    const { pending, prd, html, design } = setup()
+    let calls = 0
+    const query: SDKQuery = async function* (prompt) {
+      calls++
+      if (calls === 2) expect(prompt).toContain('没有可复用的安全HTML')
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: calls === 1
+        ? `{"action":"design","html":${JSON.stringify(html).slice(0, -12)}` : JSON.stringify({ action: 'design', design }) }] } }
+    }
+    await expect(generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })).rejects.toThrow('UX_DESIGN_FAILED')
   })
 
   it('业务范围反馈回PRD，不把新功能藏进草图', async () => {
