@@ -66,6 +66,8 @@ import type { DelegationRunRole as DelegationRole } from '../../../shared/delega
 export type DelegationStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface DelegateAgentArgs {
+  writePaths?: string[]
+  readOnly?: boolean
   task: string
   role?: DelegationRole
   expectedOutput?: string
@@ -106,6 +108,8 @@ export interface AskSignal {
 }
 
 export interface DelegationRecord {
+  assignment?: { writePaths?: string[]; readOnly?: boolean }
+  workspaceLease?: { release: () => void; completionNote?: () => string }
   taskHandoff?: TaskHandoff
   delegationId: string
   parentSessionId: string
@@ -153,6 +157,7 @@ export interface WaitForDelegationsArgs {
 // =========================================================================
 
 const delegations = new Map<string, DelegationRecord>()
+const childInvocations = new Map<string, Set<Promise<void>>>()
 const parentContexts = new Map<string, DelegationParentContext>()
 
 let childToolsBuilder: ChildToolsBuilder = () => {
@@ -196,8 +201,10 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
   if (!parentCtx) {
     throw new Error(`未找到父循环上下文（sessionId=${parent.sessionId}）。委派工具只在主 agent loop 内可用。`)
   }
-  if (runningDelegationCount(parent.sessionId) >= MAX_RUNNING_DELEGATIONS_PER_PARENT) {
-    throw new Error(`当前并行的委派子会话已达上限（${MAX_RUNNING_DELEGATIONS_PER_PARENT}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
+  if (parentCtx.allowChannelOverrides === false && (args.channelId || args.modelId)) throw new Error('DELEGATION_MODEL_OVERRIDE_NOT_AUTHORIZED')
+  const maxConcurrent = Math.min(parentCtx.maxConcurrentDelegations ?? MAX_RUNNING_DELEGATIONS_PER_PARENT, MAX_RUNNING_DELEGATIONS_PER_PARENT)
+  if (runningDelegationCount(parent.sessionId) >= maxConcurrent) {
+    throw new Error(`当前并行的委派子会话已达上限（${maxConcurrent}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
   }
 
   const delegationId = randomUUID()
@@ -220,6 +227,8 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     askSignal: createAskSignal(),
     channelOverride: resolveDelegationChannelOverride(args) ?? undefined,
   }
+  record.assignment = { writePaths: args.writePaths, readOnly: args.readOnly }
+  record.workspaceLease = parentCtx.prepareDelegation?.({ parent, args, childSessionId, delegationId })
   delegations.set(delegationId, record)
   ensureDelegationWatchStarted()
   // delegation-persistence 阶段 1（2026-08-28）：子会话索引写归属 meta——重启后
@@ -233,7 +242,7 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     // best-effort（同 recordSessionActivity 容错口径）；warn 保证落盘失败运维可见
     console.warn('[delegation-persistence] 子会话归属写入失败:', error)
   }
-  registerChildWithHost(parentCtx, { delegationId, childSessionId }, () => { delegations.delete(delegationId) })
+  registerChildWithHost(parentCtx, { delegationId, childSessionId }, () => { record.workspaceLease?.release(); delegations.delete(delegationId) })
   pruneFinishedDelegations()
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
 
@@ -250,6 +259,8 @@ function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): voi
   record.loopStatus = result.status
   record.taskHandoff = buildTaskHandoff(result)
   record.resultSummary = summarizeChildResult(result, DELEGATION_RESULT_CHAR_LIMIT) + formatWorktreeNote(record.worktreeMeta)
+  record.resultSummary += record.workspaceLease?.completionNote?.() ?? ''
+  record.workspaceLease?.release(); record.workspaceLease = undefined
   record.status = 'completed'
   // persistence：终态落盘（重启后 JSONL 末行推断依据）
   try {
@@ -267,6 +278,7 @@ function settleChildLoopError(record: DelegationRecord, error: unknown): void {
   const carriedMeta = (error as { childWorktreeMeta?: Record<string, unknown> } | undefined)?.childWorktreeMeta
   if (carriedMeta) record.worktreeMeta = { ...(record.worktreeMeta ?? {}), ...carriedMeta }
   record.error = errorMessage(error) + formatWorktreeNote(record.worktreeMeta)
+  record.workspaceLease?.release(); record.workspaceLease = undefined
   record.status = 'failed'
   try {
     appendDelegationSettle(record.childSessionId, 'failed', { error: record.error })
@@ -357,13 +369,30 @@ async function runChildLoop(opts: {
 function launchChildLoop(opts: Parameters<typeof runChildLoop>[0]): void {
   const ownedAbort = opts.record.abort
   installAbortSettlement(opts.record, () => {
+    opts.record.workspaceLease?.release(); opts.record.workspaceLease = undefined
     publishDelegationEvent(opts.record.parentSessionId, 'delegation_cancelled', opts.record)
     delegations.delete(opts.record.delegationId)
   })
-  void runChildLoop(opts).then(
+  const pending = childInvocations.get(opts.record.parentSessionId) ?? new Set<Promise<void>>()
+  childInvocations.set(opts.record.parentSessionId, pending)
+  const invocation = runChildLoop(opts).then(
     result => { if (opts.record.abort === ownedAbort) settleChildLoop(opts.record, result) },
     error => { if (opts.record.abort === ownedAbort) settleChildLoopError(opts.record, error) },
-  )
+  ).finally(() => { pending.delete(invocation); if (!pending.size) childInvocations.delete(opts.record.parentSessionId) })
+  pending.add(invocation)
+}
+
+/** Logical cancellation releases writers immediately; this separately waits for
+ * actual loop teardown before a host verifies files or removes a test home. */
+export async function settleParentDelegationRuns(parentSessionId: string, timeoutMs = 10000): Promise<void> {
+  const pending = childInvocations.get(parentSessionId)
+  if (!pending?.size) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([Promise.allSettled([...pending]), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('DELEGATION_TEARDOWN_INCOMPLETE')), timeoutMs)
+    })])
+  } finally { clearTimeout(timer) }
 }
 
 // =========================================================================
@@ -378,7 +407,7 @@ export function getDelegationSummary(record: DelegationRecord): DelegationSummar
     role: record.role,
     status: record.status,
     goal: record.goal,
-    result_summary: record.resultSummary,
+    result_summary: record.resultSummary?.slice(0, parentContexts.get(record.parentSessionId)?.delegationSummaryLimit ?? DELEGATION_RESULT_CHAR_LIMIT),
     ...(record.loopStatus ? { loop_status: record.loopStatus } : {}),
     error: record.error,
     started_at: record.startedAt,
@@ -473,6 +502,7 @@ export function stopDelegation(parentSessionId: string, delegationId: string): D
       console.warn('[delegation-persistence] stop 落盘失败:', error)
     }
     record.abort.abort()
+    record.workspaceLease?.release(); record.workspaceLease = undefined
     record.resolveCompletion()
     publishDelegationEvent(parentSessionId, 'delegation_cancelled', record)
   }
@@ -608,11 +638,15 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   }
   // 复用与 startDelegation 相同的并行上限门禁（审计 P2-5）：continue 会把 running 数 +1，
   // 绕过检查即可突破「每父并行 ≤ MAX_RUNNING_DELEGATIONS_PER_PARENT」硬上限。
-  if (runningDelegationCount(parent.sessionId) >= MAX_RUNNING_DELEGATIONS_PER_PARENT) {
-    throw new Error(`当前并行的委派子会话已达上限（${MAX_RUNNING_DELEGATIONS_PER_PARENT}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
+  if (parentCtx.allowChannelOverrides === false && record.channelOverride) throw new Error('DELEGATION_MODEL_OVERRIDE_NOT_AUTHORIZED')
+  const maxConcurrent = Math.min(parentCtx.maxConcurrentDelegations ?? MAX_RUNNING_DELEGATIONS_PER_PARENT, MAX_RUNNING_DELEGATIONS_PER_PARENT)
+  if (runningDelegationCount(parent.sessionId) >= maxConcurrent) {
+    throw new Error(`当前并行的委派子会话已达上限（${maxConcurrent}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
   }
 
   const previousHandoff = record.taskHandoff
+  record.workspaceLease = parentCtx.prepareDelegation?.({ parent, args: { task: trimmedTask, role: record.role, ...record.assignment },
+    childSessionId: record.childSessionId, delegationId: record.delegationId })
   record.taskHandoff = undefined
   record.status = 'running'
   record.loopStatus = undefined

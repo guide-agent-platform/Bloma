@@ -47,8 +47,9 @@ export function toTransportTurns(context: Pick<Context, 'messages' | 'systemProm
       const block: MessageContentBlock = { type: 'tool_result', tool_use_id: message.toolCallId,
         content: message.content.filter(b => b.type === 'text').map(b => b.text).join('\n'), is_error: message.isError }
       const last = turns.at(-1)
-      if (last?.role === 'user' && Array.isArray(last.content) && last.content.every(b => b.type === 'tool_result')) last.content.push(block)
-      else turns.push({ role: 'user', content: [block] })
+      const images = userBlocks(message.content).filter(b => b.type === 'image')
+      if (last?.role === 'user' && Array.isArray(last.content) && last.content.some(b => b.type === 'tool_result')) last.content.push(block, ...images)
+      else turns.push({ role: 'user', content: [block, ...images] })
     }
   }
   return turns
@@ -97,6 +98,6 @@ export function auditBlocks(message: AgentMessage): MessageContentBlock[] {
       : block.type === 'toolCall' ? [{ type: 'tool_use', id: block.id, name: block.name, input: block.arguments }] : [])
   if (message.role === 'user') return userBlocks(message.content)
   if (message.role === 'toolResult') return [{ type: 'tool_result', tool_use_id: message.toolCallId,
-    content: message.content.filter(b => b.type === 'text').map(b => b.text).join('\n'), is_error: message.isError }]
+    content: message.content.filter(b => b.type === 'text').map(b => b.text).join('\n'), is_error: message.isError }, ...userBlocks(message.content).filter(b => b.type === 'image')]
   return []
 }

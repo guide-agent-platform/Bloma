@@ -18,6 +18,7 @@ import { renderMaterialContext, materialImageRefs } from '../platform/attachment
 import { runUxConfirmGate, restoreUxConfirmation, replayUxConfirmation, hasPendingUxConfirm, resolveUxConfirmCardAnswer, resumeUxConfirmConfirmed, retryUxSketch,
   consumeUxConfirmDismiss, startUxAdjustAwait, takeUxAdjustFeedback, takeUxSketchCorrection, runUxAdjustRound } from './ux-confirm'
 import { enterDesktopLine } from '../desktop/desktop-route'
+import { isSoftwareProject } from '../desktop/workflow-policy'
 
 /** One extraction and one scope confirmation. No legacy PRD/audit/ideas pipeline. */
 export async function handleLeanGuide(input: AgentSendMessageInput, publish: (event: AgentEvent) => void, model?: GuideModelOptions): Promise<void> {
@@ -89,11 +90,12 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   const images = [...(input.images ?? []), ...(model.materials ? materialImageRefs(model.materials) : [])]
   const budget = leanBudget(input.project_id, 'prepare')
   const query = budget.wrap(model.query)
-  const result = await withLeanRuntime(input.project_id, 'prepare', model.signal, signal => callLlmForJson({ systemPrompt: LEAN_BRIEF_PROMPT,
+  const software = isSoftwareProject(input.project_id)
+  const result = await withLeanRuntime(input.project_id, 'prepare', model.signal, signal => callLlmForJson({ systemPrompt: LEAN_BRIEF_PROMPT + (software ? '\n另填delivery=desktop/browser/command描述用户使用方式；有界面默认desktop，仅用户明确要在浏览器使用才browser；无界面command。框架、依赖、语言由工程Agent选择，不让用户做技术问卷。' : ''),
     prompt: JSON.stringify({ previous: brief.lean_brief ? brief : undefined, conversation: source, materials, latest: input.content }),
     query: (text, options) => query(text, { ...options, images, accounting: { projectId: input.project_id, runId: input.request_id, role: 'brief', scope: 'prepare' } }),
     env: model.env, signal, sessionId: input.session_id, maxTokens: Math.min(model.maxTokens, 8192), temperature: .1, attempts: 2,
-    parse: text => parseLeanBrief(text, { projectId: input.project_id, sessionId: input.session_id, source, previous: brief }) }))
+    parse: text => parseLeanBrief(text, { projectId: input.project_id, sessionId: input.session_id, source, previous: brief, software }) }))
   model.signal.throwIfAborted()
   if (!result) { emit('message_delta', { text: '任务整理未完成，原始需求已保留；可重试，不会自动开工。' }); emit('message_completed', { subtype: 'incomplete' }); return }
   if (result.action === 'clarify') {

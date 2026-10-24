@@ -14,6 +14,8 @@ import type { LlmVerificationResult } from './llm-verification'
 import { combineVerification, runCapabilityVerifiers, type CapabilityVerifier } from './capability-verifiers'
 import { runGuiAcceptance, type GuiAcceptanceResult } from './gui-acceptance'
 import { coreVerificationCacheKey, withCoreVerificationCache } from './core-verification-cache'
+import { isSoftwareProject } from './workflow-policy'
+import { readLaunchDeclaration } from './launch-smoke'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
@@ -207,6 +209,13 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
  * product-authored script to print PASS. Specialized adapters remain mandatory. */
 async function verifyLeanBehavior(options: CoreVerificationOptions, root: string, brief: import('../model/prd-backplane').PrdBackplane, result: CoreVerificationResult): Promise<void> {
   if (!brief.user_confirmed_at) throw new Error('LEAN_SCOPE_NOT_CONFIRMED')
+  if (isSoftwareProject(options.projectId)) {
+    const declared = readLaunchDeclaration(root)
+    if (!declared?.ok) throw new Error('SOFTWARE_LAUNCH_DECLARATION_REQUIRED')
+    const target = brief.lean_brief!.delivery ?? (brief.lean_brief!.ui === 'none' ? 'command' : 'desktop')
+    const actual = declared.launch.ui === 'browser' ? 'browser' : declared.launch.mode === 'command' ? 'command' : 'desktop'
+    if (target !== actual) throw new Error(`SOFTWARE_DELIVERY_TARGET_MISMATCH: 已确认${target}，实际入口${actual}；改变使用方式需先确认`)
+  }
   const scope = prdScopeFingerprint(brief)
   const states = new Map(brief.requirements.map(row => [row.id, 'unverified' as CoreVerificationStatus]))
   let behavior: CoreVerificationStatus = 'unverified'

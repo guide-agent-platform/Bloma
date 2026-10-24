@@ -131,6 +131,8 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
           || parsed.project_id !== projectId || !parsed.requirements.length || parsed.requirements.some(row => !row?.id || !row.description)
           || !parsed.acceptance || !Array.isArray(parsed.out_of_scope) || !Array.isArray(parsed.assumptions)
           || parsed.lean_brief.preview !== undefined && !['skip', 'reuse'].includes(parsed.lean_brief.preview)
+          || parsed.lean_brief.delivery !== undefined && (!['desktop', 'browser', 'command'].includes(parsed.lean_brief.delivery)
+            || (parsed.lean_brief.ui === 'none') !== (parsed.lean_brief.delivery === 'command'))
           || parsed.lean_brief.preview === 'reuse' && !/^[a-f0-9]{64}$/.test(parsed.lean_brief.reference_html_hash ?? ''))) throw new Error('LEAN_BRIEF_INVALID')
         return reconcilePrdBackplane(parsed)
       }

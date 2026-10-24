@@ -290,6 +290,10 @@ export function validationStateLine(state: { gwt_all_passed: boolean; security_a
 // =========================================================================
 
 export interface BuildAgentToolsOptions {
+  /** Software projects choose their own frontend/build ecosystem. */
+  software?: boolean
+  /** Host write ownership is checked again after asynchronous syntax validation. */
+  assertFileWrite?: (path: string, ctx: ToolContext) => void
   projectId: string
   /** 编辑格式能力位：diff（默认，强模型精确替换）/ whole（弱渠道整文件重写，Aider 结论） */
   editFormat?: 'diff' | 'whole'
@@ -379,13 +383,15 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + 修复预算门 + meta CSP 剥离 + 依赖白名单拦截。 */
   const validateAndWrite = async (root: string, rel: string, content: string, ctx: ToolContext, expectedRevision?: string): Promise<ToolOutcome> => {
+    ctx.signal.throwIfAborted()
+    options.assertFileWrite?.(rel, ctx)
     if (!isWritablePath(rel, realVariant)) return { output: notWritableError(rel, realVariant), isError: true }
     if (extname(rel).toLowerCase() === '.html') {
       const structureError = checkHtmlStructure(content)
       if (structureError) return { output: `${structureError}\n请修正后重新提交完整内容。`, isError: true }
       // 注入点⑥工具层拦截（周计划 §6：loop 引白名单外包→工具层拦截）：外部 CDN
       // script/link 引用拒绝写入（模板依赖白名单禁外部资源；开关关闭时不拦，行为=现状）
-      const cdnViolation = externalResourceViolation(content)
+      const cdnViolation = options.software ? undefined : externalResourceViolation(content)
       if (cdnViolation) return { output: `${cdnViolation}\n模板依赖白名单禁止外部资源（内联实现或本地文件）；请去除外链后重新提交。`, isError: true }
     }
     if (extname(rel).toLowerCase() === '.js') {
@@ -397,11 +403,13 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     // 修复预算门：路径/参数/语法均校验通过后才烧预算（无效调用不烧，对齐注释语义）
     const budget = guardRepairBudget(ctx)
     if (budget) return budget
-    const finalContent = extname(rel).toLowerCase() === '.html' ? stripMetaCsp(content) : content
+    const finalContent = !options.software && extname(rel).toLowerCase() === '.html' ? stripMetaCsp(content) : content
     const abs = join(root, rel)
     // P1-06（2026-09-26 运行审计）：提交点写入原语——CAS 版本校验（收窄 TOCTOU：
     // 语法校验 await 之后、写盘之前；基准取显式传入或会话读写的版本，宿主强制）
     // + 写租约临界区互斥（并行写者冲突拒绝并教育；单会话零影响；TTL 兜底）。
+    ctx.signal.throwIfAborted()
+    options.assertFileWrite?.(rel, ctx)
     const committed = commitFileWrite({
       projectId: ctx.projectId,
       root,
@@ -487,7 +495,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const topDir = subDir.split('/')[0]
       if (topDir && SKIPPED_DIRS.has(topDir)) {
         const managed = topDir === 'node_modules'
-          ? 'node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不在产物清单中，也不允许直接修改'
+          ? options.software ? 'node_modules 从源文件清单隐藏；依赖是否可用需查看package.json并实际运行，使用包管理器安装，不直接手改依赖源码' : 'node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不在产物清单中，也不允许直接修改'
           : `${topDir}/ 是平台基础设施目录，不在产物清单中`
         return { output: `${managed}。不要据此判断依赖缺失：判断依赖声明请读 package.json（如存在）。` }
       }
@@ -740,7 +748,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         // R0.2：命中不了平台托管目录（node_modules 等）时如实说明，防「找不到 = 不存在」误判
         const targetsManaged = [pattern, subDir].some((seg) => seg && seg.split('/').includes('node_modules'))
         const managedNote = targetsManaged
-          ? '\n注：node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不出现在文件清单中——无匹配不等于依赖缺失，请勿据此改用零依赖实现。'
+          ? options.software ? '\n注：node_modules 不出现在源码清单中；请查看package.json并实际运行确认依赖，不将无匹配当作依赖可用或不可用的证据。' : '\n注：node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不出现在文件清单中——无匹配不等于依赖缺失，请勿据此改用零依赖实现。'
           : ''
         return { output: `无匹配文件（模式 ${pattern}${subDir ? `，目录 ${subDir}/` : ''}）。可用 list_files 查看实际文件清单。${managedNote}` }
       }

@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { getPromaHome } from '../../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../../storage/json-store'
 import { projectDirectory, resolveSoftwareCommand, softwareEnvironment } from './command-runtime'
+import { mainRootDir } from '../platform/paths'
 
 export interface SoftwareProcessSnapshot {
   id: string; projectId: string; sessionId: string; state: 'starting' | 'running' | 'stopping' | 'exited' | 'failed' | 'stopped' | 'interrupted'
@@ -63,7 +64,7 @@ export async function stopSoftwareProcess(projectId: string, id: string, session
   return softwareProcess(projectId, id, sessionId)
 }
 
-export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number }): Promise<SoftwareProcessSnapshot> {
+export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean }): Promise<SoftwareProcessSnapshot> {
   input.signal?.throwIfAborted()
   if ([...processes.values()].filter(p => p.snapshot.projectId === input.projectId && ['starting', 'running'].includes(p.snapshot.state)).length >= 3) throw new Error('PROCESS_CONCURRENCY_LIMIT: 请先停止不再使用的预览进程')
   const cwd = projectDirectory(input.root, input.cwd), url = input.url ? loopbackUrl(input.url) : undefined
@@ -77,11 +78,15 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
   // Save ownership before spawn. A failure cannot leave an untracked child.
   const file = pathFor(snapshot.id)
   writeJsonFile(file, snapshot)
-  const child = spawn(resolved.command[0], resolved.command.slice(1), { cwd, env: resolved.env, windowsHide: true,
-    detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
+  const supervisor = input.independentUserApp ? resolved : resolveSoftwareCommand(input.root,
+    ['node', join(mainRootDir(), 'templates/tools/software_process_supervisor.cjs')], softwareEnvironment(input.projectId, input.dataDir))
+  const child = spawn(supervisor.command[0], supervisor.command.slice(1), { cwd, env: supervisor.env, windowsHide: true,
+    detached: process.platform !== 'win32' || input.independentUserApp, stdio: [input.independentUserApp ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
+  child.stdin?.on('error', () => { /* lifecycle error/exit handlers own terminal state */ })
+  if (!input.independentUserApp) child.stdin?.write(`${JSON.stringify({ ...resolved, cwd })}\n`)
   const entry: OwnedProcess = { snapshot, file, child, signal: input.signal, abort: () => { void stopSoftwareProcess(input.projectId, snapshot.id).catch(() => undefined) } }
   processes.set(snapshot.id, entry)
-  for (const [id, previous] of processes) if (processes.size > 128 && !['starting', 'running'].includes(previous.snapshot.state)) processes.delete(id)
+  for (const [id, previous] of processes) if (processes.size > 128 && !['starting', 'running', 'stopping'].includes(previous.snapshot.state)) processes.delete(id)
   snapshot.pid = child.pid
   const schedule = () => { if (!entry.timer) entry.timer = setTimeout(() => { entry.timer = undefined; try { persist(entry) } catch { entry.abort() } }, 200) }
   child.stdout?.on('data', data => { snapshot.stdout = (snapshot.stdout + data.toString('utf8')).slice(-TAIL); schedule() })
@@ -117,4 +122,8 @@ export async function stopSoftwareSession(projectId: string, sessionId: string):
 }
 export function activeSoftwarePreview(projectId: string): string | undefined {
   return [...processes.values()].find(entry => entry.snapshot.projectId === projectId && entry.snapshot.state === 'running' && entry.snapshot.ready)?.snapshot.url
+}
+export function hasSoftwareSessionProcess(projectId: string, sessionId: string): boolean {
+  return [...processes.values()].some(entry => entry.snapshot.projectId === projectId && entry.snapshot.sessionId === sessionId
+    && ['starting', 'running', 'stopping'].includes(entry.snapshot.state))
 }

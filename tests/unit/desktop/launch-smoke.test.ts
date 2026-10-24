@@ -32,8 +32,8 @@ describe('parseLaunchDeclaration', () => {
     const parsed = parseLaunchDeclaration('{"schema_version":1,"command":["python","app.py"],"window_title":"计算器"}')
     expect(parsed).toEqual({ ok: true, launch: { command: ['python', 'app.py'], window_title: '计算器' } })
   })
-  it('schema_version 非 1 / command 空数组 / window_title 非串 → 拒绝', () => {
-    expect(parseLaunchDeclaration('{"schema_version":2,"command":["a"]}')).toMatchObject({ ok: false })
+  it('未知schema_version / command 空数组 / window_title 非串 → 拒绝', () => {
+    expect(parseLaunchDeclaration('{"schema_version":3,"command":["a"]}')).toMatchObject({ ok: false })
     expect(parseLaunchDeclaration('{"schema_version":1,"command":[]}')).toMatchObject({ ok: false })
     expect(parseLaunchDeclaration('{"schema_version":1,"command":["a"],"window_title":5}')).toMatchObject({ ok: false })
     expect(parseLaunchDeclaration('not-json')).toMatchObject({ ok: false })

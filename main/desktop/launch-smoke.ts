@@ -27,6 +27,8 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { violatesCommandBlacklist } from './contract-schema'
 import { buildDriverEnv, resolveDriverVenvCommand } from './process-driver'
+import { loopbackUrl } from '../software/process-manager'
+import { validateSoftwareCommand, resolveSoftwareCommand, softwareEnvironment } from '../software/command-runtime'
 
 /** 入口声明文件（项目根相对）。 */
 export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
@@ -35,12 +37,15 @@ export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
 export const SMOKE_SCREENSHOT_RELATIVE_PATH = '00_VERIFY/screenshots/LAUNCH.png'
 
 export interface LaunchDeclaration {
+  schema_version?: 2
+  url?: string
+  artifact?: string
   mode?: 'command' | 'resident'
   command: string[]
   /** GUI 窗口标题提示（联合判定档触发条件 + 截图窗口匹配；缺省走纯存活档） */
   window_title?: string
   /** UI 技术栈声明（批8 下半）："webview" = pywebview 骨架 v2 产物（探索桥路由用；缺省由 requirements 探测） */
-  ui?: 'webview'
+  ui?: 'webview' | 'electron' | 'browser'
 }
 
 export type LaunchDeclarationParse =
@@ -59,7 +64,7 @@ export function parseLaunchDeclaration(raw: string): LaunchDeclarationParse {
     return { ok: false, error: 'LAUNCH.json 须为对象' }
   }
   const obj = parsed as Record<string, unknown>
-  if (obj.schema_version !== 1) {
+  if (obj.schema_version !== 1 && obj.schema_version !== 2) {
     return { ok: false, error: `LAUNCH.json schema_version 须为数字 1（收到 ${JSON.stringify(obj.schema_version)}）` }
   }
   const command = obj.command
@@ -73,16 +78,30 @@ export function parseLaunchDeclaration(raw: string): LaunchDeclarationParse {
     return { ok: false, error: 'LAUNCH.json window_title 须为字符串（窗口标题提示，可省略）' }
   }
   // 批8 下半：ui 声明只认 'webview'（探索桥路由）；其他值按非法拒绝（fail-closed 同风格）
-  if (obj.ui !== undefined && obj.ui !== 'webview') {
+  if (obj.ui !== undefined && !(obj.schema_version === 2 ? ['webview', 'electron', 'browser'].includes(String(obj.ui)) : obj.ui === 'webview')) {
     return { ok: false, error: `LAUNCH.json ui 目前只支持 "webview"（收到 ${JSON.stringify(obj.ui)}，可省略）` }
+  }
+  let url: string | undefined
+  if (obj.schema_version === 2) {
+    try {
+      validateSoftwareCommand(command)
+      if (obj.ui === 'browser') {
+        if (typeof obj.url !== 'string') throw new Error('浏览器程序须声明本机url')
+        url = loopbackUrl(obj.url)
+      } else if (obj.url !== undefined) throw new Error('只有浏览器入口可声明url')
+      if (obj.ui === 'electron' && !(typeof windowTitle === 'string' && windowTitle.trim())) throw new Error('桌面程序须声明实际window_title')
+      if (obj.mode === 'command' && obj.ui) throw new Error('一次性命令不能声明GUI')
+      if (obj.artifact !== undefined && (typeof obj.artifact !== 'string' || !obj.artifact.trim() || /^(?:[A-Za-z]:|[\\/])/.test(obj.artifact) || obj.artifact.split(/[\\/]/).includes('..'))) throw new Error('artifact须位于项目内')
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   }
   return {
     ok: true,
     launch: {
       command,
+      ...(obj.schema_version === 2 ? { schema_version: 2 as const, ...(url ? { url } : {}), ...(typeof obj.artifact === 'string' ? { artifact: obj.artifact } : {}) } : {}),
       ...(obj.mode !== undefined ? { mode: obj.mode as 'command' | 'resident' } : {}),
       ...(windowTitle !== undefined ? { window_title: windowTitle } : {}),
-      ...(obj.ui !== undefined ? { ui: obj.ui as 'webview' } : {}),
+      ...(obj.ui !== undefined ? { ui: obj.ui as LaunchDeclaration['ui'] } : {}),
     },
   }
 }
@@ -132,6 +151,7 @@ export interface ProbeRunInput {
 export type ProbeRun = { json: LaunchProbeCriteria | null; error?: string }
 
 export interface LaunchSmokeResult {
+  http_ready?: boolean
   passed: boolean
   /** 人话摘要（人话卡与决策日志用） */
   detail: string
@@ -645,11 +665,21 @@ function probeFailResult(criteria: LaunchProbeCriteria): LaunchSmokeResult {
  */
 export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {}): Promise<LaunchSmokeResult> {
   deps.signal?.throwIfAborted()
+  const declared = readLaunchDeclaration(rootPath)
+  if (declared?.ok && declared.launch.schema_version === 2 && declared.launch.ui === 'browser') {
+    const { runBrowserStartup } = await import('../software/startup')
+    return runBrowserStartup(rootPath, declared.launch, deps.signal)
+  }
   const dataRoot = mkdtempSync(join(tmpdir(), 'bloma-launch-data-'))
   const probeController = new AbortController()
   const signal = deps.signal ? AbortSignal.any([deps.signal, probeController.signal]) : probeController.signal
-  const env = { ...buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'] } as never, process.env),
+  const env: Record<string, string> = { ...(declared?.ok && declared.launch.schema_version === 2 ? softwareEnvironment('launch-smoke', join(dataRoot, 'data'))
+    : buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'] } as never, process.env)),
     APP_DATA_DIR: join(dataRoot, 'data'), PYTHONDONTWRITEBYTECODE: '1' }
+  if (declared?.ok && declared.launch.schema_version === 2) {
+    env.APPDATA = join(dataRoot, 'appdata'); env.LOCALAPPDATA = join(dataRoot, 'localappdata'); env.HOME = join(dataRoot, 'home'); env.USERPROFILE = env.HOME
+    for (const directory of [env.APPDATA, env.LOCALAPPDATA, env.HOME]) mkdirSync(directory, { recursive: true })
+  }
   let child: ChildProcess | undefined, stopping: Promise<void> | undefined
   const stop = (): Promise<void> => {
     if (stopping) return stopping
@@ -669,7 +699,9 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
     const result = await runOwnedLaunchSmoke(rootPath, { ...deps, signal,
       spawnImpl: (command, cwd) => {
         signal.throwIfAborted()
-        child = (deps.spawnImpl ?? defaultSpawn)(command, cwd, env)
+        const declaration = readLaunchDeclaration(rootPath)
+        const resolved = declaration?.ok && declaration.launch.schema_version === 2 ? resolveSoftwareCommand(rootPath, command, env) : { command, env }
+        child = (deps.spawnImpl ?? defaultSpawn)(resolved.command, cwd, resolved.env)
         return child
       } })
     deps.signal?.throwIfAborted()
@@ -690,7 +722,9 @@ async function runOwnedLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps): Pro
   if (!declaration.ok) {
     return { passed: false, detail: `启动冒烟无法执行：${declaration.error}` }
   }
-  const blacklistHit = violatesCommandBlacklist(declaration.launch.command)
+  let blacklistHit: string | null = null
+  try { if (declaration.launch.schema_version === 2) validateSoftwareCommand(declaration.launch.command); else blacklistHit = violatesCommandBlacklist(declaration.launch.command) }
+  catch (error) { blacklistHit = String(error) }
   if (blacklistHit) {
     return { passed: false, detail: `启动冒烟安全拦截：${blacklistHit}` }
   }

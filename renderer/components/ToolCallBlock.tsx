@@ -17,6 +17,15 @@ import { readToolFeedback, safeToolFeedback, toolFeedbackLabel, type ToolFeedbac
 /** 工具名 → 用户可读名（与主进程 TOOL_DISPLAY_NAMES 对齐，渲染端独立维护避免跨层依赖）。 */
 export const TOOL_UI_LABELS: Record<string, string> = {
   read_file: '读取文件',
+  run_command: '构建与运行',
+  start_service: '启动实际程序',
+  read_process: '检查运行情况',
+  stop_process: '停止试用进程',
+  inspect_software_environment: '检查开发环境',
+  view_image: '查看实际界面',
+  inspect_app: '试用并查看界面',
+  register_gui_check: '准备交互验证',
+  register_cli_check: '准备运行验证',
   inspect_project_resources: '检查运行资源',
   run_project_script: '执行项目脚本',
   install_packages: '准备依赖',

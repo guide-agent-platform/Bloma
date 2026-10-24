@@ -508,6 +508,14 @@ export function setupGlobalAgentListeners(): () => void {
     // 预览地址：rollback_done（重启 reconcile 回滚收敛）与 ux_sketch_ready（确认门新规
     // 2026-10-04：UX 外观草图挂沙箱）带回沙箱 preview_url，按项目隔离存储。
     // 2026-10-04 审计 B-02：sketch_ready/mvp_ready 已无发射方（web 生成线退役），消费腿删除。
+    if (event.type === 'software_preview_changed' && event.project_id) {
+      let url: string | undefined
+      try {
+        const candidate = new URL(String(event.payload.preview_url))
+        if (candidate.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(candidate.hostname) && !candidate.username && !candidate.password) url = candidate.href
+      } catch { /* null clears the live preview */ }
+      store.set(softwarePreviewsAtom, previous => { const next = { ...previous }; if (url) next[event.project_id!] = url; else delete next[event.project_id!]; return next })
+    }
     if (event.type === 'rollback_done' || event.type === 'ux_sketch_ready' || event.type === 'mvp_review_ready') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
@@ -999,6 +1007,8 @@ export const stageIndicatorLabelAtom = atom<string>('选择模式')
  * updatedAt 用于 cache-buster：沙箱同端口重 serve 新产物时 URL 不变，webview 不重载——
  * 2026-08-27 线上案例「迭代后预览内容没变」） */
 export const previewUrlsAtom = atom<Record<string, { url: string; reviewUrl?: string; updatedAt: number }>>({})
+/** Host-owned live application URLs; never treated as a confirmed design or delivery receipt. */
+export const softwarePreviewsAtom = atom<Record<string, string>>({})
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)

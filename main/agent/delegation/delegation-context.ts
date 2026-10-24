@@ -6,6 +6,10 @@ import type { ChildToolsBuilder } from './agent-collaboration'
 
 /** 父上下文随 session 隔离；保留统一缺省预算，允许宿主按工作角色指定预算。 */
 export interface DelegationParentContext {
+  maxConcurrentDelegations?: number
+  allowChannelOverrides?: boolean
+  delegationSummaryLimit?: number
+  prepareDelegation?: (input: { parent: import('../loop/agent-loop').ToolContext; args: import('./agent-collaboration').DelegateAgentArgs; childSessionId: string; delegationId: string }) => { release: () => void; completionNote?: () => string }
   materials?: import('../../../shared/attachment-types').MaterialContext
   query: SDKQuery
   env: Record<string, string>

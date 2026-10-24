@@ -24,6 +24,7 @@ interface PanelState {
     delivery_md?: string
     launch: { declared: boolean; parse_ok: boolean; parse_error?: string; command?: string[] }
     can_launch: boolean
+    supports_point_selection?: boolean
   }
   launchResult?: { ok: boolean; data?: { started: boolean; pid?: number }; error?: { message?: string } }
 }
@@ -63,7 +64,7 @@ describe('DeliveryPanel', () => {
   })
   afterEach(() => cleanup())
 
-  it('渲染文件清单与 DELIVERY.md；completed + 合法声明 → 启动可点并回报 pid', async () => {
+  it('渲染文件清单与 DELIVERY.md；completed + 合法声明 → 启动可点并显示可使用状态', async () => {
     mockBloma({
       deliverables: {
         files: ['calculator.py', 'DELIVERY.md', 'LAUNCH.json'],
@@ -78,7 +79,7 @@ describe('DeliveryPanel', () => {
     const button = screen.getByTestId('delivery-launch-button') as HTMLButtonElement
     expect(button.disabled).toBe(false)
     fireEvent.click(button)
-    await waitFor(() => expect(screen.getByTestId('delivery-launch-state').textContent).toContain('777'))
+    await waitFor(() => expect(screen.getByTestId('delivery-launch-state').textContent).toContain('已启动，可以开始使用。'))
   })
 
   it('缺 LAUNCH.json → 按钮禁用 + 缺口提示如实', async () => {
@@ -92,6 +93,26 @@ describe('DeliveryPanel', () => {
     renderPanel('completed')
     await waitFor(() => expect(screen.getByTestId('delivery-launch-hint').textContent).toContain('LAUNCH.json'))
     expect((screen.getByTestId('delivery-launch-button') as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('an update never stops the old instance until the user explicitly chooses to restart', async () => {
+    const launch = vi.fn().mockResolvedValueOnce({ ok: true, data: { started: false, needs_restart: true, detail: '旧版本仍在运行，请先保存。' } })
+      .mockResolvedValueOnce({ ok: true, data: { started: true, detail: '已启动更新。' } })
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = { projectDeliverables: { get: vi.fn(async () => ({ ok: true, data: { files: [], launch: { declared: true, parse_ok: true }, can_launch: true } })), launch } }
+    renderPanel('completed')
+    await waitFor(() => expect((screen.getByTestId('delivery-launch-button') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByTestId('delivery-launch-button'))
+    const restart = await screen.findByRole('button', { name: '已保存，关闭旧版本并启动更新' })
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(launch.mock.calls[0][0]).not.toHaveProperty('restart')
+    fireEvent.click(restart)
+    await waitFor(() => expect(launch.mock.calls[1][0]).toMatchObject({ project_id: 'p1', restart: true }))
+    await waitFor(() => expect(screen.getByTestId('delivery-launch-state').textContent).toBe('已启动更新。'))
+  })
+  it('does not advertise unsupported point selection and still explains how to request changes', async () => {
+    mockBloma({ deliverables: { files: [], launch: { declared: true, parse_ok: true }, can_launch: true, supports_point_selection: false } })
+    renderPanel('completed')
+    await screen.findByText('想继续改进，直接在聊天中描述位置和期望效果即可。')
+    expect(screen.queryByRole('button', { name: /进入修改预览/ })).toBeNull()
   })
 
   it('未完成项目 → 提示完成后可启动', async () => {

@@ -12,7 +12,9 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { isSoftwareProject } from '../desktop/workflow-policy'
+import { readLaunchDeclaration } from '../desktop/launch-smoke'
 import { getDocumentsDir } from '../../storage/config-paths'
 import { findProject } from '../project/project-service'
 import { assertExportPathNotLink, resolveProjectExportTarget } from '../project/export-target'
@@ -43,14 +45,17 @@ function readBackplaneForReadme(project: Project): ReadmeBackplane | null {
 }
 
 /** 带排除的递归复制（mkdir+copyFile 手动实现——cpSync 对 Windows 非 ASCII 目标会静默失败，同 project-service 口径）。 */
-function copyProjectTree(src: string, dest: string): void {
+function copyProjectTree(src: string, dest: string, software = false, artifactDir?: string, rel = ''): void {
   assertExportPathNotLink(dest)
   mkdirSync(dest, { recursive: true })
   if (!existsSync(src)) return
   for (const entry of readdirSync(src, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (EXPORT_EXCLUDE_DIRS.has(entry.name)) continue
-      copyProjectTree(join(src, entry.name), join(dest, entry.name))
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name
+      const inArtifact = artifactDir && (childRel === artifactDir || childRel.startsWith(`${artifactDir}/`))
+      if (software ? entry.name === '.git' || ['.venv', 'venv', '__pycache__', '.pytest_cache'].includes(entry.name)
+        || entry.name === 'node_modules' && !inArtifact : EXPORT_EXCLUDE_DIRS.has(entry.name)) continue
+      copyProjectTree(join(src, entry.name), join(dest, entry.name), software, artifactDir, childRel)
     } else if (entry.isFile()) {
       assertExportPathNotLink(join(dest, entry.name))
       copyFileSync(join(src, entry.name), join(dest, entry.name))
@@ -59,6 +64,17 @@ function copyProjectTree(src: string, dest: string): void {
 }
 
 function renderReadme(project: Project, backplane: ReadmeBackplane | null): string {
+  if (isSoftwareProject(project.project_id)) {
+    const declared = readLaunchDeclaration(project.root_path)
+    return [`# ${project.name}`, '', backplane?.positioning || project.name, '', '## 使用', '',
+      '在Bloma交付面板点击「启动程序」。运行配置、依赖与已知限制以本项目DELIVERY.md和LAUNCH.json为准。', '',
+      declared?.ok ? `实际入口：\`${declared.launch.command.join(' ')}\`` : '当前没有有效的启动声明。', '',
+      '## 导出内容', '',
+      '本包保留源码和已有构建产物，开发依赖目录未随源码复制。源码包在另一台机器上需要相应运行环境和依赖；不等于独立安装包。',
+      declared?.ok && declared.launch.artifact ? `声明的打包产物：${declared.launch.artifact}。能否脱离本机使用，以该包的独立运行验证为准。` : '本项目未声明独立打包产物。', '',
+      '用户运行数据由Bloma存放在项目专属数据目录，不混入源码导出包；迁移数据应另行备份。', '',
+      ...(backplane?.requirements ?? []).map(item => `- ${item.id ?? ''} ${item.description ?? ''}`), ''].join('\n')
+  }
   const now = new Date()
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const features = (backplane?.requirements ?? [])
@@ -146,7 +162,7 @@ function renderGitignore(): string {
 }
 
 /** 递归统计文件数（普通文件；排除目录不计入）。 */
-function countFiles(dir: string): number {
+function countFiles(dir: string, software = false): number {
   let count = 0
   let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = []
   try {
@@ -156,8 +172,8 @@ function countFiles(dir: string): number {
   }
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      if (EXPORT_EXCLUDE_DIRS.has(entry.name)) continue
-      count += countFiles(join(dir, entry.name))
+      if (!software && EXPORT_EXCLUDE_DIRS.has(entry.name)) continue
+      count += countFiles(join(dir, entry.name), software)
     } else if (entry.isFile()) count += 1
   }
   return count
@@ -170,13 +186,15 @@ function countFiles(dir: string): number {
 export function exportProjectHandoff(input: ProjectExportInput, destination: string): ProjectExportResult {
   const project = findProject(input.project_id)
   const target = resolveProjectExportTarget(destination, project.name)
-  copyProjectTree(project.root_path, target)
+  const software = isSoftwareProject(project.project_id), launch = software ? readLaunchDeclaration(project.root_path) : undefined
+  const artifactDir = launch?.ok && launch.launch.artifact ? dirname(launch.launch.artifact).replaceAll('\\', '/') : undefined
+  copyProjectTree(project.root_path, target, software, artifactDir === '.' ? undefined : artifactDir)
 
   const backplane = readBackplaneForReadme(project)
   const readmePath = join(target, 'README.md')
   if (!existsSync(readmePath)) writeFileSync(readmePath, renderReadme(project, backplane), 'utf8')
   const gitignorePath = join(target, '.gitignore')
-  if (!existsSync(gitignorePath)) writeFileSync(gitignorePath, renderGitignore(), 'utf8')
+  if (!existsSync(gitignorePath)) writeFileSync(gitignorePath, software ? 'node_modules/\n.git/\n.venv/\n*.log\n' : renderGitignore(), 'utf8')
 
   // Phase 7 U3 I8（2026-09-10）：导出包带版本标识（每次导出覆盖写——与 README 首写
   // 幂等不同，导出信息应反映本次导出时点）：源版本/导出时间/交付状态已知限制。
@@ -218,5 +236,5 @@ export function exportProjectHandoff(input: ProjectExportInput, destination: str
     }
   }
 
-  return { canceled: false, destination: target, file_count: countFiles(target) }
+  return { canceled: false, destination: target, file_count: countFiles(target, software) }
 }

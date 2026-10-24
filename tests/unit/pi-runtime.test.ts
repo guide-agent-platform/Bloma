@@ -204,6 +204,18 @@ describe('real upstream Pi AgentSession integration', () => {
     expect(serialized).toContain('test-session/image.png'); expect(serialized).not.toContain('bloma-image-ref:')
     expect(readFileSync(nativeFile(), 'utf8')).not.toContain('"source":{"type":"base64"')
   })
+  it('delivers actual tool image references to the next model request and preserves them in replay without base64 logs', async () => {
+    const flow = scripted([[call('see', 'see_image')], [text('看到实际截图')]])
+    const images = [{ imageId: 'test-session/actual-screenshot.png', media_type: 'image/png' }]
+    const see = tool('see_image', async () => ({ output: 'actual screenshot', images }))
+    await runAgentLoop(input(flow.query, { tools: [see] }))
+    expect(JSON.stringify(flow.received[1].messages)).toContain('actual-screenshot.png')
+    expect(readFileSync(nativeFile(), 'utf8')).toContain('actual-screenshot.png')
+    const resumed = scripted([[text('继续检查')]])
+    await runAgentLoop(input(resumed.query, { tools: [see], task: '沿上次截图继续' }))
+    expect(JSON.stringify(resumed.received[0].messages)).toContain('actual-screenshot.png')
+    expect(readFileSync(nativeFile(), 'utf8')).not.toContain('"source":{"type":"base64"')
+  })
 
   it('respects permanent quota denial and rejects an empty completion', async () => {
     let requests = 0

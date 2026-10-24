@@ -66,7 +66,7 @@ export function parseGuiSuite(value: unknown): GuiAcceptanceSuite {
   if (groups.some(group => !group.length || !group.some(step => step.kind === 'expect'))) throw new Error('GUI_SEGMENT_NEEDS_ASSERTION')
   return suite
 }
-function splitSteps(suite: GuiAcceptanceSuite): Action[][] {
+export function splitSteps(suite: GuiAcceptanceSuite): Action[][] {
   const groups: Action[][] = [[]]
   for (const step of suite.steps) { if (step.kind === 'restart') groups.push([]); else groups.at(-1)!.push(step) }
   return groups
@@ -92,9 +92,19 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     const before = verificationFingerprint(options.root)
     if (!before) throw new Error('GUI_SOURCE_UNREADABLE')
     result.scope_hash = options.scopeHash; result.source_fingerprint = before
-    const launch = readLaunchDeclaration(options.root)
+    const root = realpathSync(options.root)
+    const launch = readLaunchDeclaration(root)
+    if (launch?.ok && launch.launch.schema_version === 2 && ['electron', 'browser'].includes(launch.launch.ui ?? '')) {
+      temporary = mkdtempSync(join(tmpdir(), 'bloma-host-software-gui-'))
+      for (const fixture of suite.fixtures ?? []) {
+        const target = join(temporary, 'data', fixture.path)
+        mkdirSync(join(target, '..'), { recursive: true }); writeFileSync(target, fixture.text)
+      }
+      const { observeSoftwareGui } = await import('../software/gui-observer')
+      Object.assign(result, await observeSoftwareGui({ projectId: options.projectId, root, launch: launch.launch, suite, temporary, signal: options.signal }))
+    } else {
     if (!launch?.ok || launch.launch.command.length !== 2 || !/^python(?:3)?(?:\.exe)?$/i.test(basename(launch.launch.command[0]))) throw new Error('GUI_NATIVE_ENTRY_UNSUPPORTED')
-    const root = realpathSync(options.root), entry = realpathSync(resolve(root, launch.launch.command[1])), rel = relative(root, entry)
+    const entry = realpathSync(resolve(root, launch.launch.command[1])), rel = relative(root, entry)
     if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !entry.endsWith('.py')) throw new Error('GUI_ENTRY_OUTSIDE_PROJECT')
     temporary = mkdtempSync(join(tmpdir(), 'bloma-host-gui-'))
     for (const fixture of suite.fixtures ?? []) {
@@ -117,6 +127,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
       if (observed.status !== 'passed') { result.status = observed.status; result.error = observed.error; break }
       if (response.code !== 0 || observed.steps.length !== group.length || observed.steps.some((step: { passed: boolean }) => !step.passed)) throw new Error('GUI_PASS_EVIDENCE_INCOMPLETE')
       result.status = 'passed'
+    }
     }
     result.source_unchanged = verificationFingerprint(root) === before
     if (!result.source_unchanged || !readFileSync(path).equals(bytes)) throw new Error('GUI_INPUT_CHANGED')

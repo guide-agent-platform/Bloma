@@ -20,7 +20,7 @@ async function publicProject(): Promise<Project> {
   registerProjectsIpc({ handle: (name: string, handler: never) => handlers.set(name, handler) } as never, {} as never)
   const result = await handlers.get(IPC_CHANNELS.PROJECT_CREATE)!({}, { request_id: 'create', mode: 'longterm' })
   expect(result.ok).toBe(true)
-  expect(result.data.workflow_version).toBe('lean-v1')
+  expect(result.data.workflow_version).toBe('software-v1')
   return result.data
 }
 const nativePython = resolve('run-artifacts/workflow-gui-runtime/Scripts/python.exe')

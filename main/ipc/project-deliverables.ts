@@ -10,6 +10,7 @@
  * 域逻辑复用：launch-smoke 的声明解析/黑名单（与交付前冒烟同一套约定）。
  */
 import type { BrowserWindow, IpcMain } from 'electron'
+import { shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync, statSync, realpathSync } from 'node:fs'
 import { join, sep } from 'node:path'
@@ -22,6 +23,8 @@ import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration, readLaunchDeclaration } from '../desktop/launch-smoke'
 import { violatesCommandBlacklist } from '../desktop/contract-schema'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
+import { isSoftwareProject } from '../desktop/workflow-policy'
+import { launchSoftwareForUser } from '../software/user-launch'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -88,6 +91,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
         result.launch = { declared: false, parse_ok: false }
       } else if (declaration.ok) {
         result.launch = { declared: true, parse_ok: true, command: declaration.launch.command }
+        if (isSoftwareProject(project.project_id)) result.supports_point_selection = declaration.launch.ui === 'electron'
       } else {
         result.launch = { declared: true, parse_ok: false, parse_error: declaration.error }
       }
@@ -108,6 +112,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       if (!parsed.ok) {
         throw new Error(`LAUNCH_INVALID: ${parsed.error}`)
       }
+      if (isSoftwareProject(input.project_id)) return launchSoftwareForUser(input.project_id, project.root_path, parsed.launch, url => shell.openExternal(url), input.restart === true)
       const blacklistHit = violatesCommandBlacklist(parsed.launch.command)
       if (blacklistHit) {
         throw new Error(`LAUNCH_BLOCKED: ${blacklistHit}`)

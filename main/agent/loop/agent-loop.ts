@@ -103,6 +103,8 @@ export interface ToolContext {
 /** output is evidence text; host feedback is shared with model history and events. */
 export interface ToolOutcome {
   output: string
+  /** Host-stored image references only; bytes hydrate at the existing transport boundary. */
+  images?: PastedImageRef[]
   isError?: boolean
   /** true = 本次调用被预算拦截（软着陆信号，loop 据此计数连续无进展轮） */
   budgetExhausted?: boolean

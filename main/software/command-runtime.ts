@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
+import { createRequire } from 'node:module'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand } from '../desktop/process-driver'
 
 /** Project execution policy, NOT an OS sandbox. Arguments are passed directly;
@@ -40,12 +41,14 @@ function pathExecutable(name: string): string | undefined {
 }
 
 export function softwareEnvironment(projectId: string, dataDir?: string): Record<string, string> {
-  const home = join(getPromaHome(), 'software-environments', projectId)
+  if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error('ENVIRONMENT_PROJECT_ID_INVALID')
+  const toolsHome = join(getPromaHome(), 'software-environments', projectId)
+  const home = dataDir ? join(dirname(dataDir), 'environment-home') : toolsHome
   for (const directory of [home, join(home, 'appdata'), join(home, 'localappdata'), dataDir ?? join(home, 'test-data')]) mkdirSync(directory, { recursive: true })
   return { ...buildDriverEnv({ env_whitelist: [] } as never, process.env),
     HOME: home, USERPROFILE: home, APPDATA: join(home, 'appdata'), LOCALAPPDATA: join(home, 'localappdata'),
     APP_DATA_DIR: dataDir ?? join(home, 'test-data'), BROWSER: 'none', CI: '1',
-    npm_config_cache: join(home, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false',
+    npm_config_cache: join(toolsHome, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false',
     PIP_DISABLE_PIP_VERSION_CHECK: '1', PIP_NO_INPUT: '1', PYTHONDONTWRITEBYTECODE: '1' }
 }
 
@@ -59,7 +62,14 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
     if (!executable) throw new Error('COMMAND_NODE_UNAVAILABLE')
     command[0] = executable
     if (process.versions.electron && executable === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
-  } else if (process.platform === 'win32' && ['npm', 'npx', 'pnpm', 'yarn'].includes(name)) {
+  } else if (['npm', 'npx'].includes(name)) {
+    let script: string | undefined
+    try { script = join(dirname(createRequire(import.meta.url).resolve('npm/package.json')), 'bin', name === 'npm' ? 'npm-cli.js' : 'npx-cli.js') } catch {}
+    if (!script || !existsSync(script)) throw new Error('BUNDLED_NPM_UNAVAILABLE: 当前Bloma安装缺少开发工具，请修复运行包')
+    const node = pathExecutable('node') ?? process.execPath
+    command = [node, script, ...command.slice(1)]
+    if (process.versions.electron && node === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
+  } else if (process.platform === 'win32' && ['pnpm', 'yarn'].includes(name)) {
     const shim = pathExecutable(command[0])
     if (!shim) throw new Error(`COMMAND_PACKAGE_MANAGER_UNAVAILABLE: ${name}`)
     const entry = { npm: 'npm/bin/npm-cli.js', npx: 'npm/bin/npx-cli.js', pnpm: 'pnpm/bin/pnpm.cjs', yarn: 'yarn/bin/yarn.js' }[name]!

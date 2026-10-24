@@ -8,6 +8,8 @@ import { readPrdBackplane } from '../project/prd-store'
 import { prdScopeFingerprint, trustedAcceptance } from '../project/requirement-contract'
 import { readLaunchDeclaration } from './launch-smoke'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand } from './process-driver'
+import { isSoftwareProject } from './workflow-policy'
+import { executeSoftwareCommand } from '../software/command-runtime'
 
 interface CliCase { name: string; covers: string[]; args: string[]; stdout: string; exit_code: number }
 interface CliSuite { version: 1; scope_hash: string; cases: CliCase[]; expectations: Record<string, string> }
@@ -60,14 +62,18 @@ export async function runLeanCliCheck(projectId: string, root: string, signal?: 
     const launch = readLaunchDeclaration(root)
     if (!launch?.ok) throw new Error(launch?.error ?? 'CLI_LAUNCH_MISSING')
     const command = launch.launch.command
-    if (!/(?:^|[\\/])python(?:3)?(?:\.exe)?$/i.test(command[0] ?? '') || !command[1]?.endsWith('.py')) throw new Error('CLI_REGISTERED_PYTHON_ENTRY_REQUIRED')
-    const entry = realpathSync(resolve(root, command[1])), directory = realpathSync(root)
-    if (!entry.startsWith(directory + sep)) throw new Error('CLI_ENTRY_OUTSIDE_PROJECT')
+    const software = isSoftwareProject(projectId)
+    if (!software) {
+      if (!/(?:^|[\\/])python(?:3)?(?:\.exe)?$/i.test(command[0] ?? '') || !command[1]?.endsWith('.py')) throw new Error('CLI_REGISTERED_PYTHON_ENTRY_REQUIRED')
+      const entry = realpathSync(resolve(root, command[1])), directory = realpathSync(root)
+      if (!entry.startsWith(directory + sep)) throw new Error('CLI_ENTRY_OUTSIDE_PROJECT')
+    }
     temporary = mkdtempSync(join(tmpdir(), 'bloma-cli-check-'))
     const runSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(120000)])
     for (const test of suite.cases) {
       runSignal.throwIfAborted()
-      const outcome = await execFileDriverSpawn({ command: resolveDriverVenvCommand([...command, ...test.args], root), cwd: root, timeoutMs: 15000,
+      const outcome = software ? await executeSoftwareCommand({ root, projectId, command: [...command, ...test.args], timeoutMs: 15000, signal: runSignal, dataDir: join(temporary, 'data') })
+        : await execFileDriverSpawn({ command: resolveDriverVenvCommand([...command, ...test.args], root), cwd: root, timeoutMs: 15000,
         signal: runSignal, env: { ...buildDriverEnv({ env_whitelist: [] } as never, process.env), APP_DATA_DIR: join(temporary, 'data'), PYTHONDONTWRITEBYTECODE: '1' } })
       const passed = outcome.code === test.exit_code && outcome.stdout.trim() === test.stdout.trim()
       result.cases.push({ name: test.name, covers: test.covers, passed, actual: outcome.stdout.slice(0, 8192), exit_code: outcome.code })

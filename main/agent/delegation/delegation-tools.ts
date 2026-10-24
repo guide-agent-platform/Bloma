@@ -33,6 +33,8 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
     input_schema: {
       type: 'object',
       properties: {
+        write_paths: { type: 'array', items: { type: 'string' }, description: '软件子任务的独占写入范围：具体相对文件，或以/结尾的子目录；只读任务省略。不得与其它子任务重叠。' },
+        read_only: { type: 'boolean', description: '只读调研/审查不拥有写入权。' },
         task: { type: 'string', description: '发给子 agent 的完整任务说明，必须自包含必要上下文' },
         role: {
           type: 'string',
@@ -60,6 +62,8 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
           task: String(toolInput.task ?? ''),
           role: normalizeDelegationRole(toolInput.role),
           expectedOutput: typeof toolInput.expectedOutput === 'string' ? toolInput.expectedOutput : undefined,
+          writePaths: stringArrayOrUndefined(toolInput.write_paths),
+          readOnly: typeof toolInput.read_only === 'boolean' ? toolInput.read_only : undefined,
           channelId: typeof toolInput.channelId === 'string' ? toolInput.channelId : undefined,
           modelId: typeof toolInput.modelId === 'string' ? toolInput.modelId : undefined,
         }),

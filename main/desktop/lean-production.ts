@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
 import { runAgentLoop } from '../agent/loop/agent-loop'
-import { registerParentLoopContext, disposeParentDelegationState } from '../agent/delegation/agent-collaboration'
+import { registerParentLoopContext, disposeParentDelegationState, stopDelegations, settleParentDelegationRuns } from '../agent/delegation/agent-collaboration'
 import { findProject, updateProject } from '../project/project-service'
 import { readPrdBackplane } from '../project/prd-store'
 import { readConfirmedUxBinding } from '../project/ux-binding'
@@ -23,11 +23,15 @@ import { buildLeanCliTool, cliSuitePath } from './lean-cli-check'
 import { guiSuitePath } from './gui-acceptance'
 import { readLaunchDeclaration, runLaunchSmoke } from './launch-smoke'
 import { createHash, randomUUID } from 'node:crypto'
-import { finishCorrectionSession, hasActiveCorrectionSession } from './correction-session'
+import { finishCorrectionSession, hasActiveCorrectionSession, settleCorrectionTeardown } from './correction-session'
 import { readCorrectionSubmission, clearCorrectionSubmission } from './correction-outbox'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { buildLeanScopeTool } from './lean-scope-tool'
 import { writeTextFileAtomic } from '../../storage/json-store'
+import { isSoftwareProject } from './workflow-policy'
+import { createSoftwareCollaborationPolicy } from '../software/collaboration-policy'
+import { buildSoftwareAgentTools, SOFTWARE_ENGINEERING_INSTRUCTIONS } from '../software/agent-tools'
+import { stopSoftwareSession } from '../software/process-manager'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -47,6 +51,7 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
   }
   if (!isStop(input.content)) {
     if (hasActiveCorrectionSession(input.projectId)) finishCorrectionSession({ projectId: input.projectId })
+    if (isSoftwareProject(input.projectId)) await settleCorrectionTeardown(input.projectId)
     const correction = readCorrectionSubmission(input.projectId)
     if (correction) {
       const content = input.content.includes(correction.content) ? input.content : `${correction.content}\n用户补充：${input.content}`
@@ -81,6 +86,8 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     deps.publish(input, 'message_delta', { text: '已停止，已有文件和修改意见已保留。' }); deps.complete(input.sessionId, input.projectId, 'incomplete'); return
   }
   const brief = readPrdBackplane(input.projectId), scope = prdScopeFingerprint(brief)
+  const software = isSoftwareProject(input.projectId)
+  const collaboration = software ? createSoftwareCollaborationPolicy(input.projectId, project.root_path, input.sessionId) : undefined
   const versionOf = () => {
     const current = readPrdBackplane(input.projectId)
     const rules = [guiSuitePath(input.projectId), cliSuitePath(input.projectId)].map(file =>
@@ -97,32 +104,39 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   if (!brief.user_confirmed_at || !brief.lean_brief) { blocked('目标尚未确认，本次没有开始制作。', true); return }
   let ux: ReturnType<typeof readConfirmedUxBinding>
   try { ux = readConfirmedUxBinding(input.projectId, brief) } catch (error) { blocked(String(error), true); return }
-  if (brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2(project.root_path, project.name, { includeScaffold: false })
+  if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2(project.root_path, project.name, { includeScaffold: false })
   const budget = leanBudget(input.projectId, 'desktop-implement')
   const runSignal = signal
   const query: SDKQuery = budget.wrap(input.query)
-  const baseTools = buildDesktopChildTools(input.projectId, 'implement', 'diff')
+  const baseTools = collaboration ? buildSoftwareAgentTools(input.projectId, 'parent', collaboration,
+    url => emit('software_preview_changed', { preview_url: url ?? null })) : buildDesktopChildTools(input.projectId, 'implement', 'diff')
   let scopePending = false
-  const tools = productionAgentTools(baseTools, [buildDesktopEnvProbeTool(),
+  const tools = productionAgentTools(baseTools, [...(software ? [] : [buildDesktopEnvProbeTool()]),
     buildLeanScopeTool(input.projectId, input.content, emit, () => { scopePending = true }),
     brief.lean_brief.ui === 'required' ? buildLeanGuiTool(input.projectId) : buildLeanCliTool(input.projectId)])
   const system = [
-    '根据已确认目标直接制作、集成和修复程序，中文简短报告实际结果。你持有项目文件和受控执行工具；先完成真实主使用路径，再补全本次承诺。仅独立且能减少总工作的任务才委派。',
+    software ? SOFTWARE_ENGINEERING_INSTRUCTIONS : '根据已确认目标直接制作、集成和修复程序，中文简短报告实际结果。你持有项目文件和受控执行工具；先完成真实主使用路径，再补全本次承诺。仅独立且能减少总工作的任务才委派。',
     `项目根：${project.root_path}。已有平台组件和骨架优先复用，当前未有的环境先探测；不重做已证明的环境研究。不要求架构文档、阶段任务书或推进标记。`,
     ux?.html_path ? `已确认外观：${ux.html_path}，先读后沿用；用户后续修改仅改相关部分。` : brief.lean_brief.ui === 'required' ? '用户明确授权直接制作界面，无需先画草图。' : '本任务无需额外外观设计。',
     '局部外观和缺陷直接修改。用户新增、删除业务能力或改变业务预期时，先用propose_scope_change保留原功能及新增预期并等待确认，不能在旧任务单下宣称新增功能已验收。',
     JSON.stringify({ goal: brief.positioning, requirements: brief.requirements.map(row => ({ id: row.id, description: row.description,
       expected: brief.acceptance[row.id], requirement_hash: requirementEvidenceHash(brief, row) })), constraints: brief.constraints,
-      out_of_scope: brief.out_of_scope, assumptions: brief.assumptions }),
+      out_of_scope: brief.out_of_scope, assumptions: brief.assumptions, delivery: brief.lean_brief.delivery }),
     '保留真实用户数据与配置；测试使用隔离数据目录。预期依据已确认目标，不能改预期掩盖失败。特殊能力登记与执行细节可通过read_production_context按需读取。',
     '不强制额外测试脚本或自报PASS。特殊能力需要时在CORE_CHECK.json只登记实际入口，例如llm/speech；用read_production_context按需查看协议。未实现或未验证的必需能力如实保留。',
     brief.lean_brief.ui === 'required' ? '界面任务登记register_gui_check：用真实控件完成fill/click/expect，留存任务加restart；expectations保留任务单预期，acceptance_refs把expect步骤关联F编号。宿主独立操作应用，登记不等于通过。' : '无界面任务登记register_cli_check：固定args与stdout/exit_code，宿主调用实际LAUNCH入口。一次性命令在LAUNCH写mode:"command"，服务默认保持运行。',
-    '产物根写LAUNCH.json：{"schema_version":1,"command":["python","app.py"],"window_title":"实际标题","ui":"webview"}，按实际入口填写。宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。',
+    software ? '宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。' : '产物根写LAUNCH.json：{"schema_version":1,"command":["python","app.py"],"window_title":"实际标题","ui":"webview"}，按实际入口填写。宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。',
   ].join('\n\n')
   registerParentLoopContext(input.sessionId, { query, env: input.env, maxTokens: Math.min(input.maxTokens, 16384), maxTurns: 96,
     delegationMaxTurns: 24, permissionMode: 'allow-all', temperature: .1, system, editFormat: 'diff', runtime: 'pi', runtimeScope: 'lean-build',
     executionScope: budget.executionScope, materials: sessionMaterials(input.projectId, input.sessionId), publish: emit,
-    childToolsBuilder: (id, role, format) => buildDesktopChildTools(id, role, format) })
+    ...(collaboration ? { maxConcurrentDelegations: 2, allowChannelOverrides: false, delegationSummaryLimit: 3000,
+      prepareDelegation: collaboration.prepare,
+      childSystemBuilder: (_role: import('../../shared/delegation-run-context').DelegationRunRole, child: string) =>
+        `完成主负责人交付的具体子任务，先读相关文件，沿用现有接口。项目根：${project.root_path}。文件权限：${collaboration.describe(child)}。仅在归属范围内修改；不运行命令、不再委派、不修改目标/验收输入。需要跨边界修改时回报主负责人。简短交接实际修改、检查和未验证项，不自报产品通过。全局约束：${JSON.stringify(brief.constraints)}` } : {}),
+    childToolsBuilder: (id, role, format) => collaboration ? buildSoftwareAgentTools(id, role, collaboration) : buildDesktopChildTools(id, role, format) })
+  const cancelChildren = () => { stopDelegations(input.sessionId) }
+  runSignal.addEventListener('abort', cancelChildren, { once: true })
   let task = input.content
   let initial = true
   try {
@@ -140,6 +154,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       initial = false
       if (scopePending) { deps.complete(input.sessionId, input.projectId, 'incomplete'); return }
       if (result.status !== 'completed') { blocked(result.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result.termination_detail?.reason ?? result.status}），可沿当前现场继续。`); return }
+      // Integration checks own a quiet tree. Never race outstanding writers or dev servers.
+      stopDelegations(input.sessionId)
+      if (software) { await stopSoftwareSession(input.projectId, input.sessionId); emit('software_preview_changed', { preview_url: null }) }
+      if (software) await settleParentDelegationRuns(input.sessionId)
       updateProject(input.projectId, { desktop_phase: 'desktop-verify', current_stage: 'testing' })
       emit('stage_changed', { stage: 'desktop-verify' })
       const version = versionOf()
@@ -160,7 +178,8 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
           runSignal.throwIfAborted()
           writeTextFileAtomic(join(project.root_path, '00_VERIFY/launch-smoke.json'), JSON.stringify(launch, null, 2))
           if (brief.lean_brief.ui === 'required' && launch?.criteria?.degraded) { blocked('正常窗口验证环境不可用，程序已保留，未将仅存活检查当作交付通过。'); return }
-          const windowReady = brief.lean_brief.ui !== 'required' || launch?.criteria && launch.criteria.window_found && launch.criteria.responsive && launch.criteria.stable && launch.criteria.closed_gracefully
+          const browser = software && brief.lean_brief.delivery === 'browser' && declared?.ok && declared.launch.ui === 'browser'
+          const windowReady = brief.lean_brief.ui !== 'required' || browser && launch?.http_ready === true || launch?.criteria && launch.criteria.window_found && launch.criteria.responsive && launch.criteria.stable && launch.criteria.closed_gracefully
           if (!launch?.passed || !windowReady) failure = `正常启动未通过：${launch?.detail ?? '未执行或证据缺失'}\n${launch?.outputExcerpt ?? ''}`
         }
       }
@@ -176,7 +195,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         blocked('验证期间目标或产物发生变化，本次通过记录未用于交付。'); return
       }
       const launch = existsSync(join(project.root_path, 'LAUNCH.json')) ? JSON.parse(readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8')) as { command?: string[] } : undefined
-      const text = `本次目标已完成并通过当前核心、安全与启动检查。${launch?.command ? `启动：${launch.command.join(' ')}` : '可从项目交付入口启动。'}${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
+      const text = `本次目标已完成并通过当前核心、安全与启动检查。${software ? '可从项目交付入口一键启动试用。' : launch?.command ? `启动：${launch.command.join(' ')}` : '可从项目交付入口启动。'}${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
       return () => {
         runSignal.throwIfAborted()
         if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) { blocked('收口前产物或验证输入发生变化，本次未交付。'); return }
@@ -188,5 +207,14 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     }
   } catch (error) {
     blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。' : `当前执行受阻：${error instanceof Error ? error.message : String(error)}`)
-  } finally { disposeParentDelegationState(input.sessionId) }
+  } finally {
+    runSignal.removeEventListener('abort', cancelChildren)
+    disposeParentDelegationState(input.sessionId)
+    if (software) {
+      const cleanup = await Promise.allSettled([stopSoftwareSession(input.projectId, input.sessionId), settleParentDelegationRuns(input.sessionId)])
+      emit('software_preview_changed', { preview_url: null })
+      const failed = cleanup.find(result => result.status === 'rejected')
+      if (failed?.status === 'rejected') throw failed.reason
+    }
+  }
 }

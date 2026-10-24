@@ -9,7 +9,7 @@ export const LEAN_BRIEF_PROMPT = `把用户目标整理为可执行的短任务�
 原话与材料完整保留，历史仅作参考，最新明确意见优先；旧功能不得悄悄丢弃。保留既有F编号，新增能力不挤占旧编号。每项必需能力写一个可观察结果，不展开对象、规则、流程或三类状态图谱。未知关键条件只输出 {"action":"clarify","question":"关键问题","options":["选项"]}。
 目标明确输出 {"action":"brief","name":"简短项目名","goal":"目标","ui":"required|none","requirements":[{"id":"已有F编号或省略","description":"必需能力","expected":"实际应看到什么"}],"constraints":[],"out_of_scope":[],"assumptions":[]}。不另写PRD正文、审计报告或实现代码。只输出JSON。`
 
-export function parseLeanBrief(raw: string, context: { projectId: string; sessionId: string; source: string; previous: PrdBackplane }):
+export function parseLeanBrief(raw: string, context: { projectId: string; sessionId: string; source: string; previous: PrdBackplane; software?: boolean }):
   { action: 'clarify'; question: string; options: string[] } | { action: 'brief'; brief: PrdBackplane } | undefined {
   let value: unknown
   try { value = JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) } catch { return }
@@ -19,6 +19,8 @@ export function parseLeanBrief(raw: string, context: { projectId: string; sessio
   }
   if (value.action !== 'brief' || typeof value.goal !== 'string' || !value.goal.trim() || !['required', 'none'].includes(String(value.ui))
     || !Array.isArray(value.requirements) || !value.requirements.length) return
+  const delivery = value.delivery ?? context.previous.lean_brief?.delivery ?? (value.ui === 'none' ? 'command' : 'desktop')
+  if (context.software && (!['desktop', 'browser', 'command'].includes(String(delivery)) || value.ui === 'none' && delivery !== 'command' || value.ui === 'required' && delivery === 'command')) return
   let next = Math.max(0, ...context.previous.requirements.map(row => Number(/^F-(\d+)$/.exec(row.id)?.[1] ?? 0))) + 1
   const used = new Set<string>(), requirements: SketchRequirement[] = [], acceptance: Record<string, string> = {}
   for (const row of value.requirements) {
@@ -34,11 +36,13 @@ export function parseLeanBrief(raw: string, context: { projectId: string; sessio
     name: typeof value.name === 'string' && value.name.trim() ? value.name : context.previous.name,
     positioning: value.goal, requirements, acceptance, constraints: texts(value.constraints), out_of_scope: texts(value.out_of_scope), assumptions: texts(value.assumptions),
     lean_brief: { version: 1, ui: value.ui as 'required' | 'none', source_session_id: context.sessionId,
+      ...(context.software ? { delivery: delivery as 'desktop' | 'browser' | 'command' } : {}),
       source_sha256: createHash('sha256').update(context.source).digest('hex') } }) }
 }
 
 export function renderLeanBrief(brief: PrdBackplane): string {
   return [brief.positioning, ...brief.requirements.map(row => `${row.id} ${row.description}\n完成应看到：${brief.acceptance[row.id] ?? ''}`),
+    ...(brief.lean_brief?.delivery ? ['使用方式：' + ({ desktop: '桌面软件，一键启动', browser: '在本机浏览器使用', command: '命令工具' }[brief.lean_brief.delivery])] : []),
     ...(brief.lean_brief?.preview === 'reuse' ? ['界面沿用已确认外观，在制作时按新增功能调整。'] : []),
     ...(brief.lean_brief?.preview === 'skip' ? ['按你的授权直接制作，不再生成草图。'] : []),
     ...(brief.constraints?.length ? ['约束：' + brief.constraints.join('；')] : []),

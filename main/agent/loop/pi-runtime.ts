@@ -121,7 +121,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         const assistantEntry = [...opened.manager.getBranch()].reverse().find(entry => entry.type === 'message' && entry.message.role === 'assistant')
         opened.manager.appendCustomEntry('bloma-tool-receipt', { id, assistantEntryId: assistantEntry?.id, name: tool.name, content,
           isError: outcome.isError === true || outcome.budgetExhausted === true })
-        return { content: [{ type: 'text', text: content }],
+        return { content: [{ type: 'text' as const, text: content }, ...(outcome.images ?? []).map(piImage)],
           details: { ...outcome.detail, feedback, budgetExhausted: outcome.budgetExhausted } }
       },
     }))

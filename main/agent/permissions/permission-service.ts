@@ -143,6 +143,15 @@ export const TOOL_PERMISSION_REGISTRY: Record<string, 'safe' | 'warning' | 'dang
   run_security_scan: 'safe',
   // Agent Loop 工具（L2，方案 §4.3 权限列）
   read_file: 'safe',
+  view_image: 'safe',
+  read_process: 'safe',
+  inspect_software_environment: 'warning',
+  run_command: 'warning',
+  start_service: 'warning',
+  stop_process: 'warning',
+  inspect_app: 'warning',
+  register_gui_check: 'warning',
+  register_cli_check: 'warning',
   list_files: 'safe',
   grep: 'safe',
   web_fetch: 'warning',
@@ -163,6 +172,15 @@ export const TOOL_PERMISSION_REGISTRY: Record<string, 'safe' | 'warning' | 'dang
 
 /** 用户可读的工具名，供权限对话框摘要展示（P0 可读语言）。 */
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  run_command: '构建与运行',
+  start_service: '启动实际程序',
+  read_process: '检查运行情况',
+  stop_process: '停止试用进程',
+  inspect_software_environment: '检查开发环境',
+  inspect_app: '试用并查看界面',
+  view_image: '查看实际界面',
+  register_gui_check: '准备交互验证',
+  register_cli_check: '准备运行验证',
   generate_sketch: '生成验证草图',
   generate_mvp: '生成 MVP 应用',
   run_project: '运行项目预览',

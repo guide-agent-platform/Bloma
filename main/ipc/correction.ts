@@ -15,7 +15,7 @@ import type { IpcMain } from 'electron'
 import { IPC_CHANNELS } from '../../shared/types'
 import type { CorrectionFinishInput, CorrectionPicksInput, CorrectionStartInput } from '../../shared/types'
 import { extractRequestId, requireFields, safeInvoke } from './shared'
-import { startCorrectionSession, readCorrectionPicks, finishCorrectionSession } from '../desktop/correction-session'
+import { startCorrectionSession, readCorrectionPicks, finishCorrectionSession, settleCorrectionTeardown } from '../desktop/correction-session'
 
 export function registerCorrectionIpc(ipcMain: IpcMain): void {
   ipcMain.handle(IPC_CHANNELS.CORRECTION_START, async (_event, payload: unknown) => {
@@ -37,7 +37,9 @@ export function registerCorrectionIpc(ipcMain: IpcMain): void {
       const input = requireFields<CorrectionFinishInput>(payload, ['project_id'])
       if ((input.recover !== undefined && typeof input.recover !== 'boolean') || (input.discard !== undefined && typeof input.discard !== 'boolean')
         || (input.acknowledge !== undefined && typeof input.acknowledge !== 'string')) throw new Error('CORRECTION_FINISH_INVALID')
-      return finishCorrectionSession({ projectId: input.project_id, recover: input.recover, discard: input.discard, acknowledge: input.acknowledge })
+      const result = finishCorrectionSession({ projectId: input.project_id, recover: input.recover, discard: input.discard, acknowledge: input.acknowledge })
+      await settleCorrectionTeardown(input.project_id)
+      return result
     })
   })
 }

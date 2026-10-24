@@ -94,6 +94,7 @@ export interface DesktopLineProjectLike {
   workflow_version?: import('../../shared/workflow-version').ModernWorkflowVersion
   template_type: string
   desktop_phase?: string
+  current_stage?: string
 }
 
 /** 桌面线接纳的品类（2026-10-05 拍板：game 直进桌面线）：desktop_tool 主力品类 +
@@ -109,6 +110,7 @@ export function isDesktopLineActive(project: DesktopLineProjectLike | undefined)
   if (!project || !DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)) return false
   const phase = project.desktop_phase
   return typeof phase === 'string' && getDesktopPhase(phase) !== undefined
+    || lean && ['generating_mvp', 'testing', 'completed', 'ready'].includes(project.current_stage ?? '')
 }
 
 /** 改道判定（PRD 确认点用）：开关 + 品类即改道（desktop_phase 未设也进——正在进入）。 */

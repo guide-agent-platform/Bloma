@@ -1,9 +1,12 @@
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolveSoftwareCommand, softwareEnvironment } from '../software/command-runtime'
 import { mainRootDir } from '../platform/paths'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
 
-export interface LlmVerificationSpec { module: string; factory: string; method: string; covers: string[] }
+export interface LlmVerificationSpec { runtime?: 'node'; module: string; factory: string; method: string; covers: string[] }
 export interface LlmVerificationResult {
   probe_version: number
   status: 'passed' | 'failed' | 'environment_blocked'
@@ -12,14 +15,22 @@ export interface LlmVerificationResult {
   error?: string
 }
 export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, spawn: DriverSpawn = execFileDriverSpawn, signal?: AbortSignal): Promise<LlmVerificationResult> {
+  let temporary: string | undefined
   try {
     signal?.throwIfAborted()
-    if (![spec.module, spec.factory, spec.method].every(value => typeof value === 'string' && /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(value))) throw new Error('模型入口声明不合法')
+    const identifier = (value: unknown) => typeof value === 'string' && /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(value)
+    if (!identifier(spec.factory) || !identifier(spec.method) || (spec.runtime === 'node'
+      ? typeof spec.module !== 'string' || isAbsolute(spec.module) || spec.module.split(/[\\/]/).includes('..') || !/\.(?:cjs|mjs|js)$/.test(spec.module)
+      : spec.runtime !== undefined || !identifier(spec.module))) throw new Error('模型入口声明不合法')
     const fingerprint = verificationFingerprint(root)
     if (!fingerprint) throw new Error('模型入口源码不可完整读取')
     const executable = resolveDriverVenvCommand(['python'], root)[0]!
-    const result = await spawn({ command: [executable, '-X', 'utf8', '-B', join(mainRootDir(), 'templates/tools/llm_entry_probe.py'), root, JSON.stringify(spec)],
-      cwd: root, timeoutMs: 30000, signal, env: { ...buildDriverEnv({ env_whitelist: ['APP_DATA_DIR'] } as never, process.env), LLM_PROVIDER: 'real', APP_DATA_DIR: join(root, '00_VERIFY/llm-data') } })
+    if (spec.runtime === 'node') temporary = mkdtempSync(join(tmpdir(), 'bloma-llm-node-'))
+    const resolved = spec.runtime === 'node' ? resolveSoftwareCommand(root,
+      ['node', join(mainRootDir(), 'templates/tools/llm_entry_probe.cjs'), root, JSON.stringify(spec)], softwareEnvironment('host-llm-probe', join(temporary!, 'data'))) : {
+      command: [executable, '-X', 'utf8', '-B', join(mainRootDir(), 'templates/tools/llm_entry_probe.py'), root, JSON.stringify(spec)],
+      env: { ...buildDriverEnv({ env_whitelist: ['APP_DATA_DIR'] } as never, process.env), LLM_PROVIDER: 'real', APP_DATA_DIR: join(root, '00_VERIFY/llm-data') } }
+    const result = await spawn({ ...resolved, cwd: root, timeoutMs: 30000, signal })
     signal?.throwIfAborted()
     const parsed = JSON.parse(result.stdout.trim()) as LlmVerificationResult
     if (parsed.probe_version !== 1 || !['passed', 'failed', 'environment_blocked'].includes(parsed.status)) throw new Error('模型探针结果不合法')
@@ -30,5 +41,5 @@ export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, s
   } catch (error) {
     if (signal?.aborted) throw error
     return { probe_version: 1, status: 'environment_blocked', error: error instanceof Error ? error.message : String(error) }
-  }
+  } finally { if (temporary) rmSync(temporary, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) }
 }

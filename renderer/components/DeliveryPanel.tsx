@@ -5,7 +5,7 @@ import { Markdown } from './Markdown'
 import { CorrectionPanel } from './CorrectionPanel'
 import { ProgramScreenshot } from './ProgramScreenshot'
 import { SketchViewport } from './SketchViewport'
-import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom } from '../agent-atoms'
+import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom, softwarePreviewsAtom } from '../agent-atoms'
 import type { ProjectDeliverablesResult } from '../../shared/types'
 
 /**
@@ -27,17 +27,19 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
   const running = useAtomValue(hasActiveStreamAtom)
   const correctionSession = useAtomValue(correctionSessionAtom)
   const projectId = project?.project_id
+  const liveUrl = useAtomValue(softwarePreviewsAtom)[projectId ?? '']
   // 自动刷新信号：桌面阶段推进（stage_changed 回填后变化）或产物变更（version+1）
   const desktopPhase = useAtomValue(desktopPhaseAtom)
   const artifactsVersion = useAtomValue(desktopArtifactsAtom).version
   const [data, setData] = React.useState<ProjectDeliverablesResult | undefined>()
   const [loading, setLoading] = React.useState(false)
   const [launchState, setLaunchState] = React.useState<string | null>(null)
+  const [needsRestart, setNeedsRestart] = React.useState(false)
   const [showCorrection, setShowCorrection] = React.useState(false)
   const currentProjectId = React.useRef(projectId)
   const refreshSequence = React.useRef(0)
   currentProjectId.current = projectId
-  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null) }, [projectId])
+  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null); setNeedsRestart(false) }, [projectId])
 
   const refresh = React.useCallback(async () => {
     if (!projectId) return
@@ -61,7 +63,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
   }, [refresh, desktopPhase, artifactsVersion, project?.current_stage])
 
-  const onLaunch = async (): Promise<void> => {
+  const onLaunch = async (restart = false): Promise<void> => {
     if (!projectId) return
     setLaunchState('启动中…')
     const api = window.electronAPI?.projectDeliverables
@@ -70,13 +72,15 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       return
     }
     let result
-    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId }) }
+    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId, ...(restart ? { restart: true } : {}) }) }
     catch { if (currentProjectId.current === projectId) setLaunchState('启动失败：请重试，或告诉向导你遇到的问题'); return }
     if (currentProjectId.current !== projectId) return
     if (result.ok && result.data.started) {
-      setLaunchState(`已启动（进程 ${result.data.pid ?? '?'}）`)
+      setNeedsRestart(false)
+      setLaunchState(result.data.detail ?? '已启动，可以开始使用。')
     } else {
-      setLaunchState(`启动失败：${result.ok ? '进程未能存活' : result.error?.user_visible_message || result.error?.message || '未知错误'}`)
+      setNeedsRestart(result.ok && result.data.needs_restart === true)
+      setLaunchState(result.ok && result.data.detail ? result.data.detail : `启动失败：${result.ok ? '进程未能存活' : result.error?.user_visible_message || result.error?.message || '未知错误'}`)
     }
   }
 
@@ -97,7 +101,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       <div className="theatre-program-bar" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
         {embedded && <LayoutTemplate size={14} />}
         <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500 }}>{project?.name ?? '你的软件'}</span>
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{project?.current_stage === 'completed' ? '桌面程序' : project?.desktop_blocked && !running ? '制作暂时停止' : desktopPhase ? '正在制作' : '等待想法成形'}</span>
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{liveUrl ? '程序试用 · 测试数据 · 尚未交付' : project?.current_stage === 'completed' ? '可以使用' : project?.desktop_blocked && !running ? '制作暂时停止' : desktopPhase ? '正在制作' : '等待想法成形'}</span>
         <div style={{ flex: 1 }} />
         <button
           data-ai-id="delivery-refresh"
@@ -135,9 +139,11 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
           </span>
         )}
         {launchState && <span data-ai-id="delivery-launch-state" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{launchState}</span>}
+        {needsRestart && <button type="button" disabled={running || !data?.can_launch} onClick={() => void onLaunch(true)}>已保存，关闭旧版本并启动更新</button>}
       </div>}
 
-      {embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url && <div className="delivery-confirmed-sketch"><SketchViewport src={data.confirmed_sketch_url} readOnly /></div>}
+      {embedded && liveUrl && <iframe title="实际程序试用" src={liveUrl} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" style={{ flex: 1, width: '100%', minHeight: 360, border: 0 }} />}
+      {embedded && !liveUrl && project?.current_stage !== 'completed' && data?.confirmed_sketch_url && <div className="delivery-confirmed-sketch"><SketchViewport src={data.confirmed_sketch_url} readOnly /></div>}
       <div className="theatre-delivery-body" data-has-sketch={Boolean(embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url)} style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
         <ProgramScreenshot />
         {!loading && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
@@ -145,8 +151,10 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
             可用（主进程校验，旧骨架产物返回 unsupported 如实置灰提示） */}
         {project?.current_stage === 'completed' && (
           <div style={{ marginBottom: 8 }}>
-            {embedded && <button type="button" className="theatre-tool" aria-expanded={showCorrection} onClick={() => setShowCorrection(previous => !previous)}>反馈改进与点选修改</button>}
-            {(!embedded || showCorrection) && <CorrectionPanel />}
+            {data?.supports_point_selection === false ? <p>想继续改进，直接在聊天中描述位置和期望效果即可。</p> : <>
+              {embedded && <button type="button" className="theatre-tool" aria-expanded={showCorrection} onClick={() => setShowCorrection(previous => !previous)}>反馈改进与点选修改</button>}
+              {(!embedded || showCorrection) && <CorrectionPanel />}
+            </>}
           </div>
         )}
         {loading && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}><RotateCw size={12} /> 读取产物…</div>}

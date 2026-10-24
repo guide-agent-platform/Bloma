@@ -20,6 +20,9 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 export function coreVerificationCacheKey(projectId: string, root: string): string | undefined {
   try {
     const backplane = readPrdBackplane(projectId)
+    // Existing dependency receipts certify Python environments. A JS/Electron
+    // project receives fresh host observations until its runtime is fully bound.
+    try { if (findProject(projectId).workflow_version === 'software-v1') return } catch { /* isolated legacy key fixtures */ }
     // Hardware attestations and external model artifacts have their own lifetime.
     if (backplane.requirements.some(item => requirementCapabilities(item).has('speech'))) return
     const launch = backplane.lean_brief ? readLaunchDeclaration(root) : undefined

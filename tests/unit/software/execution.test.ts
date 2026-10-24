@@ -2,6 +2,8 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'no
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
+import { spawn } from 'node:child_process'
+import { mainRootDir } from '../../../main/platform/paths'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createProject } from '../../../main/project/project-service'
 import { executeSoftwareCommand, projectDirectory, softwareEnvironment, validateSoftwareCommand } from '../../../main/software/command-runtime'
@@ -46,3 +48,17 @@ it('tracks an actual HTTP service, rejects another owner/occupied port, and canc
   expect(softwareProcess(project.project_id, service.id).state).toBe('stopped')
   await expect(fetch(url, { signal: AbortSignal.timeout(1000) })).rejects.toThrow()
 })
+it('supervisor loses its host pipe and reaps the actual server grandchild', async () => {
+  const p = await port(), url = `http://127.0.0.1:${p}`
+  writeFileSync(join(project.root_path, 'grandchild.cjs'), `require('http').createServer((q,s)=>s.end('grandchild')).listen(${p},'127.0.0.1')`)
+  writeFileSync(join(project.root_path, 'parent.cjs'), 'require("child_process").spawn(process.execPath,["grandchild.cjs"],{stdio:"inherit"});setInterval(()=>{},1000)')
+  const supervisor = spawn(process.execPath, [join(mainRootDir(), 'templates/tools/software_process_supervisor.cjs')], { cwd: project.root_path, stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' })
+  supervisor.stdin.write(JSON.stringify({ command: [process.execPath, 'parent.cjs'], cwd: project.root_path, env: softwareEnvironment(project.project_id) }) + '\n')
+  const closed = new Promise<void>(resolve => supervisor.once('exit', () => resolve()))
+  try {
+    await expect.poll(async () => { try { return await (await fetch(url)).text() } catch { return '' } }, { timeout: 10000 }).toBe('grandchild')
+    supervisor.stdin.end() // Exactly the EOF received when the parent host exits/crashes.
+    await Promise.race([closed, new Promise((_, reject) => setTimeout(() => reject(Error('supervisor did not exit')), 10000).unref())])
+    await expect(fetch(url, { signal: AbortSignal.timeout(1000) })).rejects.toThrow()
+  } finally { supervisor.stdin.end() }
+}, 30000)

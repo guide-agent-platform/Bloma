@@ -19,6 +19,8 @@ import { resolveDriverVenvCommand } from './process-driver'
 import { violatesCommandBlacklist } from './contract-schema'
 import { isMvpConfirmPending } from './mvp-confirm'
 import { clearCorrectionSubmission, readCorrectionSubmission, saveCorrectionSubmission } from './correction-outbox'
+import { isSoftwareProject } from './workflow-policy'
+import { getPromaHome } from '../../storage/config-paths'
 
 /** 会话目录相对项目根（00_ 前缀对齐工程目录惯例；picks/data/outputs 平铺其内）。 */
 export const CORRECTION_DIR_REL = '00_CORRECTION'
@@ -61,12 +63,16 @@ interface ActiveSession {
   sessionDir: string
   drivePort: number
   child: ChildProcess
+  close?: () => Promise<void>
   startedAt: string
   finished: boolean
 }
 
 /** 进程内注册表（每项目至多一个活跃会话；teardown 兜底清理）。 */
 const activeSessions = new Map<string, ActiveSession>()
+const closingSessions = new Map<string, Promise<void>>()
+const startingSessions = new Set<string>()
+export async function settleCorrectionTeardown(projectId: string): Promise<void> { await closingSessions.get(projectId) }
 
 /** 逐文件复制目录树（陷阱 27：cpSync recursive 对非 ASCII 目录段错误——中文项目名必踩）。 */
 function copyTree(source: string, target: string): void {
@@ -152,7 +158,7 @@ export async function startCorrectionSession(input: { projectId: string }): Prom
   if (project.current_stage !== 'completed' && !isMvpConfirmPending(input.projectId)) {
     return { ok: false, reason: 'not-delivered', error: 'CORRECTION_NOT_DELIVERED: 项目尚未完成交付，不能进入修改预览' }
   }
-  if (activeSessions.has(input.projectId)) {
+  if (activeSessions.has(input.projectId) || startingSessions.has(input.projectId)) {
     return { ok: false, reason: 'already-running', error: 'CORRECTION_ALREADY_RUNNING: 该项目已有一个修改预览在运行' }
   }
   let raw: string
@@ -165,6 +171,20 @@ export async function startCorrectionSession(input: { projectId: string }): Prom
   if (!parsed.ok) {
     return { ok: false, reason: 'launch-invalid', error: `CORRECTION_LAUNCH_INVALID: ${parsed.error}` }
   }
+  if (isSoftwareProject(input.projectId) && parsed.launch.ui === 'electron') {
+    const sessionKey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    const sessionDir = join(getPromaHome(), 'software-corrections', input.projectId, sessionKey), startedAt = new Date().toISOString()
+    startingSessions.add(input.projectId)
+    try {
+      await settleCorrectionTeardown(input.projectId)
+      const { startSoftwareCorrection } = await import('../software/correction-runtime')
+      const runtime = await startSoftwareCorrection(input.projectId, project.root_path, parsed.launch, sessionDir)
+      activeSessions.set(input.projectId, { projectId: input.projectId, sessionKey, sessionDir, drivePort: 0, child: runtime.child, close: runtime.close, startedAt, finished: false })
+      return { ok: true, session: { sessionKey, sessionDir, drivePort: 0, dataSnapshotted: runtime.dataSnapshotted, startedAt, pid: runtime.child.pid } }
+    } catch (error) { return { ok: false, reason: 'spawn-failed', error: String(error) } }
+    finally { startingSessions.delete(input.projectId) }
+  }
+  if (isSoftwareProject(input.projectId) && parsed.launch.ui === 'browser') return { ok: false, reason: 'unsupported', error: '这个程序暂时不能点选，可直接在聊天中描述要改的位置和效果。' }
   const blacklistHit = violatesCommandBlacklist(parsed.launch.command)
   if (blacklistHit) {
     return { ok: false, reason: 'launch-invalid', error: `CORRECTION_LAUNCH_BLOCKED: ${blacklistHit}` }
@@ -341,6 +361,11 @@ export function finishCorrectionSession(input: { projectId: string; recover?: bo
 function cleanupSession(projectId: string, session: ActiveSession): void {
   session.finished = true
   activeSessions.delete(projectId)
+  if (session.close) {
+    const closing = session.close().finally(() => { if (closingSessions.get(projectId) === closing) closingSessions.delete(projectId) })
+    closingSessions.set(projectId, closing); void closing.catch(error => console.warn('[correction-close]', String(error)))
+    return
+  }
   try {
     if (session.child.pid) {
       spawn('taskkill', ['/PID', String(session.child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })

@@ -434,6 +434,8 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface ProjectDeliverablesResult {
+  /** Host-known support; omitted for historical projects. */
+  supports_point_selection?: boolean
   /** Frozen confirmed UX, returned read-only for continuity during implementation. */
   confirmed_sketch_url?: string
   /** 项目产物文件（相对路径，≤200；跳过归档/依赖/构建产物目录） */
@@ -454,11 +456,15 @@ export interface ProjectDeliverablesResult {
 /** 启动程序输入。 */
 export interface ProjectLaunchAppInput extends RequestEnvelope {
   project_id: string
+  restart?: boolean
 }
 
 /** 启动程序结果。 */
 export interface ProjectLaunchAppResult {
   started: boolean
+  needs_restart?: boolean
+  url?: string
+  detail?: string
   pid?: number
   command?: string
 }
@@ -1179,6 +1185,7 @@ export interface AgentEvent {
     | 'repairing'
     | 'rollback_done'
     | 'ux_sketch_ready'
+    | 'software_preview_changed'
     | 'ux_sketch_closed'
     | 'mvp_review_ready'
     | 'mvp_review_closed'
