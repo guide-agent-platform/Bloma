@@ -4,6 +4,7 @@ import type { ToolContext } from '../agent/loop/agent-loop'
 import type { DelegationParentContext } from '../agent/delegation/delegation-context'
 import { verificationFingerprint } from '../desktop/verification-fingerprint'
 import { hasSoftwareSessionProcess } from './process-manager'
+import { hasDebugSession } from './debug-sessions'
 
 interface Assignment { paths: string[]; readOnly: boolean; active: boolean; source?: string }
 const overlap = (a: string, b: string) => a === b || a.endsWith('/') && b.startsWith(a) || b.endsWith('/') && a.startsWith(b)
@@ -43,7 +44,7 @@ export function createSoftwareCollaborationPolicy(projectId: string, root: strin
     if (parent.projectId !== projectId || parent.sessionId !== parentSessionId) throw new Error('DELEGATION_PARENT_MISMATCH')
     parent.signal.throwIfAborted()
     const writable = args.role === 'implement' && args.readOnly !== true || args.role === 'custom' && args.readOnly === false
-    if (writable && hasSoftwareSessionProcess(projectId, parentSessionId)) throw Error('DELEGATION_STOP_DEV_SERVICE_BEFORE_WRITING: 先停止会话中的开发服务，再划分写入任务；避免后台构建与子任务改动互相覆盖')
+    if (writable && (hasSoftwareSessionProcess(projectId, parentSessionId) || hasDebugSession(projectId, parentSessionId))) throw Error('DELEGATION_STOP_DEV_SERVICE_BEFORE_WRITING: 先停止会话中的开发服务/调试实例，再划分写入任务；避免后台构建与子任务改动互相覆盖')
     const paths = writable ? (args.writePaths ?? []).map(pathOf) : []
     if (writable && (!paths.length || paths.length > 32)) throw new Error('DELEGATION_EXPLICIT_WRITE_PATHS_REQUIRED')
     if (paths.some((path, i) => paths.slice(0, i).some(other => overlap(path, other)))

@@ -21,7 +21,7 @@ export function electronEntry(root: string, command: readonly string[]): { execu
   return { executablePath, args }
 }
 
-async function observe(page: Page, step: GuiAcceptanceSuite['steps'][number]): Promise<unknown> {
+export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps'][number]): Promise<unknown> {
   if (!('selector' in step)) throw new Error(`GUI_ACTION_UNSUPPORTED_FOR_THIS_RUNTIME:${step.kind}`)
   const locator = page.locator(step.selector)
   if (step.kind === 'fill') { await locator.fill(step.value); return await locator.inputValue() }
@@ -74,7 +74,7 @@ export async function observeSoftwareGui(input: { projectId: string; root: strin
       page.setDefaultTimeout(4000)
       for (const step of steps) {
         input.signal?.throwIfAborted()
-        try { const actual = await observe(page, step); result.steps.push({ id: step.id, passed: true, actual }) }
+        try { const actual = await observeGuiStep(page, step); result.steps.push({ id: step.id, passed: true, actual }) }
         catch (error) {
           result.steps.push({ id: step.id, passed: false, actual: (error as { actual?: unknown }).actual ?? String(error) })
           result.error = error instanceof Error ? error.message : String(error)

@@ -1,6 +1,6 @@
 # Bloma软件专精：四项优先能力方案稿
 
-版本v0.1，2026-10-24。状态：方案稿，四项能力尚未实施。本次已实施的前置修复为711176b，见[GUI契约修复记录](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/docs/05_PROJECT_PLAN/gui-tool-contract-fix-20261024.md)。
+版本v0.1，2026-10-24。状态：用户已授权执行，实际进展见[实施记录](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/docs/05_PROJECT_PLAN/software-specialization-implementation-20261024.md)，以下为范围和验收目标，不表示四项已全部完成。前置修复为711176b，见[GUI契约修复记录](C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/docs/05_PROJECT_PLAN/gui-tool-contract-fix-20261024.md)。
 
 ## 1. 目标与边界
 

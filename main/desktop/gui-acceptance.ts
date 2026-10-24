@@ -29,7 +29,7 @@ export function guiSuitePath(projectId: string): string {
   if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error('GUI_PROJECT_INVALID')
   return join(getPromaHome(), 'gui-acceptance', `${projectId}.json`)
 }
-export function parseGuiSuite(value: unknown): GuiAcceptanceSuite {
+export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: boolean } = {}): GuiAcceptanceSuite {
   const suite = value as GuiAcceptanceSuite
   if (!suite || suite.version !== 1 || !/^[a-f0-9]{64}$/.test(suite.scope_hash) || !Array.isArray(suite.covers) || !suite.covers.length
     || suite.covers.some(id => typeof id !== 'string' || !/^F-\d+$/.test(id)) || new Set(suite.covers).size !== suite.covers.length
@@ -64,7 +64,7 @@ export function parseGuiSuite(value: unknown): GuiAcceptanceSuite {
   if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
   const groups = splitSteps(suite)
   if (groups.length > 8) throw new Error(`GUI_RESTART_LIMIT_EXCEEDED: ${groups.length}>8`)
-  const emptySegment = groups.findIndex(group => !group.length || !group.some(step => step.kind === 'expect'))
+  const emptySegment = groups.findIndex(group => !group.length || !options.allowActionsOnly && !group.some(step => step.kind === 'expect'))
   if (emptySegment >= 0) throw new Error(`GUI_SEGMENT_NEEDS_ASSERTION: 第${emptySegment + 1}段缺少expect；restart后也需实际断言，不要以restart结尾`)
   return suite
 }

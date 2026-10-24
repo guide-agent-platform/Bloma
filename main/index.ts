@@ -27,6 +27,7 @@ import { recordDecision } from './project/decision-log'
 import { findProject, listProjects, updateProject } from './project/project-service'
 import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, setTrayProjectSource, teardownTrayAndShortcut } from './platform/shell/tray'
 import { disposeAllCorrectionSessions } from './desktop/correction-session'
+import { closeAllDebugSessions, hasAnyDebugSession } from './software/debug-sessions'
 import { initialWindowBounds } from './platform/shell/window-bounds'
 import { appIconPath } from './platform/shell/app-icon'
 
@@ -227,6 +228,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+let debugQuitDrainStarted = false
+app.on('before-quit', event => {
+  if (debugQuitDrainStarted || !hasAnyDebugSession()) return
+  event.preventDefault(); debugQuitDrainStarted = true
+  void closeAllDebugSessions().catch(error => console.error('[debug-quit]', String(error))).finally(() => app.quit())
+})
 app.on('will-quit', () => {
   teardownTrayAndShortcut()
   // 点选纠错（批11 MVP-E，2026-10-08）：修改预览实例是平台拉起的可见窗口，

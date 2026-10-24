@@ -32,6 +32,7 @@ import { isSoftwareProject } from './workflow-policy'
 import { createSoftwareCollaborationPolicy } from '../software/collaboration-policy'
 import { buildSoftwareAgentTools, SOFTWARE_ENGINEERING_INSTRUCTIONS } from '../software/agent-tools'
 import { stopSoftwareSession } from '../software/process-manager'
+import { closeDebugSessions } from '../software/debug-sessions'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -156,7 +157,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       if (result.status !== 'completed') { blocked(result.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result.termination_detail?.reason ?? result.status}），可沿当前现场继续。`); return }
       // Integration checks own a quiet tree. Never race outstanding writers or dev servers.
       stopDelegations(input.sessionId)
-      if (software) { await stopSoftwareSession(input.projectId, input.sessionId); emit('software_preview_changed', { preview_url: null }) }
+      if (software) { await closeDebugSessions(input.projectId, input.sessionId); await stopSoftwareSession(input.projectId, input.sessionId); emit('software_preview_changed', { preview_url: null }) }
       if (software) await settleParentDelegationRuns(input.sessionId)
       updateProject(input.projectId, { desktop_phase: 'desktop-verify', current_stage: 'testing' })
       emit('stage_changed', { stage: 'desktop-verify' })
@@ -211,7 +212,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     runSignal.removeEventListener('abort', cancelChildren)
     disposeParentDelegationState(input.sessionId)
     if (software) {
-      const cleanup = await Promise.allSettled([stopSoftwareSession(input.projectId, input.sessionId), settleParentDelegationRuns(input.sessionId)])
+      const cleanup = await Promise.allSettled([closeDebugSessions(input.projectId, input.sessionId), stopSoftwareSession(input.projectId, input.sessionId), settleParentDelegationRuns(input.sessionId)])
       emit('software_preview_changed', { preview_url: null })
       const failed = cleanup.find(result => result.status === 'rejected')
       if (failed?.status === 'rejected') throw failed.reason

@@ -8,10 +8,12 @@ import { projectDirectory, resolveSoftwareCommand, softwareEnvironment } from '.
 import { mainRootDir } from '../platform/paths'
 
 export interface SoftwareProcessSnapshot {
+  root?: string
+  internal?: boolean
   id: string; projectId: string; sessionId: string; state: 'starting' | 'running' | 'stopping' | 'exited' | 'failed' | 'stopped' | 'interrupted'
   pid?: number; code?: number | null; url?: string; ready?: boolean; stdout: string; stderr: string; startedAt: string
 }
-interface OwnedProcess { snapshot: SoftwareProcessSnapshot; file: string; child: ChildProcess; abort: () => void; signal?: AbortSignal; timer?: ReturnType<typeof setTimeout>; stopping?: Promise<void> }
+interface OwnedProcess { snapshot: SoftwareProcessSnapshot; file: string; child: ChildProcess; abort: () => void; signal?: AbortSignal; timer?: ReturnType<typeof setTimeout>; stopping?: Promise<void>; restart?: (signal: AbortSignal) => Promise<SoftwareProcessSnapshot> }
 const processes = new Map<string, OwnedProcess>()
 const TAIL = 32768
 const pathFor = (id: string) => {
@@ -20,7 +22,9 @@ const pathFor = (id: string) => {
 }
 export function redactSoftwareOutput(text: string): string {
   for (const [key, value] of Object.entries(process.env)) if (/KEY|TOKEN|SECRET|PASSWORD/i.test(key) && value && value.length >= 8) text = text.split(value).join('[REDACTED]')
-  return text.replace(/((?:api[_-]?key|authorization|password)\s*["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, '$1[REDACTED]')
+  text = text.replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/((?:set-cookie|cookie)\s*[:=]\s*)[^\r\n]+/gi, '$1[REDACTED]')
+  return text.replace(/((?:api[_-]?key|authorization|password|access[_-]?token|refresh[_-]?token|token|secret)\s*["']?\s*[:=]\s*["']?)[^\s"',};&]+/gi, '$1[REDACTED]')
 }
 function persist(entry: OwnedProcess) { writeJsonFile(entry.file, { ...entry.snapshot, stdout: redactSoftwareOutput(entry.snapshot.stdout), stderr: redactSoftwareOutput(entry.snapshot.stderr) }) }
 
@@ -64,7 +68,7 @@ export async function stopSoftwareProcess(projectId: string, id: string, session
   return softwareProcess(projectId, id, sessionId)
 }
 
-export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean }): Promise<SoftwareProcessSnapshot> {
+export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean; internal?: boolean }): Promise<SoftwareProcessSnapshot> {
   input.signal?.throwIfAborted()
   if ([...processes.values()].filter(p => p.snapshot.projectId === input.projectId && ['starting', 'running'].includes(p.snapshot.state)).length >= 3) throw new Error('PROCESS_CONCURRENCY_LIMIT: 请先停止不再使用的预览进程')
   const cwd = projectDirectory(input.root, input.cwd), url = input.url ? loopbackUrl(input.url) : undefined
@@ -74,7 +78,7 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
     probe.listen(Number(address.port || 80), address.hostname.replace(/^\[|\]$/g, ''), () => probe.close(() => resolve()))
   })
   const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir))
-  const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
+  const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, root: projectDirectory(input.root), ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
   // Save ownership before spawn. A failure cannot leave an untracked child.
   const file = pathFor(snapshot.id)
   writeJsonFile(file, snapshot)
@@ -84,7 +88,7 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
     detached: process.platform !== 'win32' || input.independentUserApp, stdio: [input.independentUserApp ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
   child.stdin?.on('error', () => { /* lifecycle error/exit handlers own terminal state */ })
   if (!input.independentUserApp) child.stdin?.write(`${JSON.stringify({ ...resolved, cwd })}\n`)
-  const entry: OwnedProcess = { snapshot, file, child, signal: input.signal, abort: () => { void stopSoftwareProcess(input.projectId, snapshot.id).catch(() => undefined) } }
+  const entry: OwnedProcess = { snapshot, file, child, signal: input.signal, restart: signal => startSoftwareProcess({ ...input, signal }), abort: () => { void stopSoftwareProcess(input.projectId, snapshot.id).catch(() => undefined) } }
   processes.set(snapshot.id, entry)
   for (const [id, previous] of processes) if (processes.size > 128 && !['starting', 'running', 'stopping'].includes(previous.snapshot.state)) processes.delete(id)
   snapshot.pid = child.pid
@@ -120,10 +124,23 @@ export async function stopSoftwareSession(projectId: string, sessionId: string):
   await Promise.all([...processes.values()].filter(entry => entry.snapshot.projectId === projectId && entry.snapshot.sessionId === sessionId)
     .map(entry => stopSoftwareProcess(projectId, entry.snapshot.id, sessionId)))
 }
-export function activeSoftwarePreview(projectId: string): string | undefined {
-  return [...processes.values()].find(entry => entry.snapshot.projectId === projectId && entry.snapshot.state === 'running' && entry.snapshot.ready)?.snapshot.url
+export function activeSoftwarePreview(projectId: string, sessionId?: string): string | undefined {
+  return [...processes.values()].find(entry => entry.snapshot.projectId === projectId && !entry.snapshot.internal && entry.snapshot.sessionId !== 'user-launch'
+    && (!sessionId || entry.snapshot.sessionId === sessionId) && entry.snapshot.state === 'running' && entry.snapshot.ready)?.snapshot.url
 }
 export function hasSoftwareSessionProcess(projectId: string, sessionId: string): boolean {
   return [...processes.values()].some(entry => entry.snapshot.projectId === projectId && entry.snapshot.sessionId === sessionId
     && ['starting', 'running', 'stopping'].includes(entry.snapshot.state))
+}
+/** Attachment requires the live owned handle, never a disk PID or a user app. */
+export function ownedSoftwarePreview(projectId: string, sessionId: string, id: string): SoftwareProcessSnapshot {
+  const snapshot = softwareProcess(projectId, id, sessionId)
+  if (!processes.has(id) || snapshot.internal || snapshot.state !== 'running' || !snapshot.ready || !snapshot.url || sessionId === 'user-launch') throw Error('DEBUG_PROCESS_NOT_OWNED_AND_READY')
+  return snapshot
+}
+export async function restartOwnedSoftwarePreview(projectId: string, sessionId: string, id: string, signal: AbortSignal): Promise<SoftwareProcessSnapshot> {
+  ownedSoftwarePreview(projectId, sessionId, id)
+  const restart = processes.get(id)!.restart!
+  await stopSoftwareProcess(projectId, id, sessionId); signal.throwIfAborted()
+  return restart(signal)
 }
