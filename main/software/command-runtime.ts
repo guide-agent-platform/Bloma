@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { getPromaHome } from '../../storage/config-paths'
 import { createRequire } from 'node:module'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand } from '../desktop/process-driver'
+import { managedRuntime, managedRuntimeDirectories } from './runtime-bindings'
 
 /** Project execution policy, NOT an OS sandbox. Arguments are passed directly;
  * Windows package-manager shims are resolved to their Node entry, never cmd /c. */
@@ -45,7 +46,9 @@ export function softwareEnvironment(projectId: string, dataDir?: string): Record
   const toolsHome = join(getPromaHome(), 'software-environments', projectId)
   const home = dataDir ? join(dirname(dataDir), 'environment-home') : toolsHome
   for (const directory of [home, join(home, 'appdata'), join(home, 'localappdata'), dataDir ?? join(home, 'test-data')]) mkdirSync(directory, { recursive: true })
-  return { ...buildDriverEnv({ env_whitelist: [] } as never, process.env),
+  const clean = buildDriverEnv({ env_whitelist: [] } as never, process.env), directories = managedRuntimeDirectories(projectId)
+  return { ...clean, ...(directories.length ? { PATH: [...directories, clean.PATH ?? clean.Path ?? ''].join(process.platform === 'win32' ? ';' : ':') } : {}),
+    BLOMA_RUNTIME_PROJECT: projectId,
     HOME: home, USERPROFILE: home, APPDATA: join(home, 'appdata'), LOCALAPPDATA: join(home, 'localappdata'),
     APP_DATA_DIR: dataDir ?? join(home, 'test-data'), BROWSER: 'none', CI: '1',
     npm_config_cache: join(toolsHome, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false',
@@ -56,9 +59,15 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
   let command = validateSoftwareCommand(value)
   const name = basename(command[0]).replace(/\.(exe|cmd|bat)$/i, '').toLowerCase()
   const env = { ...environment }
-  if (['python', 'python3'].includes(name)) command = resolveDriverVenvCommand(command, root)
+  const runtimeProject = environment.BLOMA_RUNTIME_PROJECT
+  const node = runtimeProject ? managedRuntime(runtimeProject, 'node')?.executable : undefined
+  if (['python', 'python3'].includes(name)) {
+    const original = command[0]
+    command = resolveDriverVenvCommand(command, root)
+    if (command[0] === original && ['python', 'python3'].includes(original) && runtimeProject) command[0] = managedRuntime(runtimeProject, 'python')?.executable ?? pathExecutable(original) ?? command[0]
+  }
   if (name === 'node') {
-    const executable = pathExecutable(command[0]) ?? (command[0] === 'node' ? process.execPath : undefined)
+    const executable = (command[0] === 'node' ? node : undefined) ?? pathExecutable(command[0]) ?? (command[0] === 'node' ? process.execPath : undefined)
     if (!executable) throw new Error('COMMAND_NODE_UNAVAILABLE')
     command[0] = executable
     if (process.versions.electron && executable === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
@@ -66,9 +75,9 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
     let script: string | undefined
     try { script = join(dirname(createRequire(import.meta.url).resolve('npm/package.json')), 'bin', name === 'npm' ? 'npm-cli.js' : 'npx-cli.js') } catch {}
     if (!script || !existsSync(script)) throw new Error('BUNDLED_NPM_UNAVAILABLE: 当前Bloma安装缺少开发工具，请修复运行包')
-    const node = pathExecutable('node') ?? process.execPath
-    command = [node, script, ...command.slice(1)]
-    if (process.versions.electron && node === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
+    const executable = node ?? pathExecutable('node') ?? process.execPath
+    command = [executable, script, ...command.slice(1)]
+    if (process.versions.electron && executable === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
   } else if (process.platform === 'win32' && ['pnpm', 'yarn'].includes(name)) {
     const shim = pathExecutable(command[0])
     if (!shim) throw new Error(`COMMAND_PACKAGE_MANAGER_UNAVAILABLE: ${name}`)
@@ -76,9 +85,9 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
     const candidates = [join(dirname(shim), 'node_modules', entry), join(dirname(shim), '..', 'lib', 'node_modules', entry)]
     const script = candidates.find(existsSync)
     if (!script) throw new Error(`COMMAND_PACKAGE_MANAGER_ENTRY_UNAVAILABLE: ${name}；可用node直接执行已安装的包管理器入口`)
-    const node = pathExecutable('node') ?? process.execPath
-    command = [node, script, ...command.slice(1)]
-    if (process.versions.electron && node === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
+    const executable = node ?? pathExecutable('node') ?? process.execPath
+    command = [executable, script, ...command.slice(1)]
+    if (process.versions.electron && executable === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
   } else if (command[0].includes('/') || command[0].includes('\\')) {
     const candidate = resolve(root, command[0])
     if (!existsSync(candidate)) throw new Error('COMMAND_EXECUTABLE_MISSING')

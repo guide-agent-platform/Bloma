@@ -7,7 +7,7 @@
 | A1/A2 持续调试/错误观察 | 已实现并定向验证 | 正常Electron/浏览器入口、跨调用状态、受管理进程、日志与版本绑定；见下文 |
 | A3 文件交互 | 已实现并定向验证 | 真实上传/原生Open、下载、键盘/滚动/拖拽；冻结二进制fixture，PDF/Word真实提取与损坏文件反馈 |
 | B 增量修改/恢复 | 已实现并定向验证 | 候选实际验证、稳定目录、既有断言保留、数据副本迁移/恢复与上一可用版本入口 |
-| C 环境/独立交付 | 待实施 | 运行时/依赖与成品资格；干净机器验证需真实环境 |
+| C 环境/独立交付 | C1/C2已实现并定向验证；C3待真实环境 | 私有Node/Python、实际成品入口与全量字节绑定；跨机器资格单独保留未验证 |
 | D 工程接入/长期任务 | 待实施 | 接入已有工程、检索与可继续现场 |
 
 ## A1/A2 实施
@@ -53,6 +53,20 @@ software-v1宿主在验证前复制候选，实际核心/GUI/CLI与正常启动�
 specialize-b-final-tests.log：6文件19项通过，包括真实Pi制作/构建后在候选验证并交付、编辑工作副本后仍启动旧成品、依赖缓存复用与篡改失效、真实SQLite的100条固定ID/内容迁移失败保留、升级搜索/标签、恢复读回及恢复前备份最新记录、原Electron点选兼容、恢复UI确认和旧行为基线。集合有重叠，不与之前日志相加。类型最初发现新增mock的零参数tuple错误，已修复；最终类型specialize-b-final-types-fixed.log和构建specialize-b-final-build.log通过。最后的恢复目标状态修复另有UI定向复验。
 
 保留specialize-b-real-update.log（测试误读被UI截断的stdout）、specialize-b-candidate-acceptance.log（样例SQL升级后列数错误）失败证据。修复真实样例的INSERT字段后，specialize-b-fallback-acceptance.log中5项通过，含迁移失败后实际启动旧程序。该批仍是本机机制/固定SDK回放，未证明干净环境或在线模型成本收益。
+
+## C 运行时和成品资格
+
+prepare_software_environment仅主Agent可用，接上schema、权限标签、进展及真实命令环境。尊重engines/.python-version/requires-python；Windows x64可从Node官方发行与校验文件准备Node，或由校验过的uv准备Python。Python使用--no-bin/--no-registry/--no-config，安装、缓存和HOME均限私有目录，不改系统PATH或注册表。版本与平台/架构/Node ABI、来源、许可及摘要落盘；命令与npm子进程自动使用绑定版本。已有兼容缓存可离线复用；坏字节拒绝使用，不静默回退系统运行时。工程依赖继续尊重原锁文件安装，不强迫换包管理器。
+
+参照Node官方校验机制https://github.com/nodejs/node及uv官方管理/注册开关https://docs.astral.sh/uv/reference/cli/。下载只用指定HTTPS来源及校验摘要，压缩包解开前拒绝越界/链接并限制展开规模。校验属于TLS官方元数据与内容完整性，不冒充独立PGP签名验证。
+
+specialize-c1-canonical-preparation.log：移除测试PATH中的Node/Python后，真实下载/解包、npm构建实际使用私有node.exe、Python sqlite3/ctypes/ssl真实加载、venv创建/选择、绑定复用及篡改拒绝1项通过。之前失败分别是PowerShell转义错误与uv minor别名指向具体patch路径的差异；已修正，绑定规范化具体版本，保留原失败日志。该环境仍是同一Windows开发机，不能声称C3。
+
+发布目录现在解析并绑定实际解释器/包管理器入口，记录外部执行文件摘要；外部运行时或包内资源变化会拒绝旧版本证据。任务单可区分local/source/portable/installer，确认卡用用户用语展示，不问内部技术选型。只移交源码、本机依赖运行、便携候选和安装候选分别报告。独立交付缺少真实干净环境证据时，仍保留已实际通过本机功能/安全/启动的试用版本，但总体任务保持未完成，不以流结束或本机PASS交差，也不为了缺环境反复叫模型修源码。
+
+specialize-c2-packaged-acceptance.log：从原历史项目只读复制实际Calculator.exe全包到新测试工程，再复制到发布候选，正常入口真实点击2+3=5；无根开发node_modules或外部启动文件，包内HTML改动使字节验证失效，1项通过。结果software-packaged-candidate-acceptance.json。只证明同机成品迁移与绑定，未改历史项目交付标志。
+
+specialize-c-final-targeted.log：3文件11项通过，含离线缓存、坏参数和篡改、真实Pi/CLI的本机可用但portable承诺不完成分支、恢复UI。specialize-c-compatibility.log：5文件18项通过，含原制作、命令、SQLite更新和引导兼容；集合不相加。类型specialize-c-final-types.log通过。最终构建另见本批build日志。
 
 ## 后续验证原则
 

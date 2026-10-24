@@ -13,6 +13,7 @@ export function buildLeanScopeTool(projectId: string, source: string, emit: Para
     input_schema: { type: 'object', required: ['goal', 'ui', 'requirements'], properties: {
       goal: { type: 'string' }, name: { type: 'string' }, ui: { type: 'string', enum: ['required', 'none'] },
       delivery: { type: 'string', enum: ['desktop', 'browser', 'command'] },
+      distribution: { type: 'string', enum: ['local', 'portable', 'installer', 'source'] },
       requirements: { type: 'array', items: { type: 'object', required: ['description', 'expected'], properties: {
         id: { type: 'string' }, description: { type: 'string' }, expected: { type: 'string' } } } },
       constraints: { type: 'array', items: { type: 'string' } }, out_of_scope: { type: 'array', items: { type: 'string' } },

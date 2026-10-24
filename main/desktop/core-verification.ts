@@ -16,9 +16,12 @@ import { runGuiAcceptance, type GuiAcceptanceResult } from './gui-acceptance'
 import { coreVerificationCacheKey, withCoreVerificationCache } from './core-verification-cache'
 import { isSoftwareProject } from './workflow-policy'
 import { readLaunchDeclaration } from './launch-smoke'
+import { qualifySoftwareArtifact, type ArtifactQualification } from '../software/artifact-qualification'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
+  local_status?: CoreVerificationStatus
+  distribution?: ArtifactQualification
   host_cli?: LeanCliResult
   reused?: boolean
   host_gui?: GuiAcceptanceResult
@@ -258,6 +261,14 @@ async function verifyLeanBehavior(options: CoreVerificationOptions, root: string
   })
   result.status = result.requirements.reduce((status, row) => combineVerification(status, row.verification), behavior)
   if (result.missing.length && result.status === 'passed') result.status = 'unverified'
+  if (isSoftwareProject(options.projectId)) {
+    result.local_status = result.status
+    result.distribution = await qualifySoftwareArtifact(root, brief, options.signal)
+    if (result.distribution.status !== 'passed') {
+      result.status = combineVerification(result.status, result.distribution.status)
+      result.missing.push(result.distribution.detail)
+    }
+  }
   result.summary = result.status === 'passed' ? '实际入口与本次承诺功能检查通过，验证范围见报告。' : '实际功能检查尚未全部通过，产物已保留。'
 }
 

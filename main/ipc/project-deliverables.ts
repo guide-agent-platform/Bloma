@@ -91,6 +91,12 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       const stable = isSoftwareProject(project.project_id) ? await activeSoftwareRelease(project.project_id, undefined, false) : undefined
       if (isSoftwareProject(project.project_id)) result.data_snapshots = listSoftwareDataSnapshots(project.project_id)
       if (stable) result.stable_release = stable.id
+      if (stable) {
+        try {
+          const report = JSON.parse(readFileSync(join(stable.root, '00_VERIFY/core-verification.json'), 'utf8')) as { distribution?: { detail?: string } }
+          if (report.distribution?.detail) result.delivery_qualification = { detail: report.distribution.detail, independent_verified: false }
+        } catch { /* missing qualification is never an independent delivery PASS */ }
+      }
       if (stable) result.can_use_previous_release = Boolean(softwareFallbackReleaseId(project.project_id, stable.id))
       const declaration = stable ? { ok: true as const, launch: stable.launch } : readLaunchDeclaration(project.root_path)
       if (declaration === null) {

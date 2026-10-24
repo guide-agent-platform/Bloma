@@ -20,6 +20,8 @@ export function parseLeanBrief(raw: string, context: { projectId: string; sessio
   if (value.action !== 'brief' || typeof value.goal !== 'string' || !value.goal.trim() || !['required', 'none'].includes(String(value.ui))
     || !Array.isArray(value.requirements) || !value.requirements.length) return
   const delivery = value.delivery ?? context.previous.lean_brief?.delivery ?? (value.ui === 'none' ? 'command' : 'desktop')
+  const distribution = value.distribution ?? context.previous.lean_brief?.distribution
+  if (context.software && distribution !== undefined && !['local', 'portable', 'installer', 'source'].includes(String(distribution))) return
   if (context.software && (!['desktop', 'browser', 'command'].includes(String(delivery)) || value.ui === 'none' && delivery !== 'command' || value.ui === 'required' && delivery === 'command')) return
   let next = Math.max(0, ...context.previous.requirements.map(row => Number(/^F-(\d+)$/.exec(row.id)?.[1] ?? 0))) + 1
   const used = new Set<string>(), requirements: SketchRequirement[] = [], acceptance: Record<string, string> = {}
@@ -37,12 +39,14 @@ export function parseLeanBrief(raw: string, context: { projectId: string; sessio
     positioning: value.goal, requirements, acceptance, constraints: texts(value.constraints), out_of_scope: texts(value.out_of_scope), assumptions: texts(value.assumptions),
     lean_brief: { version: 1, ui: value.ui as 'required' | 'none', source_session_id: context.sessionId,
       ...(context.software ? { delivery: delivery as 'desktop' | 'browser' | 'command' } : {}),
+      ...(context.software && distribution !== undefined ? { distribution: distribution as 'local' | 'portable' | 'installer' | 'source' } : {}),
       source_sha256: createHash('sha256').update(context.source).digest('hex') } }) }
 }
 
 export function renderLeanBrief(brief: PrdBackplane): string {
   return [brief.positioning, ...brief.requirements.map(row => `${row.id} ${row.description}\n完成应看到：${brief.acceptance[row.id] ?? ''}`),
     ...(brief.lean_brief?.delivery ? ['使用方式：' + ({ desktop: '桌面软件，一键启动', browser: '在本机浏览器使用', command: '命令工具' }[brief.lean_brief.delivery])] : []),
+    ...(brief.lean_brief?.distribution ? ['交付方式：' + ({ local: '在本机直接使用', portable: '可复制到其他电脑直接使用', installer: '可在其他电脑安装使用', source: '移交源码' }[brief.lean_brief.distribution])] : []),
     ...(brief.lean_brief?.preview === 'reuse' ? ['界面沿用已确认外观，在制作时按新增功能调整。'] : []),
     ...(brief.lean_brief?.preview === 'skip' ? ['按你的授权直接制作，不再生成草图。'] : []),
     ...(brief.constraints?.length ? ['约束：' + brief.constraints.join('；')] : []),

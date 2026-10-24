@@ -12,7 +12,7 @@ import { productionAgentTools } from './production-agent'
 import { leanBudget, withLeanRuntime } from './lean-budget'
 import { guardDispatcherCompletion } from './dispatcher-completion'
 import { provisionDesktopSkeletonV2 } from './skeleton-provision'
-import { runCoreVerification } from './core-verification'
+import { runCoreVerification, type CoreVerificationResult } from './core-verification'
 import { verificationFingerprint } from './verification-fingerprint'
 import { consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
 import { commitDesktopDelivery } from './delivery-state'
@@ -124,7 +124,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     '局部外观和缺陷直接修改。用户新增、删除业务能力或改变业务预期时，先用propose_scope_change保留原功能及新增预期并等待确认，不能在旧任务单下宣称新增功能已验收。',
     JSON.stringify({ goal: brief.positioning, requirements: brief.requirements.map(row => ({ id: row.id, description: row.description,
       expected: brief.acceptance[row.id], requirement_hash: requirementEvidenceHash(brief, row) })), constraints: brief.constraints,
-      out_of_scope: brief.out_of_scope, assumptions: brief.assumptions, delivery: brief.lean_brief.delivery }),
+      out_of_scope: brief.out_of_scope, assumptions: brief.assumptions, delivery: brief.lean_brief.delivery, distribution: brief.lean_brief.distribution ?? 'local' }),
     '保留真实用户数据与配置；测试使用隔离数据目录。预期依据已确认目标，不能改预期掩盖失败。特殊能力登记与执行细节可通过read_production_context按需读取。',
     '不强制额外测试脚本或自报PASS。特殊能力需要时在CORE_CHECK.json只登记实际入口，例如llm/speech；用read_production_context按需查看协议。未实现或未验证的必需能力如实保留。',
     brief.lean_brief.ui === 'required' ? `界面任务登记register_gui_check：steps需id/kind/selector，expect用equals；仅留存任务加restart且重开后仍需expect。${software ? '宿主绑定已确认预期，不用复制expectations；只提交steps和acceptance_refs（expect步骤id→F编号数组）。' : 'expectations保留任务单预期，acceptance_refs把expect步骤关联F编号。'}宿主独立操作应用，登记不等于通过。` : '无界面任务登记register_cli_check：固定args与stdout/exit_code，宿主调用实际LAUNCH入口。一次性命令在LAUNCH写mode:"command"，服务默认保持运行。',
@@ -172,12 +172,13 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         catch (error) { runSignal.throwIfAborted(); preparationFailure = `发布候选未准备完成：${String(error)}` }
       }
       const checkRoot = candidate?.root ?? project.root_path
-      const core = preparationFailure ? { status: 'unverified' as const, summary: preparationFailure, missing: [preparationFailure], evidence: [], llm: undefined }
+      const core: CoreVerificationResult = preparationFailure ? { status: 'unverified', checked_at: new Date().toISOString(), summary: preparationFailure, missing: [preparationFailure], evidence: [] }
         : deps.coreVerification ? await deps.coreVerification(input.projectId, runSignal)
         : await runCoreVerification({ projectId: input.projectId, sandboxRoot: checkRoot, signal: runSignal, reuse: !software })
       runSignal.throwIfAborted()
       let failure: string | undefined
-      if (core.status !== 'passed') failure = `${core.summary}\n${core.missing.join('\n')}`
+      const cleanEnvironmentPending = software && core.local_status === 'passed' && core.distribution?.status === 'environment_blocked'
+      if (core.status !== 'passed' && !cleanEnvironmentPending) failure = `${core.summary}\n${core.missing.join('\n')}`
       else {
         const security = deps.securityScan ? deps.securityScan(input.projectId) : defaultQuickSecurityGate(input.projectId)
         if (!security || !security.passed || security.blocking > 0) failure = `安全检查未通过或未执行：${security?.listing ?? '无有效证据'}`
@@ -195,7 +196,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         }
       }
       if (failure) {
-        if (core.status === 'environment_blocked') { blocked(failure); return }
+        if (core.status === 'environment_blocked' && !cleanEnvironmentPending) { blocked(failure); return }
         const attempt = consumeProjectAttempt(input.projectId, 'lean-repair', 2)
         if (!attempt.allowed) { blocked(failure); return }
         emit('message_delta', { text: '验证发现具体缺口，我会沿当前现场局部修复。' })
@@ -215,6 +216,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
           await promoteSoftwareRelease(candidate, { version, scope, at: new Date().toISOString() }, runSignal,
             () => prdScopeFingerprint(readPrdBackplane(input.projectId)) === scope && versionOf() === version)
           saveSoftwareRegressionBaseline(input.projectId, version)
+        }
+        if (cleanEnvironmentPending) {
+          blocked(`本机功能、安全及启动检查已通过，可以从交付入口试用。${core.distribution!.detail}`)
+          return
         }
         resetProjectAttemptScope(input.projectId, 'lean-repair')
         commitDesktopDelivery(input.projectId, runSignal)

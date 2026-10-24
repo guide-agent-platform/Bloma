@@ -437,6 +437,7 @@ export interface ProjectDeliverablesResult {
   data_snapshots?: Array<{ id: string; at: string; schema: string }>
   stable_release?: string
   can_use_previous_release?: boolean
+  delivery_qualification?: { detail: string; independent_verified: boolean }
   /** Host-known support; omitted for historical projects. */
   supports_point_selection?: boolean
   /** Frozen confirmed UX, returned read-only for continuity during implementation. */

@@ -6,11 +6,13 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { readLaunchDeclaration, type LaunchDeclaration } from '../desktop/launch-smoke'
+import { resolveSoftwareCommand, softwareEnvironment } from './command-runtime'
 
 interface Entry { path: string; size: number; sha256: string }
 export interface RuntimeInventory { digest: string; bytes: number; files: Entry[] }
 export interface SoftwareRelease { version: 1; id: string; projectId: string; sourceRoot: string; root: string;
   source: RuntimeInventory; runtime: RuntimeInventory; launch: LaunchDeclaration; dependencies: Record<string, string>;
+  external_files?: Array<{ path: string; sha256: string }>
   verified?: { version: string; scope: string; at: string } }
 const IGNORED = new Set(['.git', '00_HISTORY', '.cache', '__pycache__', '.pytest_cache', 'data-backups'])
 const MUTABLE = new Set(['data', '00_VERIFY', '00_UX'])
@@ -95,11 +97,20 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
   // Failed candidates remain diagnostic artifacts, never become active releases.
   await copyEntries(sourceRoot, root, source.files.filter(entry => !DEPENDENCIES.has(entry.path.split('/')[0])), signal)
   for (const [name, cache] of Object.entries(dependencies)) await symlink(cache, join(root, name), process.platform === 'win32' ? 'junction' : 'dir')
-  const launch = relocatedLaunch(parsed.launch, sourceRoot, root)
+  const relocated = relocatedLaunch(parsed.launch, sourceRoot, root)
+  const resolved = resolveSoftwareCommand(root, relocated.command, softwareEnvironment(projectId))
+  const launch = { ...relocated, command: resolved.command }
+  const external_files: NonNullable<SoftwareRelease['external_files']> = []
+  for (const file of [...new Set(launch.command.filter(isAbsolute))]) {
+    const rel = relative(root, file)
+    if (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)) continue
+    try { if (!(await stat(file)).isFile()) continue } catch { if (file === launch.command[0]) throw Error('RELEASE_EXTERNAL_RUNTIME_MISSING'); continue }
+    external_files.push({ path: await realpath(file), sha256: await fileDigest(file, signal) })
+  }
   await writeFile(join(root, 'LAUNCH.json'), JSON.stringify(launch, null, 2))
   if ((await runtimeInventory(sourceRoot, signal)).digest !== source.digest) throw Error('RELEASE_SOURCE_CHANGED_DURING_COPY')
   const runtime = await runtimeInventory(root, signal, dependencies)
-  const release: SoftwareRelease = { version: 1, id, projectId, sourceRoot, root, source, runtime, launch, dependencies }
+  const release: SoftwareRelease = { version: 1, id, projectId, sourceRoot, root, source, runtime, launch, dependencies, external_files }
   writeTextFileAtomic(join(directory, 'release.json'), JSON.stringify(release))
   return release
 }
@@ -110,6 +121,7 @@ export async function validateSoftwareRelease(projectId: string, release: Softwa
     if (rel.includes(sep) || !/^[a-f0-9]{64}$/.test(rel)) throw Error('RELEASE_CACHE_PATH_INVALID')
   }
   if ((await runtimeInventory(release.root, signal, release.dependencies)).digest !== release.runtime.digest) throw Error('RELEASE_BYTES_CHANGED')
+  for (const file of release.external_files ?? []) if (await fileDigest(file.path, signal) !== file.sha256) throw Error('RELEASE_EXTERNAL_RUNTIME_CHANGED')
 }
 export async function verifyReleaseSource(release: SoftwareRelease, signal?: AbortSignal) {
   await validateSoftwareRelease(release.projectId, release, signal)

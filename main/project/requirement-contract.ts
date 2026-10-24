@@ -39,6 +39,7 @@ export function requirementEvidenceHash(backplane: PrdBackplane, item: SketchReq
   if (item.capabilities !== undefined) fields.push({ capabilities: item.capabilities })
   if (backplane.lean_brief) fields.push({ workflow: 'lean-v1', ui: backplane.lean_brief.ui })
   if (backplane.lean_brief?.delivery) fields.push({ delivery: backplane.lean_brief.delivery })
+  if (backplane.lean_brief?.distribution) fields.push({ distribution: backplane.lean_brief.distribution })
   return digest(fields)
 }
 

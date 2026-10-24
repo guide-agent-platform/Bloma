@@ -145,6 +145,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
           </span>
         )}
         {launchState && <span data-ai-id="delivery-launch-state" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{launchState}</span>}
+        {data?.delivery_qualification && <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{data.delivery_qualification.detail}</span>}
         {needsRestart && <button type="button" disabled={running || !data?.can_launch} onClick={() => void onLaunch(true, undefined, restartPrevious)}>已保存，关闭旧版本并启动更新</button>}
         {data?.can_use_previous_release && <button type="button" disabled={running || !data.can_launch} onClick={() => void onLaunch(false, undefined, true)}>启动上一可用版本</button>}
         {Boolean(data?.data_snapshots?.length) && <>
