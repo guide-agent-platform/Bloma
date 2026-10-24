@@ -1,0 +1,193 @@
+{
+  "source": "calculator history 2026-10-24; only GUI tool inputs, no credentials",
+  "samples": [
+    {
+      "source_line": 58,
+      "tool": "inspect_app",
+      "input": {
+        "steps": [
+          {
+            "action": "expect",
+            "selector": "#result",
+            "text": "0"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-1\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-2\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-plus\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-4\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-6\"]"
+          },
+          {
+            "action": "expect",
+            "selector": "#expression",
+            "text": "12 + 46"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-equals\"]"
+          },
+          {
+            "action": "expect",
+            "selector": "#result",
+            "text": "58"
+          },
+          {
+            "action": "click",
+            "selector": "[data-testid=\"key-C\"]"
+          },
+          {
+            "action": "expect",
+            "selector": "#result",
+            "text": "0"
+          }
+        ],
+        "include_image": true
+      }
+    },
+    {
+      "source_line": 79,
+      "tool": "register_gui_check",
+      "input": {
+        "steps": [
+          {
+            "id": "s1",
+            "action": "click",
+            "selector": "[data-testid=\"key-1\"]"
+          }
+        ],
+        "expectations": {
+          "s1": "点击数字 1 后显示区可输入"
+        },
+        "acceptance_refs": {
+          "s1": [
+            "F-001"
+          ]
+        }
+      }
+    },
+    {
+      "source_line": 111,
+      "tool": "register_gui_check",
+      "input": {
+        "acceptance_refs": {
+          "s-expr": [
+            "F-001"
+          ],
+          "s-result": [
+            "F-002"
+          ],
+          "s-clear": [
+            "F-003"
+          ]
+        },
+        "expectations": {
+          "s-expr": "界面上能看到输入的数字和运算符",
+          "s-result": "按下等号后显示正确的计算结果",
+          "s-clear": "按下清除后显示归零或空白状态"
+        },
+        "steps": [
+          {
+            "action": "click",
+            "id": "s1",
+            "selector": "[data-testid=\"key-1\"]"
+          },
+          {
+            "action": "click",
+            "id": "s2",
+            "selector": "[data-testid=\"key-2\"]"
+          },
+          {
+            "action": "click",
+            "id": "s3",
+            "selector": "[data-testid=\"key-plus\"]"
+          },
+          {
+            "action": "click",
+            "id": "s4",
+            "selector": "[data-testid=\"key-4\"]"
+          },
+          {
+            "action": "click",
+            "id": "s5",
+            "selector": "[data-testid=\"key-6\"]"
+          },
+          {
+            "action": "expect",
+            "id": "s-expr",
+            "selector": "#expression",
+            "text": "12 + 46"
+          },
+          {
+            "action": "click",
+            "id": "s6",
+            "selector": "[data-testid=\"key-equals\"]"
+          },
+          {
+            "action": "expect",
+            "id": "s-result",
+            "selector": "#result",
+            "text": "58"
+          },
+          {
+            "action": "click",
+            "id": "s7",
+            "selector": "[data-testid=\"key-C\"]"
+          },
+          {
+            "action": "expect",
+            "id": "s-clear",
+            "selector": "#result",
+            "text": "0"
+          },
+          {
+            "action": "restart",
+            "id": "s8"
+          }
+        ]
+      }
+    },
+    {
+      "source_line": 295,
+      "tool": "register_gui_check",
+      "input": {
+        "acceptance_refs": {
+          "e1": [
+            "F-001"
+          ]
+        },
+        "expectations": {
+          "F-001": "界面上能看到输入的数字和运算符",
+          "F-002": "按下等号后显示正确的计算结果",
+          "F-003": "按下清除后显示归零或空白状态"
+        },
+        "steps": [
+          {
+            "action": "click",
+            "id": "c1",
+            "selector": "#key-1"
+          },
+          {
+            "action": "expect",
+            "expect": "1",
+            "id": "e1",
+            "selector": "#expression"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import { mainRootDir } from '../platform/paths'
 import { readLaunchDeclaration } from './launch-smoke'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
+import { GUI_ACTION_KINDS } from './gui-tool-contract'
 
 type Action = { id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
   | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
@@ -44,26 +45,27 @@ export function parseGuiSuite(value: unknown): GuiAcceptanceSuite {
     || new Set(suite.fixtures.map(file => file.path.toLowerCase())).size !== suite.fixtures.length)) throw new Error('GUI_FIXTURES_INVALID')
   if (suite.control_bindings !== undefined && (!Array.isArray(suite.control_bindings) || suite.control_bindings.length > 60
     || suite.control_bindings.some(item => !item || typeof item.selector !== 'string' || !item.selector || item.selector.length > 512 || typeof item.description !== 'string' || !item.description || item.description.length > 1000))) throw new Error('GUI_BINDINGS_INVALID')
-  for (const step of suite.steps) {
+  for (const [index, step] of suite.steps.entries()) {
     if (!step || typeof step.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(step.id) || ids.has(step.id)
-      || !['fill', 'click', 'expect', 'restart', 'lock_data', 'unlock_data', 'storage_full', 'storage_restore', 'corrupt_data', 'remove_data'].includes(step.kind)) throw new Error('GUI_STEP_INVALID')
+      || !GUI_ACTION_KINDS.includes(step.kind)) throw new Error(`GUI_STEP_INVALID: steps[${index}]需要唯一id及kind（fill/click/expect/restart）；字段名不是action/type/op`)
     ids.add(step.id)
     if (step.kind === 'lock_data' || step.kind === 'storage_full') { if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = step.kind === 'lock_data' ? 'lock' : 'full' }
     if (step.kind === 'unlock_data') { if (storageFault !== 'lock') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
     if (step.kind === 'storage_restore') { if (storageFault !== 'full') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
     if (['restart', 'corrupt_data', 'remove_data'].includes(step.kind) && storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
-    if (['fill', 'click', 'expect'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw new Error('GUI_SELECTOR_INVALID')
-    if (step.kind === 'fill' && (typeof step.value !== 'string' || step.value.length > 4096)) throw new Error('GUI_VALUE_INVALID')
+    if (['fill', 'click', 'expect'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw new Error(`GUI_SELECTOR_INVALID: steps[${index}].selector需要真实CSS选择器`)
+    if (step.kind === 'fill' && (typeof step.value !== 'string' || step.value.length > 4096)) throw new Error(`GUI_VALUE_INVALID: steps[${index}].value需要不超过4096字符的输入文本`)
     if (step.kind === 'expect' && ([step.equals !== undefined, step.contains !== undefined, step.nonempty !== undefined].filter(Boolean).length !== 1
       || step.equals !== undefined && (typeof step.equals !== 'string' || step.equals.length > 4096)
       || step.contains !== undefined && (typeof step.contains !== 'string' || !step.contains || step.contains.length > 4096)
       || step.nonempty !== undefined && step.nonempty !== true || step.property !== undefined && !['text', 'value', 'count'].includes(step.property)
-      || step.timeout_ms !== undefined && (!Number.isSafeInteger(step.timeout_ms) || step.timeout_ms < 1 || step.timeout_ms > 10000))) throw new Error('GUI_EXPECT_INVALID')
+      || step.timeout_ms !== undefined && (!Number.isSafeInteger(step.timeout_ms) || step.timeout_ms < 1 || step.timeout_ms > 10000))) throw new Error(`GUI_EXPECT_INVALID: steps[${index}]需equals/contains/nonempty恰好一项；精确预期使用equals字符串，不是expected/text/value`)
   }
   if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
   const groups = splitSteps(suite)
   if (groups.length > 8) throw new Error(`GUI_RESTART_LIMIT_EXCEEDED: ${groups.length}>8`)
-  if (groups.some(group => !group.length || !group.some(step => step.kind === 'expect'))) throw new Error('GUI_SEGMENT_NEEDS_ASSERTION')
+  const emptySegment = groups.findIndex(group => !group.length || !group.some(step => step.kind === 'expect'))
+  if (emptySegment >= 0) throw new Error(`GUI_SEGMENT_NEEDS_ASSERTION: 第${emptySegment + 1}段缺少expect；restart后也需实际断言，不要以restart结尾`)
   return suite
 }
 export function splitSteps(suite: GuiAcceptanceSuite): Action[][] {

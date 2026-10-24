@@ -8,6 +8,7 @@ import { CORE_DECLARATION_BRIEF, MODEL_VERIFICATION_BRIEF, SPEECH_VERIFICATION_B
 import { requirementEvidenceHash, trustedAcceptance, acceptanceAssociationIssues } from '../project/requirement-contract'
 import type { DispatchExperiment } from './dispatch-experiment'
 import type { RequirementsModel } from '../model/requirements-model'
+import { guiStepsSchema, GUI_CHECK_EXAMPLE, SOFTWARE_GUI_ACTION_KINDS } from './gui-tool-contract'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -52,6 +53,13 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
+        if (['verification', 'verification-gui'].includes(String(input.topic)) && isSoftwareProject(projectId)) {
+          const brief = readPrdBackplane(projectId)
+          return { output: JSON.stringify({ protocol: 'GUI登记只需steps和acceptance_refs，宿主绑定已确认目标，不必复述expectations。kind不是action，expect精确预期填equals。restart前后每段都需expect，仅留存任务才需restart。开发观察不等于最终验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',
+            gui_step_schema: guiStepsSchema(96, SOFTWARE_GUI_ACTION_KINDS), example: GUI_CHECK_EXAMPLE,
+            authoritative_expectations: Object.fromEntries(brief.requirements.map(row => [row.id, trustedAcceptance(brief, row)])),
+            control_bindings: guiControlBindings(projectId), data_directory: 'APP_DATA_DIR' }) }
+        }
         if (input.topic === 'verification-llm' && isSoftwareProject(projectId)) return { output: JSON.stringify({ protocol:
           '登记CORE_CHECK.json llm:{runtime:"node",module:"src/llm-client.cjs",factory:"Client",method:"enhance",covers:["模型功能F编号"]}。Node模块须是产品实际使用的入口，导出可无参new的类；method异步接收{prompt,config:{endpoint,model,api_key,provider,timeout}}，返回{ok,kind,text/message}，kind为success/auth_error/model_error/rate_limited/invalid_response/unconfigured。宿主调用真实客户端验证本机HTTP请求及5类异常，不请求付费端点。Python入口沿用module/factory/method协议（不填runtime）。不能登记只为探针伪造的替身；外部质量另列待实测。' }) }
         if (input.topic === 'verification-gui') return { output: JSON.stringify({ control_bindings: guiControlBindings(projectId), note: '实现需保留这些已确认控件身份，固定业务期望由宿主管理。' }) }

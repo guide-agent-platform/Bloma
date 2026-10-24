@@ -124,7 +124,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       out_of_scope: brief.out_of_scope, assumptions: brief.assumptions, delivery: brief.lean_brief.delivery }),
     '保留真实用户数据与配置；测试使用隔离数据目录。预期依据已确认目标，不能改预期掩盖失败。特殊能力登记与执行细节可通过read_production_context按需读取。',
     '不强制额外测试脚本或自报PASS。特殊能力需要时在CORE_CHECK.json只登记实际入口，例如llm/speech；用read_production_context按需查看协议。未实现或未验证的必需能力如实保留。',
-    brief.lean_brief.ui === 'required' ? '界面任务登记register_gui_check：用真实控件完成fill/click/expect，留存任务加restart；expectations保留任务单预期，acceptance_refs把expect步骤关联F编号。宿主独立操作应用，登记不等于通过。' : '无界面任务登记register_cli_check：固定args与stdout/exit_code，宿主调用实际LAUNCH入口。一次性命令在LAUNCH写mode:"command"，服务默认保持运行。',
+    brief.lean_brief.ui === 'required' ? `界面任务登记register_gui_check：steps需id/kind/selector，expect用equals；仅留存任务加restart且重开后仍需expect。${software ? '宿主绑定已确认预期，不用复制expectations；只提交steps和acceptance_refs（expect步骤id→F编号数组）。' : 'expectations保留任务单预期，acceptance_refs把expect步骤关联F编号。'}宿主独立操作应用，登记不等于通过。` : '无界面任务登记register_cli_check：固定args与stdout/exit_code，宿主调用实际LAUNCH入口。一次性命令在LAUNCH写mode:"command"，服务默认保持运行。',
     software ? '宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。' : '产物根写LAUNCH.json：{"schema_version":1,"command":["python","app.py"],"window_title":"实际标题","ui":"webview"}，按实际入口填写。宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。',
   ].join('\n\n')
   registerParentLoopContext(input.sessionId, { query, env: input.env, maxTokens: Math.min(input.maxTokens, 16384), maxTurns: 96,
