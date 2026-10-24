@@ -9,16 +9,22 @@ import { readLaunchDeclaration } from './launch-smoke'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
 import { GUI_ACTION_KINDS } from './gui-tool-contract'
+import { materializeGuiFixtures } from './gui-fixtures'
 
 type Action = { id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
   | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
+  | { id: string; kind: 'press'; selector: string; key: string }
+  | { id: string; kind: 'scroll'; selector: string }
+  | { id: string; kind: 'drag'; selector: string; target_selector: string }
+  | { id: string; kind: 'upload' | 'native_upload' | 'download'; selector: string; path: string }
+  | { id: string; kind: 'expect_file'; path: string; equals?: string; contains?: string; sha256?: string; nonempty?: true }
   | { id: string; kind: 'restart' | 'lock_data' | 'unlock_data' | 'storage_full' | 'storage_restore' | 'corrupt_data' | 'remove_data' }
 export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: string[]; steps: Action[]
   /** Host-stamped provenance for automatically prepared controls and expectations. */
   design_hash?: string
   control_bindings?: Array<{ selector: string; description: string }>
   acceptance_refs?: Record<string, string[]>
-  fixtures?: Array<{ path: string; text: string }>
+  fixtures?: Array<{ path: string; text?: string; source?: string; sha256?: string; size?: number }>
 }
 export interface GuiAcceptanceResult {
   version: 1; scope: 'host_native_gui_business'; status: 'passed' | 'failed' | 'unverified'
@@ -41,7 +47,11 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
   if (suite.fixtures !== undefined && (!Array.isArray(suite.fixtures) || suite.fixtures.length > 16
     || suite.fixtures.some(file => !file || typeof file.path !== 'string' || !/^input\/[A-Za-z0-9_./-]+$/.test(file.path)
       || file.path.split('/').some(part => !part || ['.', '..'].includes(part) || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(part))
-      || typeof file.text !== 'string' || Buffer.byteLength(file.text) > 4096)
+      || (file.text !== undefined) === (file.source !== undefined)
+      || file.text !== undefined && (typeof file.text !== 'string' || Buffer.byteLength(file.text) > 4096)
+      || file.source !== undefined && (typeof file.source !== 'string' || !file.source || isAbsolute(file.source) || /^[A-Za-z]:/.test(file.source) || file.source.split(/[\\/]/).includes('..'))
+      || file.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(file.sha256)
+      || file.size !== undefined && (!Number.isSafeInteger(file.size) || file.size < 0))
     || new Set(suite.fixtures.map(file => file.path.toLowerCase())).size !== suite.fixtures.length)) throw new Error('GUI_FIXTURES_INVALID')
   if (suite.control_bindings !== undefined && (!Array.isArray(suite.control_bindings) || suite.control_bindings.length > 60
     || suite.control_bindings.some(item => !item || typeof item.selector !== 'string' || !item.selector || item.selector.length > 512 || typeof item.description !== 'string' || !item.description || item.description.length > 1000))) throw new Error('GUI_BINDINGS_INVALID')
@@ -54,6 +64,18 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
     if (step.kind === 'storage_restore') { if (storageFault !== 'full') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
     if (['restart', 'corrupt_data', 'remove_data'].includes(step.kind) && storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
     if (['fill', 'click', 'expect'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw new Error(`GUI_SELECTOR_INVALID: steps[${index}].selector需要真实CSS选择器`)
+    if (['press', 'scroll', 'drag', 'upload', 'native_upload', 'download'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw Error(`GUI_SELECTOR_INVALID: steps[${index}].selector缺失`)
+    if (step.kind === 'press' && (typeof step.key !== 'string' || !step.key || step.key.length > 128)) throw Error(`GUI_KEY_INVALID: steps[${index}].key缺失`)
+    if (step.kind === 'drag' && (typeof step.target_selector !== 'string' || !step.target_selector || step.target_selector.length > 512)) throw Error(`GUI_DRAG_TARGET_INVALID: steps[${index}].target_selector缺失`)
+    if (['upload', 'native_upload', 'download', 'expect_file'].includes(step.kind) && (!('path' in step) || typeof step.path !== 'string'
+      || !(['upload', 'native_upload'].includes(step.kind) ? /^input\/[A-Za-z0-9_./-]+$/ : /^outputs\/[A-Za-z0-9_./-]+$/).test(step.path)
+      || step.path.split('/').some(part => ['.', '..'].includes(part)))) throw Error(`GUI_FILE_PATH_INVALID: steps[${index}].path需input/或outputs/内路径`)
+    if ((step.kind === 'upload' || step.kind === 'native_upload') && !suite.fixtures?.some(file => file.path === step.path)) throw Error(`GUI_UPLOAD_FIXTURE_REQUIRED: steps[${index}].path必须引用已声明fixture`)
+    if (step.kind === 'expect_file' && ([step.equals, step.contains, step.sha256, step.nonempty].filter(value => value !== undefined).length !== 1
+      || step.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(step.sha256)
+      || step.equals !== undefined && (typeof step.equals !== 'string' || step.equals.length > 4096)
+      || step.contains !== undefined && (typeof step.contains !== 'string' || !step.contains || step.contains.length > 4096)
+      || step.nonempty !== undefined && step.nonempty !== true)) throw Error(`GUI_FILE_EXPECT_INVALID: steps[${index}]需equals/contains/sha256/nonempty恰好一项`)
     if (step.kind === 'fill' && (typeof step.value !== 'string' || step.value.length > 4096)) throw new Error(`GUI_VALUE_INVALID: steps[${index}].value需要不超过4096字符的输入文本`)
     if (step.kind === 'expect' && ([step.equals !== undefined, step.contains !== undefined, step.nonempty !== undefined].filter(Boolean).length !== 1
       || step.equals !== undefined && (typeof step.equals !== 'string' || step.equals.length > 4096)
@@ -64,7 +86,7 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
   if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
   const groups = splitSteps(suite)
   if (groups.length > 8) throw new Error(`GUI_RESTART_LIMIT_EXCEEDED: ${groups.length}>8`)
-  const emptySegment = groups.findIndex(group => !group.length || !options.allowActionsOnly && !group.some(step => step.kind === 'expect'))
+  const emptySegment = groups.findIndex(group => !group.length || !options.allowActionsOnly && !group.some(step => step.kind === 'expect' || step.kind === 'expect_file'))
   if (emptySegment >= 0) throw new Error(`GUI_SEGMENT_NEEDS_ASSERTION: 第${emptySegment + 1}段缺少expect；restart后也需实际断言，不要以restart结尾`)
   return suite
 }
@@ -98,10 +120,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     const launch = readLaunchDeclaration(root)
     if (launch?.ok && launch.launch.schema_version === 2 && ['electron', 'browser'].includes(launch.launch.ui ?? '')) {
       temporary = mkdtempSync(join(tmpdir(), 'bloma-host-software-gui-'))
-      for (const fixture of suite.fixtures ?? []) {
-        const target = join(temporary, 'data', fixture.path)
-        mkdirSync(join(target, '..'), { recursive: true }); writeFileSync(target, fixture.text)
-      }
+      materializeGuiFixtures(options.projectId, suite, join(temporary, 'data'))
       const { observeSoftwareGui } = await import('../software/gui-observer')
       Object.assign(result, await observeSoftwareGui({ projectId: options.projectId, root, launch: launch.launch, suite, temporary, signal: options.signal }))
     } else {
@@ -109,10 +128,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     const entry = realpathSync(resolve(root, launch.launch.command[1])), rel = relative(root, entry)
     if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !entry.endsWith('.py')) throw new Error('GUI_ENTRY_OUTSIDE_PROJECT')
     temporary = mkdtempSync(join(tmpdir(), 'bloma-host-gui-'))
-    for (const fixture of suite.fixtures ?? []) {
-      const target = join(temporary, 'data', fixture.path)
-      mkdirSync(join(target, '..'), { recursive: true }); writeFileSync(target, fixture.text)
-    }
+    materializeGuiFixtures(options.projectId, suite, join(temporary, 'data'))
     const python = options.python ?? resolveDriverVenvCommand([launch.launch.command[0]], root)[0]
     for (const [index, group] of splitSteps(suite).entries()) {
       options.signal?.throwIfAborted()

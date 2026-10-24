@@ -5,7 +5,7 @@
 | 批次 | 状态 | 结果与边界 |
 | --- | --- | --- |
 | A1/A2 持续调试/错误观察 | 已实现并定向验证 | 正常Electron/浏览器入口、跨调用状态、受管理进程、日志与版本绑定；见下文 |
-| A3 文件交互 | 待实施 | 上传、下载、键盘/拖拽及冻结文件fixture |
+| A3 文件交互 | 已实现并定向验证 | 真实上传/原生Open、下载、键盘/滚动/拖拽；冻结二进制fixture，PDF/Word真实提取与损坏文件反馈 |
 | B 增量修改/恢复 | 待实施 | 稳定发布目录、已有行为及迁移恢复 |
 | C 环境/独立交付 | 待实施 | 运行时/依赖与成品资格；干净机器验证需真实环境 |
 | D 工程接入/长期任务 | 待实施 | 接入已有工程、检索与可继续现场 |
@@ -27,6 +27,16 @@ Electron调试通过受管理进程启动正常程序，并连接本机CDP；该
 初始测试发现Electron夹具全局const api与preload导出的同名属性冲突，同时发现空stack会掩盖错误message；已修正夹具并改进错误文本回退。保留失败specialize-a1-tests.log。
 
 specialize-a1-managed-tests.log中3项实际Electron/浏览器测试通过：跨调用保留状态、错误捕获/脱敏、真正更新后端版本并保留数据、取消释放端口、借用服务关闭后继续可用。specialize-a1-commit-tests.log中3文件/13项通过，含协作所有权和进程后代回收；specialize-a1-final-tests.log中3文件/16项通过，含真实Pi契约和制作收口兼容。类型最终见specialize-a1-final-types3.log，构建见specialize-a1-release-build.log；集合重叠不相加。工具只返回近期有界日志和log_cursor，避免每轮重复发送完整诊断。
+
+## A3 文件交互
+
+统一GUI协议新增upload/native_upload/download/expect_file/press/scroll/drag。输入文件限制在项目及隔离input目录，输出限制在隔离outputs目录，拒绝链接越界。源文件冻结为宿主内容摘要与字节，登记后源文件变化不能替换输入；损坏宿主冻结字节返回unverified，不沿用旧PASS。持续调试可复用已登记输入，追加新输入不重新冻结旧源文件。单文件20MiB、总计64MiB，二进制不进入模型文本。
+
+Windows原生Open适配器只操作本次创建的活进程树及其拥有的对话框，核对进程身份；不使用全局焦点、SendKeys或磁盘PID。真实Electron测试发现UIA原生窗口嵌套与ComboBox包装器差异；最终选择精确文件名控件与Open按钮，要求对话框实际关闭，并由产品读取文件内容的独立断言确认。失败日志保留，未弱化预期。
+
+specialize-a3-final-tests.log：2文件6项实际Electron/浏览器交互通过。specialize-a3-persistent-final.log：追加文件后复用原冻结内容的3项持续会话测试通过，与前集合重叠。specialize-a3-contract-tests.log：2文件16项通过，含原Python原生GUI与Pi契约回放。类型specialize-a3-final-types.log、构建specialize-a3-final-build.log通过（最后的fixture追加修正另补类型和构建）。
+
+specialize-a3-document-fixed.log：真实PDF.js与Mammoth文本提取、浏览器导入、导出读回和损坏PDF错误反馈1项通过，详情software-document-import-acceptance.json。可选依赖从本机已有学习工具读取，不新增旧版库到Bloma依赖。该证据仅覆盖文本提取，不证明PDF页面渲染、干净机器安装或真实模型成本质量。
 
 ## 后续验证原则
 

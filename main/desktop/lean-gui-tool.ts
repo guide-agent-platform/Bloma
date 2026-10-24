@@ -4,18 +4,19 @@ import { readPrdBackplane } from '../project/prd-store'
 import { findProject, updateProject } from '../project/project-service'
 import { prdScopeFingerprint, trustedAcceptance } from '../project/requirement-contract'
 import { guiSuitePath, installGuiAcceptanceSuite, parseGuiSuite } from './gui-acceptance'
-import { guiStepsSchema, GUI_CHECK_EXAMPLE, guiInputFailure, SOFTWARE_GUI_ACTION_KINDS } from './gui-tool-contract'
+import { guiStepsSchema, GUI_CHECK_EXAMPLE, guiInputFailure, SOFTWARE_GUI_ACTION_KINDS, LEGACY_GUI_ACTION_KINDS } from './gui-tool-contract'
 import { isSoftwareProject } from './workflow-policy'
+import { sealGuiFixtures, GUI_FIXTURE_SCHEMA } from './gui-fixtures'
 
 /** Bind user intent to a host-executed GUI suite. Registration is never PASS. */
 export function buildLeanGuiTool(projectId: string): AgentLoopTool {
   const software = isSoftwareProject(projectId)
   return { name: 'register_gui_check', description: `登记宿主真实GUI检查。steps需唯一id和kind，expect精确预期用equals；acceptance_refs为expect步骤id→F编号数组。${software ? '宿主自动绑定已确认任务单，无需复制expectations。' : 'expectations逐项复制任务单expected。'}示例：${JSON.stringify(GUI_CHECK_EXAMPLE)}。只登记不等于通过；同目标修复不能降低固定输入或预期。`,
     input_schema: { type: 'object', required: software ? ['steps', 'acceptance_refs'] : ['steps', 'expectations', 'acceptance_refs'], properties: {
-      steps: guiStepsSchema(96, software ? SOFTWARE_GUI_ACTION_KINDS : undefined),
+      steps: guiStepsSchema(96, software ? SOFTWARE_GUI_ACTION_KINDS : LEGACY_GUI_ACTION_KINDS),
       expectations: { type: 'object', additionalProperties: { type: 'string' }, description: software ? '可省略；如提供必须与宿主预期完全一致，不能改写用户意图。' : 'F编号→任务单expected原文，必须覆盖全部功能。' },
       acceptance_refs: { type: 'object', additionalProperties: { type: 'array', minItems: 1, items: { type: 'string', pattern: '^F-\\d+$' } }, description: '例如 {"answer":["F-001"]}；键必须是expect步骤id，全部功能都要被实际断言覆盖。' },
-      fixtures: { type: 'array', items: { type: 'object', additionalProperties: true } },
+      fixtures: GUI_FIXTURE_SCHEMA,
     } }, execute: async (input, ctx) => {
       try {
         ctx.signal.throwIfAborted()
@@ -28,11 +29,11 @@ export function buildLeanGuiTool(projectId: string): AgentLoopTool {
           || brief.requirements.some(row => expected[row.id] !== authoritative[row.id]) || Object.keys(expected).some(id => !Object.hasOwn(authoritative, id)))) {
           return guiInputFailure(new Error('GUI_EXPECTATION_SCOPE_MISMATCH: expectations应为全部F编号→已确认expected原文；此处拒绝后steps尚未校验'), { authoritative_expectations: authoritative, expectations_optional: software })
         }
-        const suite = parseGuiSuite({ ...input, expectations: authoritative, version: 1, scope_hash: scope, design_hash: project.ux_confirmation.design_hash,
-          covers: brief.requirements.map(row => row.id) })
+        const suite = sealGuiFixtures(projectId, project.root_path, parseGuiSuite({ ...input, expectations: authoritative, version: 1, scope_hash: scope, design_hash: project.ux_confirmation.design_hash,
+          covers: brief.requirements.map(row => row.id) }))
         const refs = suite.acceptance_refs
-        if (!suite.steps.some(step => step.kind === 'fill' || step.kind === 'click') || !refs || Object.entries(refs).some(([id, features]) =>
-          !suite.steps.some(step => step.id === id && step.kind === 'expect') || !Array.isArray(features) || !features.length
+        if (!suite.steps.some(step => ['fill', 'click', 'upload', 'native_upload', 'download', 'press', 'drag'].includes(step.kind)) || !refs || Object.entries(refs).some(([id, features]) =>
+          !suite.steps.some(step => step.id === id && ['expect', 'expect_file'].includes(step.kind)) || !Array.isArray(features) || !features.length
           || features.some(fid => !suite.covers.includes(fid))) || suite.covers.some(fid => !Object.values(refs).some(ids => ids.includes(fid)))) throw new Error(`GUI_EXPECT_OBSERVATIONS_REQUIRED: acceptance_refs必须为expect步骤id→F编号数组，需覆盖${suite.covers.join(',')}，并至少实际fill或click一次`)
         const previous = existsSync(guiSuitePath(projectId)) ? parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8'))) : undefined
         const contract = (value: typeof suite) => JSON.stringify({ refs: value.acceptance_refs, fixtures: value.fixtures, steps: value.steps.map(step => {

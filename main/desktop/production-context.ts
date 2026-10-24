@@ -9,6 +9,7 @@ import { requirementEvidenceHash, trustedAcceptance, acceptanceAssociationIssues
 import type { DispatchExperiment } from './dispatch-experiment'
 import type { RequirementsModel } from '../model/requirements-model'
 import { guiStepsSchema, GUI_CHECK_EXAMPLE, SOFTWARE_GUI_ACTION_KINDS } from './gui-tool-contract'
+import { GUI_FIXTURE_SCHEMA } from './gui-fixtures'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -56,7 +57,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
         if (['verification', 'verification-gui'].includes(String(input.topic)) && isSoftwareProject(projectId)) {
           const brief = readPrdBackplane(projectId)
           return { output: JSON.stringify({ protocol: 'GUI登记只需steps和acceptance_refs，宿主绑定已确认目标，不必复述expectations。kind不是action，expect精确预期填equals。restart前后每段都需expect，仅留存任务才需restart。开发观察不等于最终验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',
-            gui_step_schema: guiStepsSchema(96, SOFTWARE_GUI_ACTION_KINDS), example: GUI_CHECK_EXAMPLE,
+            gui_step_schema: guiStepsSchema(96, SOFTWARE_GUI_ACTION_KINDS), gui_fixture_schema: GUI_FIXTURE_SCHEMA, example: GUI_CHECK_EXAMPLE,
             authoritative_expectations: Object.fromEntries(brief.requirements.map(row => [row.id, trustedAcceptance(brief, row)])),
             control_bindings: guiControlBindings(projectId), data_directory: 'APP_DATA_DIR' }) }
         }

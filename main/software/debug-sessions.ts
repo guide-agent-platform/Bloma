@@ -14,12 +14,13 @@ import { electronEntry, observeGuiStep } from './gui-observer'
 import { softwareEnvironment } from './command-runtime'
 import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
 import { verificationFingerprint } from '../desktop/verification-fingerprint'
+import { materializeGuiFixtures } from '../desktop/gui-fixtures'
 
 export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string }
 export interface DebugSnapshot { id: string; projectId: string; sessionId: string; state: 'opening' | 'ready' | 'closed' | 'failed' | 'interrupted'; version: number; source?: string;
-  stale: boolean; url?: string; screenshot?: string; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
+  stale: boolean; url?: string; screenshot?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
 interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; data: string; file: string; owner: string; page?: Page;
-  child?: ChildProcess; browser?: BrowserContext; browserClient?: Browser; browserServer?: BrowserServer; externalProcessId?: string; ownedProcessId?: string; stdout?: string; stderr?: string; signal: AbortSignal; abort: () => void;
+  child?: ChildProcess; nativeRoot?: number; browser?: BrowserContext; browserClient?: Browser; browserServer?: BrowserServer; externalProcessId?: string; ownedProcessId?: string; stdout?: string; stderr?: string; signal: AbortSignal; abort: () => void;
   activeAction?: string; seq: number; logBytes: number; closing?: Promise<void>; finished?: boolean; timer?: ReturnType<typeof setTimeout>; busy: boolean; launch: LaunchDeclaration }
 const sessions = new Map<string, DebugSession>()
 const observedPages = new WeakSet<Page>()
@@ -77,6 +78,7 @@ async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
     command: [entry.executablePath, ...entry.args, `--user-data-dir=${join(session.temporary, 'profile')}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${address.port}`],
     url: `${origin}/json/version`, dataDir: session.data, signal, internal: true })
   session.ownedProcessId = process.id
+  session.nativeRoot = process.pid
   const { chromium } = await import('playwright')
   session.browserClient = await chromium.connectOverCDP(origin)
   session.browser = session.browserClient.contexts()[0]
@@ -121,6 +123,13 @@ export async function closeAllDebugSessions() {
   const failed = results.find(result => result.status === 'rejected'); if (failed?.status === 'rejected') throw failed.reason
 }
 export function hasAnyDebugSession() { return [...sessions.values()].some(entry => ['opening', 'ready'].includes(entry.snapshot.state)) }
+export function installDebugFixtures(projectId: string, sessionId: string, id: string, suite: GuiAcceptanceSuite) {
+  const session = owned(projectId, sessionId, id)
+  if (session.snapshot.state !== 'ready' || session.busy) throw Error('DEBUG_SESSION_NOT_READY')
+  materializeGuiFixtures(projectId, suite, session.data)
+  session.snapshot.fixtures = [...new Map([...(session.snapshot.fixtures ?? []), ...(suite.fixtures ?? [])].map(file => [file.path, file])).values()]
+  persist(session)
+}
 export function readDebugSession(projectId: string, sessionId: string, id: string, since = 0): DebugSnapshot {
   const session = owned(projectId, sessionId, id), current = verificationFingerprint(session.root)
   const processId = session.externalProcessId ?? session.ownedProcessId
@@ -212,7 +221,7 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
     for (const step of input.steps ?? []) {
       input.signal.throwIfAborted(); session.activeAction = step.id
       if (step.kind === 'restart') throw Error('GUI_ACTION_UNSUPPORTED_IN_SESSION: 重开检查请用正式验收或关闭后重新open')
-      try { const actual = await observeGuiStep(session.page, step); session.snapshot.steps.push({ id: step.id, passed: true, actual }) }
+      try { const actual = await observeGuiStep(session.page, step, { data: session.data, fixtures: session.snapshot.fixtures, nativeProcessRoot: session.nativeRoot, signal: input.signal }); session.snapshot.steps.push({ id: step.id, passed: true, actual }) }
       catch (error) { session.snapshot.steps.push({ id: step.id, passed: false, actual: (error as { actual?: unknown }).actual ?? String(error) }); log(session, 'action.failed', String(error)); break }
     }
     session.activeAction = undefined
