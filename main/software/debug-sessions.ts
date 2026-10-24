@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync 
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
-import type { Browser, BrowserContext, BrowserServer, Page } from 'playwright'
+import type { Browser, BrowserContext, BrowserServer, Page, Request } from 'playwright'
 import type { ChildProcess } from 'node:child_process'
 import type { GuiAcceptanceSuite } from '../desktop/gui-acceptance'
 import type { LaunchDeclaration } from '../desktop/launch-smoke'
@@ -12,11 +12,12 @@ import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { electronEntry, observeGuiStep } from './gui-observer'
 import { softwareEnvironment } from './command-runtime'
-import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
+import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, matchingOwnedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
 import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { materializeGuiFixtures } from '../desktop/gui-fixtures'
 
-export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string }
+export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string;
+  duration_ms?: number; method?: string; url?: string; status?: number }
 export interface DebugSnapshot { id: string; projectId: string; sessionId: string; state: 'opening' | 'ready' | 'closed' | 'failed' | 'interrupted'; version: number; source?: string;
   stale: boolean; url?: string; screenshot?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
 interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; data: string; file: string; owner: string; page?: Page;
@@ -40,26 +41,40 @@ function owned(projectId: string, sessionId: string, id: string): DebugSession {
   if (session.snapshot.projectId !== projectId || session.snapshot.sessionId !== sessionId) throw Error('DEBUG_SESSION_NOT_OWNED')
   return session
 }
-function log(session: DebugSession, kind: string, message: string) {
+function log(session: DebugSession, kind: string, message: string, metadata: Partial<Pick<DebugObservation, 'version' | 'action' | 'duration_ms' | 'method' | 'url' | 'status'>> = {}) {
   const entry: DebugObservation = { seq: ++session.seq, at: new Date().toISOString(), version: session.snapshot.version, action: session.activeAction,
-    kind, message: redactSoftwareOutput(message).slice(0, 1800) }
-  session.snapshot.observations.push(entry); session.logBytes += entry.message.length
-  while (session.snapshot.observations.length > 200 || session.logBytes > 64000) session.logBytes -= session.snapshot.observations.shift()!.message.length
+    kind, message: redactSoftwareOutput(message).slice(0, 1800), ...metadata }
+  session.snapshot.observations.push(entry); session.logBytes += JSON.stringify(entry).length
+  while (session.snapshot.observations.length > 200 || session.logBytes > 64000) session.logBytes -= JSON.stringify(session.snapshot.observations.shift()!).length
   if (['opening', 'ready'].includes(session.snapshot.state) && !session.timer) session.timer = setTimeout(() => {
     session.timer = undefined
     try { persist(session) } catch { session.abort() }
   }, 100)
 }
 function safeUrl(value: string): string {
-  try { const url = new URL(value); return `${url.origin}${url.pathname}` } catch { return '[unavailable URL]' }
+  try { const url = new URL(value); return redactSoftwareOutput(`${url.origin}${url.pathname}`).slice(0, 1200) } catch { return '[unavailable URL]' }
 }
 function observePage(session: DebugSession, page: Page) {
   if (observedPages.has(page)) return
   observedPages.add(page)
   page.on('console', event => log(session, `console.${event.type()}`, event.text()))
   page.on('pageerror', error => log(session, 'renderer.error', error.stack || error.message || String(error)))
-  page.on('requestfailed', request => log(session, 'network.failed', `${request.method()} ${safeUrl(request.url())}: ${request.failure()?.errorText ?? ''}`))
-  page.on('response', response => { if (response.status() >= 400) log(session, 'network.error', `${response.request().method()} ${safeUrl(response.url())}: HTTP ${response.status()}`) })
+  const requests = new WeakMap<Request, { start: number; action?: string; version: number; status?: number }>()
+  page.on('request', request => requests.set(request, { start: performance.now(), action: session.activeAction, version: session.snapshot.version }))
+  page.on('response', response => { const state = requests.get(response.request()); if (state) state.status = response.status() })
+  const finished = (request: Request, failed: boolean) => {
+    const state = requests.get(request); requests.delete(request)
+    const duration = state ? Math.max(0, Math.round(performance.now() - state.start)) : undefined
+    // Keep normal traffic out of context. Failed and slow requests retain the
+    // originating action/version even when they finish after the tool call.
+    if (!failed && (state?.status ?? 0) < 400 && (duration ?? 0) < 1000) return
+    const kind = failed ? 'network.failed' : (state?.status ?? 0) >= 400 ? 'network.error' : 'network.slow'
+    const url = safeUrl(request.url()), method = request.method()
+    log(session, kind, `${method} ${url}: ${failed ? request.failure()?.errorText ?? 'request failed' : `HTTP ${state?.status ?? 'unknown'}`}${duration === undefined ? '' : ` (${duration}ms)`}`,
+      { action: state?.action, version: state?.version ?? session.snapshot.version, duration_ms: duration, method, url, status: state?.status })
+  }
+  page.on('requestfailed', request => finished(request, true))
+  page.on('requestfinished', request => finished(request, false))
   page.on('download', download => log(session, 'download', download.suggestedFilename()))
   page.on('close', () => { log(session, 'page.closed', '调试窗口关闭'); if (page === session.page && session.snapshot.state === 'ready') void closeDebugSession(session.snapshot.projectId, session.snapshot.sessionId, session.snapshot.id).catch(() => {}) })
 }
@@ -144,8 +159,8 @@ export function readDebugSession(projectId: string, sessionId: string, id: strin
     if (process.state === 'failed' || process.state === 'exited' || process.state === 'stopped') session.snapshot.error = `DEBUG_BACKEND_UNAVAILABLE: ${process.state}`
   }
   const available = session.snapshot.observations.filter(row => row.seq > since), recent = available.slice(-16)
-  let characters = recent.reduce((total, row) => total + row.message.length, 0)
-  while (characters > 12000 && recent.length > 1) characters -= recent.shift()!.message.length
+  let characters = recent.reduce((total, row) => total + JSON.stringify(row).length, 0)
+  while (characters > 12000 && recent.length > 1) characters -= JSON.stringify(recent.shift()!).length
   return { ...session.snapshot, stale: !current || current !== session.snapshot.source,
     log_cursor: session.seq, observations_omitted: available.length - recent.length,
     observations: recent, steps: [...session.snapshot.steps] }
@@ -167,10 +182,12 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
       if (input.processId) throw Error('DEBUG_ELECTRON_ATTACH_UNSUPPORTED')
       await openManagedElectron(session, input.signal)
     } else if (input.launch.ui === 'browser' && input.launch.url) {
+      input.processId ??= matchingOwnedSoftwarePreview(input.projectId, input.sessionId, input.root, input.launch.url)
       const service = input.processId ? ownedSoftwarePreview(input.projectId, input.sessionId, input.processId)
         : await startSoftwareProcess({ root: input.root, projectId: input.projectId, sessionId: session.owner, command: input.launch.command,
           url: input.launch.url, dataDir: session.data, signal: input.signal })
       if (service.root !== resolve(input.root)) throw Error('DEBUG_PROCESS_ROOT_MISMATCH')
+      if (!source || service.source !== source) throw Error('DEBUG_PROCESS_SOURCE_CHANGED: 已有服务不是当前源码版本；先stop_process后start_service，不能把旧后端绑定为新代码')
       session.externalProcessId = input.processId; session.snapshot.url = service.url
       if (!input.processId) session.ownedProcessId = service.id
       session.browserServer = await chromium.launchServer({ headless: true,
@@ -216,7 +233,7 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
       }
       input.signal.throwIfAborted(); session.page.setDefaultTimeout(4000); session.snapshot.state = 'ready'
       session.snapshot.steps = []; session.snapshot.error = undefined; session.stdout = ''; session.stderr = ''; log(session, 'version.reload', '已重启调试入口以绑定新代码，保留隔离持久数据；旧观察保留原版本编号')
-    } else if (readDebugSession(input.projectId, input.sessionId, input.id).stale) throw Error('DEBUG_SOURCE_CHANGED: 先reload以标记新版本，不将旧窗口当作新代码')
+    } else if (readDebugSession(input.projectId, input.sessionId, input.id).stale) throw Error('DEBUG_SOURCE_CHANGED: 先reload以标记新版本；若每次保存业务数据都会触发，核对是否把APP_DATA_DIR覆盖到了项目内，使用宿主提供的工程外数据目录。不能把旧窗口当作新代码')
     session.snapshot.steps = []
     for (const step of input.steps ?? []) {
       input.signal.throwIfAborted(); session.activeAction = step.id

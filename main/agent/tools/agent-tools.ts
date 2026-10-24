@@ -489,7 +489,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     execute: async (toolInput) => {
       const project = findProject(projectId)
       let subDir = ''
-      if (typeof toolInput.path === 'string' && toolInput.path.trim()) {
+      if (typeof toolInput.path === 'string' && toolInput.path.trim() && !['.', './'].includes(toolInput.path.trim().replaceAll('\\', '/'))) {
         const resolved = resolveInsideProject(projectRoot(), toolInput.path)
         if (!resolved.ok) return { output: resolved.error, isError: true }
         subDir = resolved.rel
@@ -744,7 +744,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const pattern = String(toolInput.pattern ?? '').trim()
       if (!pattern) return { output: '缺少 pattern 参数（glob 模式，如 src/**/*.js）。', isError: true }
       let subDir = ''
-      if (typeof toolInput.path === 'string' && toolInput.path.trim()) {
+      if (typeof toolInput.path === 'string' && toolInput.path.trim() && !['.', './'].includes(toolInput.path.trim().replaceAll('\\', '/'))) {
         const resolved = resolveInsideProject(projectRoot(), toolInput.path)
         if (!resolved.ok) return { output: resolved.error, isError: true }
         subDir = resolved.rel

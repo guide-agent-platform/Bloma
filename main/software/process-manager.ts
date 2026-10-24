@@ -6,14 +6,17 @@ import { getPromaHome } from '../../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../../storage/json-store'
 import { projectDirectory, resolveSoftwareCommand, softwareEnvironment } from './command-runtime'
 import { mainRootDir } from '../platform/paths'
+import { softwareVerificationFingerprint } from '../desktop/verification-fingerprint'
 
 export interface SoftwareProcessSnapshot {
+  source?: string
+  data_dir?: string
   root?: string
   internal?: boolean
   id: string; projectId: string; sessionId: string; state: 'starting' | 'running' | 'stopping' | 'exited' | 'failed' | 'stopped' | 'interrupted'
   pid?: number; code?: number | null; url?: string; ready?: boolean; stdout: string; stderr: string; startedAt: string
 }
-interface OwnedProcess { snapshot: SoftwareProcessSnapshot; file: string; child: ChildProcess; abort: () => void; signal?: AbortSignal; timer?: ReturnType<typeof setTimeout>; stopping?: Promise<void>; restart?: (signal: AbortSignal) => Promise<SoftwareProcessSnapshot> }
+interface OwnedProcess { snapshot: SoftwareProcessSnapshot; commandKey: string; file: string; child: ChildProcess; abort: () => void; signal?: AbortSignal; timer?: ReturnType<typeof setTimeout>; stopping?: Promise<void>; restart?: (signal: AbortSignal) => Promise<SoftwareProcessSnapshot> }
 const processes = new Map<string, OwnedProcess>()
 const TAIL = 32768
 const pathFor = (id: string) => {
@@ -70,15 +73,26 @@ export async function stopSoftwareProcess(projectId: string, id: string, session
 
 export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean; internal?: boolean }): Promise<SoftwareProcessSnapshot> {
   input.signal?.throwIfAborted()
-  if ([...processes.values()].filter(p => p.snapshot.projectId === input.projectId && ['starting', 'running'].includes(p.snapshot.state)).length >= 3) throw new Error('PROCESS_CONCURRENCY_LIMIT: 请先停止不再使用的预览进程')
   const cwd = projectDirectory(input.root, input.cwd), url = input.url ? loopbackUrl(input.url) : undefined
+  const commandKey = JSON.stringify([cwd, input.command, input.dataDir ?? null, Boolean(input.internal)])
+  const source = softwareVerificationFingerprint(input.root)
+  if (!input.independentUserApp && url) {
+    const existing = [...processes.values()].find(entry => entry.snapshot.projectId === input.projectId && entry.snapshot.sessionId === input.sessionId
+      && entry.snapshot.url === url && entry.snapshot.state === 'running' && entry.snapshot.ready && entry.commandKey === commandKey)
+    if (existing) {
+      if (!source || existing.snapshot.source !== source) throw Error(`PROCESS_SOURCE_CHANGED: process_id=${existing.snapshot.id}；源码已变化，先stop_process再启动，或对已有调试会话reload`)
+      return softwareProcess(input.projectId, existing.snapshot.id, input.sessionId)
+    }
+  }
+  if ([...processes.values()].filter(p => p.snapshot.projectId === input.projectId && ['starting', 'running'].includes(p.snapshot.state)).length >= 3) throw new Error('PROCESS_CONCURRENCY_LIMIT: 请先停止不再使用的预览进程')
   if (url) await new Promise<void>((resolve, reject) => {
     const address = new URL(url), probe = createServer()
     probe.once('error', () => reject(new Error('PREVIEW_PORT_ALREADY_IN_USE: 请复用已知进程或选择空闲端口，不能把其它服务当成本次启动成功')))
     probe.listen(Number(address.port || 80), address.hostname.replace(/^\[|\]$/g, ''), () => probe.close(() => resolve()))
   })
-  const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir))
-  const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, root: projectDirectory(input.root), ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
+  const environment = softwareEnvironment(input.projectId, input.dataDir)
+  const resolved = resolveSoftwareCommand(input.root, input.command, environment)
+  const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, root: projectDirectory(input.root), source, data_dir: environment.APP_DATA_DIR, ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
   // Save ownership before spawn. A failure cannot leave an untracked child.
   const file = pathFor(snapshot.id)
   writeJsonFile(file, snapshot)
@@ -88,7 +102,7 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
     detached: process.platform !== 'win32' || input.independentUserApp, stdio: [input.independentUserApp ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
   child.stdin?.on('error', () => { /* lifecycle error/exit handlers own terminal state */ })
   if (!input.independentUserApp) child.stdin?.write(`${JSON.stringify({ ...resolved, cwd })}\n`)
-  const entry: OwnedProcess = { snapshot, file, child, signal: input.signal, restart: signal => startSoftwareProcess({ ...input, signal }), abort: () => { void stopSoftwareProcess(input.projectId, snapshot.id).catch(() => undefined) } }
+  const entry: OwnedProcess = { snapshot, commandKey, file, child, signal: input.signal, restart: signal => startSoftwareProcess({ ...input, signal }), abort: () => { void stopSoftwareProcess(input.projectId, snapshot.id).catch(() => undefined) } }
   processes.set(snapshot.id, entry)
   for (const [id, previous] of processes) if (processes.size > 128 && !['starting', 'running', 'stopping'].includes(previous.snapshot.state)) processes.delete(id)
   snapshot.pid = child.pid
@@ -137,6 +151,11 @@ export function ownedSoftwarePreview(projectId: string, sessionId: string, id: s
   const snapshot = softwareProcess(projectId, id, sessionId)
   if (!processes.has(id) || snapshot.internal || snapshot.state !== 'running' || !snapshot.ready || !snapshot.url || sessionId === 'user-launch') throw Error('DEBUG_PROCESS_NOT_OWNED_AND_READY')
   return snapshot
+}
+export function matchingOwnedSoftwarePreview(projectId: string, sessionId: string, root: string, url: string) {
+  return [...processes.values()].find(entry => entry.snapshot.projectId === projectId && entry.snapshot.sessionId === sessionId
+    && entry.snapshot.root === projectDirectory(root) && entry.snapshot.url === loopbackUrl(url) && !entry.snapshot.internal
+    && entry.snapshot.state === 'running' && entry.snapshot.ready)?.snapshot.id
 }
 export async function restartOwnedSoftwarePreview(projectId: string, sessionId: string, id: string, signal: AbortSignal): Promise<SoftwareProcessSnapshot> {
   ownedSoftwarePreview(projectId, sessionId, id)

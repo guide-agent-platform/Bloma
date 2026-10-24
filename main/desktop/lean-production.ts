@@ -165,16 +165,25 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       runSignal.throwIfAborted()
       updateProject(input.projectId, { status: 'active', desktop_phase: 'desktop-implement', current_stage: 'generating_mvp', desktop_blocked: undefined })
       emit('stage_changed', { stage: 'desktop-implement' })
-      const result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'lean-build', system, task, query, env: input.env, tools,
+      let result: Awaited<ReturnType<typeof runAgentLoop>> | undefined, modelBudgetStop: string | undefined
+      try { result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'lean-build', system, task, query, env: input.env, tools,
         projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, signal: runSignal,
         maxTokens: Math.min(input.maxTokens, 16384), maxTurns: 96, permissionMode: 'allow-all', workMode: 'implementation', executionScope: budget.executionScope,
         materials: sessionMaterials(input.projectId, input.sessionId), images: initial ? input.images : undefined,
         initialMessagePersisted: initial ? input.initialMessagePersisted : false,
         shouldPause: () => scopePending,
-        beforeComplete: ctx => guardDispatcherCompletion(ctx), publish: emit })
+        beforeComplete: ctx => guardDispatcherCompletion(ctx), publish: emit }) }
+      catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        const admissionStopped = /^(?:HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED|REQUEST_BUDGET_EXHAUSTED|MONETARY_(?:BUDGET|OPERATION)_EXHAUSTED)$/.test(reason)
+        const registered = brief.lean_brief.ui === 'required' ? guiSuitePath(input.projectId) : cliSuitePath(input.projectId)
+        if (!software || runSignal.aborted || !admissionStopped || !existsSync(registered)) throw error
+        modelBudgetStop = reason
+        emit('message_delta', { text: '模型请求额度已到，已有验收规则。我会停止模型调用，继续运行宿主检查；只有实际通过才交付。' })
+      }
       initial = false
       if (scopePending) { checkpoint('waiting_user'); deps.complete(input.sessionId, input.projectId, 'incomplete'); return }
-      if (result.status !== 'completed') { blocked(result.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result.termination_detail?.reason ?? result.status}），可沿当前现场继续。`, false, result.status === 'cancelled' ? 'cancelled' : 'blocked'); return }
+      if (!modelBudgetStop && result?.status !== 'completed') { blocked(result?.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result?.termination_detail?.reason ?? result?.status}），可沿当前现场继续。`, false, result?.status === 'cancelled' ? 'cancelled' : 'blocked'); return }
       // Integration checks own a quiet tree. Never race outstanding writers or dev servers.
       stopDelegations(input.sessionId)
       if (software) { await closeDebugSessions(input.projectId, input.sessionId); await stopSoftwareSession(input.projectId, input.sessionId); emit('software_preview_changed', { preview_url: null }) }
@@ -215,6 +224,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         }
       }
       if (failure) {
+        if (modelBudgetStop) { blocked(`模型请求额度已到，宿主检查未通过，未再调用模型：\n${failure}`); return }
         if (core.status === 'environment_blocked' && !cleanEnvironmentPending) { blocked(failure); return }
         if (software) {
           const progress = recordSoftwareRepair({ projectId: input.projectId, sessionId: input.sessionId, runId, error: failure,
@@ -233,7 +243,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       }
       if (candidate) await verifyReleaseSource(candidate, runSignal)
       const launch = existsSync(join(project.root_path, 'LAUNCH.json')) ? JSON.parse(readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8')) as { command?: string[] } : undefined
-      const text = `本次目标已完成并通过当前核心、安全与启动检查。${software ? '可从项目交付入口一键启动试用。' : launch?.command ? `启动：${launch.command.join(' ')}` : '可从项目交付入口启动。'}${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
+      const text = `${modelBudgetStop ? '模型调用已停止；宿主沿已登记规则完成了实际验证。' : ''}本次目标已完成并通过当前核心、安全与启动检查。${software ? '可从项目交付入口一键启动试用。' : launch?.command ? `启动：${launch.command.join(' ')}` : '可从项目交付入口启动。'}${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
       return async () => {
         runSignal.throwIfAborted()
         if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) { blocked('收口前产物或验证输入发生变化，本次未交付。'); return }

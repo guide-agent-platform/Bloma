@@ -1927,7 +1927,12 @@ export async function executeTurnToolCalls(
  * 纳入取消范围，避免进程级永久阻塞（如 ask 权限 pending）。
  */
 export function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new Error('AGENT_CANCELLED'))
+  if (signal.aborted) {
+    // The producer may synchronously abort before returning a rejected promise
+    // (for example admission racing cancellation). It still needs an observer.
+    void promise.catch(() => undefined)
+    return Promise.reject(new Error('AGENT_CANCELLED'))
+  }
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(new Error('AGENT_CANCELLED'))
     signal.addEventListener('abort', onAbort, { once: true })

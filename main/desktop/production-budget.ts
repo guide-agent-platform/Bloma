@@ -114,12 +114,14 @@ export function createProductionBudget(projectId: string, scope: string, phase: 
     if (runtimeMode === 'lease') {
       if (liveRuntimeLeases.has(key)) throw Error('HARNESS_RUNTIME_ALREADY_ACTIVE')
       if (state.runtimeStartedAt !== undefined) {
+        let previousHostExited = false
         if (state.runtimePid && state.runtimePid !== process.pid) {
           let alive = true
           try { process.kill(state.runtimePid, 0) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') alive = false }
           if (alive) throw Error('HARNESS_RUNTIME_LEASE_ACTIVE: 旧执行宿主仍可能存活，请先关闭旧实例；不接管其进程或同时写入工程')
+          previousHostExited = true
         }
-        if (state.runtimeOwner && now - (state.runtimeHeartbeatAt ?? state.runtimeStartedAt) < RUNTIME_LEASE_MS) throw Error('HARNESS_RUNTIME_LEASE_ACTIVE: 等待旧执行租约过期后继续，不接管仍可能运行的任务')
+        if (!previousHostExited && state.runtimeOwner && now - (state.runtimeHeartbeatAt ?? state.runtimeStartedAt) < RUNTIME_LEASE_MS) throw Error('HARNESS_RUNTIME_LEASE_ACTIVE: 等待旧执行租约过期后继续，不接管仍可能运行的任务')
         const heartbeat = state.runtimeHeartbeatAt ?? state.runtimeStartedAt
         const known = Math.max(0, heartbeat - state.runtimeStartedAt), tail = Math.min(RUNTIME_HEARTBEAT_MS, Math.max(0, now - heartbeat))
         state.runtimeMs = (state.runtimeMs ?? 0) + known + tail

@@ -21,7 +21,7 @@ export function buildSoftwareExecutionTools(projectId: string, beforeExecute?: (
         return { output: JSON.stringify({ exit_code: result.code, stdout: redactSoftwareOutput(result.stdout).slice(-24000), stderr: redactSoftwareOutput(result.stderr).slice(-12000) }), isError: result.code !== 0 }
       } catch (error) { return { output: error instanceof Error ? error.message : String(error), isError: true } }
     } }
-  const start: AgentLoopTool = { name: 'start_service', description: '启动项目内受管理的开发服务器/后台进程，立即保留身份与日志。url填写实际HTTP回环地址时宿主等待就绪；无url只证明进程启动。后续用read_process读日志、stop_process停止。不要用run_command挂住长期服务。',
+  const start: AgentLoopTool = { name: 'start_service', description: '启动项目内受管理的开发服务器/后台进程，立即保留身份与日志。APP_DATA_DIR由宿主提供在工程外，不要自行覆盖为项目内的临时目录，否则保存数据会改变源码版本。url填写实际HTTP回环地址时等待就绪；相同已拥有服务自动复用，后续用read_process/stop_process。不要用run_command挂住长期服务。',
     input_schema: { type: 'object', required: ['command'], properties: { command: commandSchema, cwd: { type: 'string' }, url: { type: 'string' } } },
     execute: async (input, ctx) => {
       try {

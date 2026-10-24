@@ -124,6 +124,7 @@ describe('runAgentLoop 权限防御（F3）', () => {
     const controller = new AbortController()
     controller.abort()
     await expect(withAbort(Promise.resolve('x'), controller.signal)).rejects.toThrow('AGENT_CANCELLED')
+    await expect(withAbort(Promise.reject(Error('producer failed while cancelling')), controller.signal)).rejects.toThrow('AGENT_CANCELLED')
   })
 
   it('withAbort：正常 resolve / reject 透传', async () => {

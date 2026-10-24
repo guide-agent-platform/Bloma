@@ -36,6 +36,7 @@ it('finds deeply nested source and fingerprints more than the legacy 5000-file b
   mkdirSync(join(root, '.venv/Lib'), { recursive: true }); writeFileSync(join(root, '.venv/Lib/dependency.py'), 'not project source')
   expect(verificationFingerprint(root)).toBeUndefined(); expect(softwareVerificationFingerprint(root)).toMatch(/^[a-f0-9]{64}$/)
   const tools = buildSoftwareAgentTools(project.project_id, 'parent', createSoftwareCollaborationPolicy(project.project_id, root, 's'))
+  expect((await tools.find(tool => tool.name === 'list_files')!.execute({ path: '.' }, ctx())).isError).not.toBe(true)
   const found = await tools.find(tool => tool.name === 'find')!.execute({ pattern: '**/deep-module.ts' }, ctx())
   expect(found.output).toContain(deep)
   const search = await tools.find(tool => tool.name === 'inspect_repository')!.execute({ mode: 'search', query: 'deepTarget', path: 'packages' }, ctx())

@@ -64,6 +64,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
           const brief = readPrdBackplane(projectId)
           return { output: JSON.stringify({ protocol: 'GUI登记只需steps和acceptance_refs，宿主绑定已确认目标，不必复述expectations。kind不是action，expect精确预期填equals。restart前后每段都需expect，仅留存任务才需restart。开发观察不等于最终验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',
             gui_step_schema: guiStepsSchema(96, SOFTWARE_GUI_ACTION_KINDS), gui_fixture_schema: GUI_FIXTURE_SCHEMA, example: GUI_CHECK_EXAMPLE,
+            selector_guidance: '列表记录按稳定身份定位，避免nth-child随着新增/编辑后的排序改变。Electron/浏览器观察器支持Playwright可见文本选择器，如#note-list .note-item:has-text("笔记B")；Python固定观察器仍需真实CSS。修正selector可以，不能降低固定输入/预期。',
             authoritative_expectations: Object.fromEntries(brief.requirements.map(row => [row.id, trustedAcceptance(brief, row)])),
             control_bindings: guiControlBindings(projectId), data_directory: 'APP_DATA_DIR' }) }
         }
