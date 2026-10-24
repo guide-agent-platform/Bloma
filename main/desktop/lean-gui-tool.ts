@@ -7,6 +7,7 @@ import { guiSuitePath, installGuiAcceptanceSuite, parseGuiSuite } from './gui-ac
 import { guiStepsSchema, GUI_CHECK_EXAMPLE, guiInputFailure, SOFTWARE_GUI_ACTION_KINDS, LEGACY_GUI_ACTION_KINDS } from './gui-tool-contract'
 import { isSoftwareProject } from './workflow-policy'
 import { sealGuiFixtures, GUI_FIXTURE_SCHEMA } from './gui-fixtures'
+import { assertRetainedSoftwareBehavior } from '../software/regression-baseline'
 
 /** Bind user intent to a host-executed GUI suite. Registration is never PASS. */
 export function buildLeanGuiTool(projectId: string): AgentLoopTool {
@@ -41,6 +42,7 @@ export function buildLeanGuiTool(projectId: string): AgentLoopTool {
           return meaning
         }) })
         if (previous?.scope_hash === scope && contract(previous) !== contract(suite)) throw new Error('GUI_EXISTING_EXPECTATIONS_CHANGED: 同目标只允许修正控件定位，不能改输入或预期过关')
+        if (software) assertRetainedSoftwareBehavior(projectId, 'gui', suite)
         installGuiAcceptanceSuite(projectId, suite)
         updateProject(projectId, { gui_acceptance: { status: 'sealed', scope_hash: scope } })
         return { output: '已登记当前目标的GUI操作与固定预期，尚未执行或判定通过。', feedback: { schema_version: 1, execution: 'completed', verification: 'not_applicable', source: 'host', scope: 'gui_registration' } }

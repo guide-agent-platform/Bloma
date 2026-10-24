@@ -25,6 +25,8 @@ import { violatesCommandBlacklist } from '../desktop/contract-schema'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import { isSoftwareProject } from '../desktop/workflow-policy'
 import { launchSoftwareForUser } from '../software/user-launch'
+import { activeSoftwareRelease } from '../software/release-store'
+import { listSoftwareDataSnapshots, softwareFallbackReleaseId } from '../software/data-update'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -86,7 +88,11 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       } catch {
         /* DELIVERY.md 缺失如实呈现 */
       }
-      const declaration = readLaunchDeclaration(project.root_path)
+      const stable = isSoftwareProject(project.project_id) ? await activeSoftwareRelease(project.project_id, undefined, false) : undefined
+      if (isSoftwareProject(project.project_id)) result.data_snapshots = listSoftwareDataSnapshots(project.project_id)
+      if (stable) result.stable_release = stable.id
+      if (stable) result.can_use_previous_release = Boolean(softwareFallbackReleaseId(project.project_id, stable.id))
+      const declaration = stable ? { ok: true as const, launch: stable.launch } : readLaunchDeclaration(project.root_path)
       if (declaration === null) {
         result.launch = { declared: false, parse_ok: false }
       } else if (declaration.ok) {
@@ -95,7 +101,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       } else {
         result.launch = { declared: true, parse_ok: false, parse_error: declaration.error }
       }
-      result.can_launch = project.current_stage === 'completed' && result.launch.parse_ok
+      result.can_launch = (project.current_stage === 'completed' || Boolean(stable)) && result.launch.parse_ok
       return result
     })
   })
@@ -104,15 +110,16 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectLaunchAppInput>(payload, ['project_id'])
       const project = findProject(input.project_id)
-      if (project.current_stage !== 'completed') {
+      const stable = isSoftwareProject(input.project_id) ? await activeSoftwareRelease(input.project_id, undefined, false) : undefined
+      if (project.current_stage !== 'completed' && !stable) {
         throw new Error('LAUNCH_NOT_DELIVERED: 项目尚未完成交付，不能启动')
       }
-      const raw = readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8')
-      const parsed = parseLaunchDeclaration(raw)
+      const parsed = stable ? { ok: true as const, launch: stable.launch } : parseLaunchDeclaration(readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8'))
       if (!parsed.ok) {
         throw new Error(`LAUNCH_INVALID: ${parsed.error}`)
       }
-      if (isSoftwareProject(input.project_id)) return launchSoftwareForUser(input.project_id, project.root_path, parsed.launch, url => shell.openExternal(url), input.restart === true)
+      if (input.restore_snapshot && input.restore_data_confirmed !== true) throw Error('DATA_RESTORE_CONFIRMATION_REQUIRED')
+      if (isSoftwareProject(input.project_id)) return launchSoftwareForUser(input.project_id, project.root_path, parsed.launch, url => shell.openExternal(url), input.restart === true, input.restore_snapshot, input.previous_release === true)
       const blacklistHit = violatesCommandBlacklist(parsed.launch.command)
       if (blacklistHit) {
         throw new Error(`LAUNCH_BLOCKED: ${blacklistHit}`)

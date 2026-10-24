@@ -30,8 +30,10 @@ it('source export preserves built assets and declared packaged dependencies with
 it('normal one-click command uses persistent user data distinct from verification and reports real output/errors', async () => {
   writeFileSync(join(project.root_path, 'app.cjs'), 'const fs=require("fs"),p=require("path").join(process.env.APP_DATA_DIR,"saved");console.log(fs.existsSync(p)?fs.readFileSync(p,"utf8"):"first");fs.writeFileSync(p,"persisted")')
   const launch = { schema_version: 2 as const, mode: 'command' as const, command: ['node', 'app.cjs'] }
+  writeFileSync(join(project.root_path, 'LAUNCH.json'), JSON.stringify(launch))
   expect(await launchSoftwareForUser(project.project_id, project.root_path, launch, async () => {})).toMatchObject({ started: true, detail: 'first' })
   expect(await launchSoftwareForUser(project.project_id, project.root_path, launch, async () => {})).toMatchObject({ started: true, detail: 'persisted' })
+  writeFileSync(join(project.root_path, 'LAUNCH.json'), JSON.stringify({ ...launch, command: ['node', 'missing.cjs'] }))
   expect(await launchSoftwareForUser(project.project_id, project.root_path, { ...launch, command: ['node', 'missing.cjs'] }, async () => {})).toMatchObject({ started: false })
 })
 it('Node AI entry makes five actual owned HTTP requests and rejects a fixed network-error implementation', async () => {
@@ -54,6 +56,7 @@ it('running user apps survive Agent cleanup, updated versions require explicit r
   const source = (version: string) => `const fs=require('fs'),path=require('path'),data=path.join(process.env.APP_DATA_DIR,'record.txt');if(!fs.existsSync(data))fs.writeFileSync(data,'user record');require('http').createServer((q,s)=>s.end('${version}')).listen(${address.port},'127.0.0.1')`
   writeFileSync(join(project.root_path, 'server.cjs'), source('v1'))
   const launch = { schema_version: 2 as const, ui: 'browser' as const, url: `http://127.0.0.1:${address.port}`, command: ['node', 'server.cjs'] }
+  writeFileSync(join(project.root_path, 'LAUNCH.json'), JSON.stringify(launch))
   const opened: string[] = [], open = async (url: string) => { opened.push(url) }
   expect((await launchSoftwareForUser(project.project_id, project.root_path, launch, open)).started).toBe(true)
   await stopSoftwareSession(project.project_id, 'some-agent-session')
@@ -64,6 +67,6 @@ it('running user apps survive Agent cleanup, updated versions require explicit r
   expect((await launchSoftwareForUser(project.project_id, project.root_path, launch, open, true)).started).toBe(true)
   expect(await (await fetch(launch.url)).text()).toBe('v2')
   const backups = join(home, 'software-app-data', project.project_id, 'backups'), first = readdirSync(backups)[0]
-  expect(readFileSync(join(backups, first, 'record.txt'), 'utf8')).toBe('user record')
+  expect(readFileSync(join(backups, first, 'data', 'record.txt'), 'utf8')).toBe('user record')
   expect(opened).toHaveLength(2)
 }, 45000)

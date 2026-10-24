@@ -46,7 +46,7 @@ export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
   'run_command执行参数数组，直接使用npm/node/python等真实工具；长期服务用start_service，read_process看日志，stop_process关闭。inspect_app的open建立持续Electron/浏览器调试实例，act/read带debug_session_id复用并查看console/失败HTTP；源码变化用reload重启入口并保留隔离数据。默认DOM与截图位置，已知当前渠道支持图像时才用include_image=true或view_image。不自动向未知/纯文本渠道塞截图，也不另派付费视觉审查，视觉未审阅就如实标注。环境未改变时不重复研究。尽早让用户试用实际程序。',
   '默认一个主负责人。独立只读调研/审查可并行；接口和文件边界明确的实现才委派。实现任务用role=implement并给write_paths，彼此不能重叠；子任务只处理自己的文件，构建/进程/集成/最终验证由你执行。依赖紧密、需要频繁互等的工作由你完成，不按角色机械拆分。',
   '最多2个并行子任务；同渠道同模型、单层、共用总请求/输出/费用/取消，不为子任务新增额度。工程命令与派发不另外叠加固定次数门槛，以共享运行预算和实际进度约束。子任务结束只是交接，不是产品通过；保留有效文件和结果，别让新执行者从头重做。',
-  '数据使用APP_DATA_DIR，Electron也支持user-data-dir隔离；业务持久化与测试数据分开。保留真实用户数据，更新前准备恢复路径。普通项目依赖/构建自行完成；系统修改、外发发布、额外付费及破坏性真实数据操作超出普通构建授权，遇到工具拒绝不要绕过。',
+  '数据使用APP_DATA_DIR，Electron也支持user-data-dir隔离；业务持久化与测试数据分开。增量修改保留已有关键行为；数据schema变化先读read_production_context(topic="data-update")登记真实迁移与读回入口。普通项目依赖/构建自行完成；系统修改、外发发布、额外付费及破坏性真实数据操作超出普通构建授权，遇到工具拒绝不要绕过。',
   '成品应有一键启动、清晰的空态/错误/进行中反馈与可恢复的数据保存。需要API配置就在成品设置界面完成，不让用户改源码或在聊天贴密钥；不借用平台Agent渠道密钥。查看实际界面截图并修复具体外观问题，不能只看代码推断界面。',
   '在项目根登记LAUNCH.json schema_version:2。Electron示例command:["node_modules/electron/dist/electron.exe","."],ui:"electron",window_title:"实际窗口标题"；浏览器示例command:["npm","run","start"],ui:"browser",url:"http://127.0.0.1:实际端口"；命令工具command:["node","app.cjs"],mode:"command"。按实际入口填写，打包后应改为实际包入口验证；未打包不声称独立安装包。',
 ].join('\n\n')

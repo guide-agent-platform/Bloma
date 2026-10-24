@@ -6,6 +6,7 @@ import { electronEntry } from './gui-observer'
 import { softwareEnvironment } from './command-runtime'
 import type { LaunchDeclaration } from '../desktop/launch-smoke'
 import type { ChildProcess } from 'node:child_process'
+import { softwareDataDirectory } from './data-update'
 
 const pages = new Map<string, Page>()
 /** Host-only handle, never exposed to a product, renderer or model tool. */
@@ -17,9 +18,9 @@ export async function startSoftwareCorrection(projectId: string, root: string, l
   if (launch.ui !== 'electron') throw Error('CORRECTION_RUNTIME_UNSUPPORTED: 当前点选适配器支持Electron；可直接在聊天描述其它程序的修改')
   const base = join(getPromaHome(), 'software-app-data', projectId), data = join(sessionDir, 'data')
   mkdirSync(data, { recursive: true })
-  const dataSnapshotted = existsSync(join(base, 'data'))
-  if (dataSnapshotted) cpSync(join(base, 'data'), data, { recursive: true })
-  if (existsSync(join(base, 'environment-home'))) cpSync(join(base, 'environment-home'), join(sessionDir, 'environment-home'), { recursive: true })
+  const currentData = softwareDataDirectory(projectId), dataSnapshotted = existsSync(currentData)
+  if (dataSnapshotted) cpSync(currentData, data, { recursive: true })
+  if (existsSync(join(currentData, '..', 'environment-home'))) cpSync(join(currentData, '..', 'environment-home'), join(sessionDir, 'environment-home'), { recursive: true })
   const { _electron } = await import('playwright')
   let app: ElectronApplication | undefined
   let child: ChildProcess | undefined

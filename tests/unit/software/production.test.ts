@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -9,6 +9,8 @@ import { syncDocuments } from '../../../main/project/document-sync'
 import { enterDesktopLine, isDesktopLineActive, type DesktopRouteDeps } from '../../../main/desktop/desktop-route'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/stages/orchestration-contracts'
 import { runCoreVerification } from '../../../main/desktop/core-verification'
+import { activeSoftwareRelease } from '../../../main/software/release-store'
+import { launchSoftwareForUser } from '../../../main/software/user-launch'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-software-loop-')); process.env.PROMA_HOME = home })
@@ -43,6 +45,11 @@ it.each(['quick', 'longterm'] as const)('real Pi software loop writes JS, builds
   expect(JSON.stringify(calls[0].messages)).not.toContain('schema_version\\":1,\\"command\\":[\\"python\\"')
   expect(events.some(event => event.type === 'stage_changed' && event.payload.stage === 'delivered')).toBe(true)
   expect(isDesktopLineActive({ ...findProject(project.project_id), desktop_phase: undefined })).toBe(true)
+  const released = await activeSoftwareRelease(project.project_id)
+  expect(released?.verified).toBeDefined(); expect(released?.root).not.toBe(project.root_path)
+  expect(JSON.parse(readFileSync(join(released!.root, '00_VERIFY/core-verification.json'), 'utf8')).status).toBe('passed')
+  writeFileSync(join(project.root_path, 'dist/app.cjs'), 'console.log("unverified working version")')
+  expect(await launchSoftwareForUser(project.project_id, project.root_path, released!.launch, async () => {})).toMatchObject({ started: true, detail: '5' })
 }, 120000)
 it('confirmed desktop delivery cannot silently use a browser launch declaration', async () => {
   const project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' })

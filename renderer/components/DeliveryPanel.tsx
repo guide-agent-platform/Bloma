@@ -35,11 +35,15 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
   const [loading, setLoading] = React.useState(false)
   const [launchState, setLaunchState] = React.useState<string | null>(null)
   const [needsRestart, setNeedsRestart] = React.useState(false)
+  const [restartPrevious, setRestartPrevious] = React.useState(false)
   const [showCorrection, setShowCorrection] = React.useState(false)
+  const [restoreId, setRestoreId] = React.useState('')
+  const [confirmRestore, setConfirmRestore] = React.useState(false)
+  const [restorePrevious, setRestorePrevious] = React.useState(false)
   const currentProjectId = React.useRef(projectId)
   const refreshSequence = React.useRef(0)
   currentProjectId.current = projectId
-  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null); setNeedsRestart(false) }, [projectId])
+  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null); setNeedsRestart(false); setRestartPrevious(false); setRestoreId(''); setConfirmRestore(false); setRestorePrevious(false) }, [projectId])
 
   const refresh = React.useCallback(async () => {
     if (!projectId) return
@@ -63,7 +67,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
   }, [refresh, desktopPhase, artifactsVersion, project?.current_stage])
 
-  const onLaunch = async (restart = false): Promise<void> => {
+  const onLaunch = async (restart = false, snapshot?: string, previous = false): Promise<void> => {
     if (!projectId) return
     setLaunchState('启动中…')
     const api = window.electronAPI?.projectDeliverables
@@ -72,14 +76,16 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       return
     }
     let result
-    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId, ...(restart ? { restart: true } : {}) }) }
+    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId, ...(restart ? { restart: true } : {}), ...(snapshot ? { restore_snapshot: snapshot, restore_data_confirmed: true } : {}), ...(previous ? { previous_release: true } : {}) }) }
     catch { if (currentProjectId.current === projectId) setLaunchState('启动失败：请重试，或告诉向导你遇到的问题'); return }
     if (currentProjectId.current !== projectId) return
+    setConfirmRestore(false); void refresh()
     if (result.ok && result.data.started) {
       setNeedsRestart(false)
       setLaunchState(result.data.detail ?? '已启动，可以开始使用。')
     } else {
       setNeedsRestart(result.ok && result.data.needs_restart === true)
+      setRestartPrevious(previous)
       setLaunchState(result.ok && result.data.detail ? result.data.detail : `启动失败：${result.ok ? '进程未能存活' : result.error?.user_visible_message || result.error?.message || '未知错误'}`)
     }
   }
@@ -139,7 +145,20 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
           </span>
         )}
         {launchState && <span data-ai-id="delivery-launch-state" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{launchState}</span>}
-        {needsRestart && <button type="button" disabled={running || !data?.can_launch} onClick={() => void onLaunch(true)}>已保存，关闭旧版本并启动更新</button>}
+        {needsRestart && <button type="button" disabled={running || !data?.can_launch} onClick={() => void onLaunch(true, undefined, restartPrevious)}>已保存，关闭旧版本并启动更新</button>}
+        {data?.can_use_previous_release && <button type="button" disabled={running || !data.can_launch} onClick={() => void onLaunch(false, undefined, true)}>启动上一可用版本</button>}
+        {Boolean(data?.data_snapshots?.length) && <>
+          <select aria-label="选择数据备份" value={restoreId} onChange={event => { setRestoreId(event.target.value); setConfirmRestore(false) }}>
+            <option value="">数据备份…</option>
+            {data?.data_snapshots?.map(snapshot => <option key={snapshot.id} value={snapshot.id}>{new Date(snapshot.at).toLocaleString()}</option>)}
+          </select>
+          <button type="button" disabled={!restoreId || running || !data?.can_launch} onClick={() => setConfirmRestore(true)}>恢复备份…</button>
+          {confirmRestore && <div role="alert">请先保存并关闭程序。将恢复所选时点的数据，当前数据会另外备份。
+            {data?.can_use_previous_release && <label><input type="checkbox" checked={restorePrevious} onChange={event => setRestorePrevious(event.target.checked)} />同时使用上一可用的软件版本</label>}
+            <button type="button" disabled={running} onClick={() => void onLaunch(true, restoreId, Boolean(data?.can_use_previous_release && restorePrevious))}>已保存，恢复所选数据</button>
+            <button type="button" onClick={() => setConfirmRestore(false)}>取消</button>
+          </div>}
+        </>}
       </div>}
 
       {embedded && liveUrl && <iframe title="实际程序试用" src={liveUrl} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" style={{ flex: 1, width: '100%', minHeight: 360, border: 0 }} />}

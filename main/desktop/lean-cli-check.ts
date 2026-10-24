@@ -10,6 +10,7 @@ import { readLaunchDeclaration } from './launch-smoke'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand } from './process-driver'
 import { isSoftwareProject } from './workflow-policy'
 import { executeSoftwareCommand } from '../software/command-runtime'
+import { assertRetainedSoftwareBehavior } from '../software/regression-baseline'
 
 interface CliCase { name: string; covers: string[]; args: string[]; stdout: string; exit_code: number }
 interface CliSuite { version: 1; scope_hash: string; cases: CliCase[]; expectations: Record<string, string> }
@@ -43,6 +44,7 @@ export function buildLeanCliTool(projectId: string): AgentLoopTool {
         if (ctx.projectId !== projectId) throw new Error('CLI_PROJECT_MISMATCH')
         const suite = parseSuite({ ...input, version: 1, scope_hash: prdScopeFingerprint(readPrdBackplane(projectId)) })
         checkScope(suite, projectId)
+        if (isSoftwareProject(projectId)) assertRetainedSoftwareBehavior(projectId, 'cli', suite)
         if (existsSync(cliSuitePath(projectId))) {
           const previous = parseSuite(JSON.parse(readFileSync(cliSuitePath(projectId), 'utf8')))
           if (previous.scope_hash === suite.scope_hash && JSON.stringify(previous.cases) !== JSON.stringify(suite.cases)) throw new Error('CLI_EXISTING_EXPECTATIONS_CHANGED')

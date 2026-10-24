@@ -10,6 +10,7 @@ import type { DispatchExperiment } from './dispatch-experiment'
 import type { RequirementsModel } from '../model/requirements-model'
 import { guiStepsSchema, GUI_CHECK_EXAMPLE, SOFTWARE_GUI_ACTION_KINDS } from './gui-tool-contract'
 import { GUI_FIXTURE_SCHEMA } from './gui-fixtures'
+import { SOFTWARE_DATA_UPDATE_GUIDANCE } from '../software/data-update'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -48,12 +49,13 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
     description: '只读制作交接：overview看范围，features按feature_ids读完整功能/规则/流程/验收（省略编号返回全部），prd读正文，verification读通用验证登记；模型或语音业务分别用verification-llm/verification-speech。按职责读取，避免重复通读。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'verification', 'verification-llm', 'verification-speech', 'verification-gui'] },
+      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
+        if (input.topic === 'data-update' && isSoftwareProject(projectId)) return { output: SOFTWARE_DATA_UPDATE_GUIDANCE }
         if (['verification', 'verification-gui'].includes(String(input.topic)) && isSoftwareProject(projectId)) {
           const brief = readPrdBackplane(projectId)
           return { output: JSON.stringify({ protocol: 'GUI登记只需steps和acceptance_refs，宿主绑定已确认目标，不必复述expectations。kind不是action，expect精确预期填equals。restart前后每段都需expect，仅留存任务才需restart。开发观察不等于最终验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',

@@ -115,6 +115,23 @@ describe('DeliveryPanel', () => {
     expect(screen.queryByRole('button', { name: /进入修改预览/ })).toBeNull()
   })
 
+  it('restores a chosen snapshot only after explicit confirmation, separately from software rollback', async () => {
+    const launch = vi.fn(async (_input: unknown) => ({ ok: true, data: { started: true, detail: '数据恢复完成。' } }))
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = { projectDeliverables: { get: vi.fn(async () => ({ ok: true,
+      data: { files: [], launch: { declared: true, parse_ok: true }, can_launch: true, can_use_previous_release: true,
+        data_snapshots: [{ id: 'backup-one', at: '2026-10-24T08:00:00Z', schema: 'v1' }] } })), launch } }
+    renderPanel('completed')
+    fireEvent.change(await screen.findByLabelText('选择数据备份'), { target: { value: 'backup-one' } })
+    fireEvent.click(screen.getByRole('button', { name: '恢复备份…' }))
+    expect(launch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(launch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '恢复备份…' }))
+    fireEvent.click(screen.getByLabelText('同时使用上一可用的软件版本'))
+    fireEvent.click(screen.getByRole('button', { name: '已保存，恢复所选数据' }))
+    await waitFor(() => expect(launch.mock.calls[0][0]).toMatchObject({ project_id: 'p1', restart: true, restore_snapshot: 'backup-one', restore_data_confirmed: true, previous_release: true }))
+  })
+
   it('未完成项目 → 提示完成后可启动', async () => {
     mockBloma({
       deliverables: {

@@ -434,6 +434,9 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface ProjectDeliverablesResult {
+  data_snapshots?: Array<{ id: string; at: string; schema: string }>
+  stable_release?: string
+  can_use_previous_release?: boolean
   /** Host-known support; omitted for historical projects. */
   supports_point_selection?: boolean
   /** Frozen confirmed UX, returned read-only for continuity during implementation. */
@@ -457,6 +460,9 @@ export interface ProjectDeliverablesResult {
 export interface ProjectLaunchAppInput extends RequestEnvelope {
   project_id: string
   restart?: boolean
+  restore_snapshot?: string
+  restore_data_confirmed?: boolean
+  previous_release?: boolean
 }
 
 /** 启动程序结果。 */

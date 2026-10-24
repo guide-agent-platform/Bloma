@@ -33,6 +33,8 @@ import { createSoftwareCollaborationPolicy } from '../software/collaboration-pol
 import { buildSoftwareAgentTools, SOFTWARE_ENGINEERING_INSTRUCTIONS } from '../software/agent-tools'
 import { stopSoftwareSession } from '../software/process-manager'
 import { closeDebugSessions } from '../software/debug-sessions'
+import { prepareSoftwareRelease, promoteSoftwareRelease, verifyReleaseSource } from '../software/release-store'
+import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -70,7 +72,7 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
   try {
     const finish = await withLeanRuntime(input.projectId, 'desktop-implement', input.signal,
       signal => runLeanProductionInner({ ...input, signal }, deps))
-    finish?.()
+    await finish?.()
   } catch (error) {
     if (!input.signal?.aborted) updateProject(input.projectId, { status: 'active', current_stage: 'generating_mvp', desktop_phase: 'desktop-implement' })
     deps.publish(input, 'message_delta', { text: `本次执行未完成，现场与用量保留：${error instanceof Error ? error.message : String(error)}` })
@@ -78,7 +80,7 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
   }
 }
 
-async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRouteDeps): Promise<(() => void) | undefined> {
+async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRouteDeps): Promise<(() => Promise<void>) | undefined> {
   const project = findProject(input.projectId)
   const signal = input.signal ?? new AbortController().signal
   if (signal.aborted) return
@@ -163,8 +165,16 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       emit('stage_changed', { stage: 'desktop-verify' })
       const version = versionOf()
       if (!version || prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope) { blocked('验证前目标或文件版本发生变化，请沿当前版本继续。'); return }
-      const core = deps.coreVerification ? await deps.coreVerification(input.projectId, runSignal)
-        : await runCoreVerification({ projectId: input.projectId, sandboxRoot: project.root_path, signal: runSignal, reuse: true })
+      let candidate: Awaited<ReturnType<typeof prepareSoftwareRelease>> | undefined
+      let preparationFailure: string | undefined
+      if (software) {
+        try { candidate = await prepareSoftwareRelease(input.projectId, project.root_path, runSignal) }
+        catch (error) { runSignal.throwIfAborted(); preparationFailure = `发布候选未准备完成：${String(error)}` }
+      }
+      const checkRoot = candidate?.root ?? project.root_path
+      const core = preparationFailure ? { status: 'unverified' as const, summary: preparationFailure, missing: [preparationFailure], evidence: [], llm: undefined }
+        : deps.coreVerification ? await deps.coreVerification(input.projectId, runSignal)
+        : await runCoreVerification({ projectId: input.projectId, sandboxRoot: checkRoot, signal: runSignal, reuse: !software })
       runSignal.throwIfAborted()
       let failure: string | undefined
       if (core.status !== 'passed') failure = `${core.summary}\n${core.missing.join('\n')}`
@@ -172,10 +182,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         const security = deps.securityScan ? deps.securityScan(input.projectId) : defaultQuickSecurityGate(input.projectId)
         if (!security || !security.passed || security.blocking > 0) failure = `安全检查未通过或未执行：${security?.listing ?? '无有效证据'}`
         else {
-          const declared = readLaunchDeclaration(project.root_path)
+          const declared = readLaunchDeclaration(checkRoot)
           const command = brief.lean_brief.ui === 'none' && declared?.ok && declared.launch.mode === 'command'
           const launch = deps.launchSmoke ? await deps.launchSmoke(input.projectId, runSignal) : command
-            ? await runLaunchSmoke(project.root_path, { signal: runSignal, allowCleanExit: true }) : await defaultLaunchSmokeGate(input.projectId, runSignal)
+            ? await runLaunchSmoke(checkRoot, { signal: runSignal, allowCleanExit: true }) : software ? await runLaunchSmoke(checkRoot, { signal: runSignal }) : await defaultLaunchSmokeGate(input.projectId, runSignal)
           runSignal.throwIfAborted()
           writeTextFileAtomic(join(project.root_path, '00_VERIFY/launch-smoke.json'), JSON.stringify(launch, null, 2))
           if (brief.lean_brief.ui === 'required' && launch?.criteria?.degraded) { blocked('正常窗口验证环境不可用，程序已保留，未将仅存活检查当作交付通过。'); return }
@@ -195,11 +205,17 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) {
         blocked('验证期间目标或产物发生变化，本次通过记录未用于交付。'); return
       }
+      if (candidate) await verifyReleaseSource(candidate, runSignal)
       const launch = existsSync(join(project.root_path, 'LAUNCH.json')) ? JSON.parse(readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8')) as { command?: string[] } : undefined
       const text = `本次目标已完成并通过当前核心、安全与启动检查。${software ? '可从项目交付入口一键启动试用。' : launch?.command ? `启动：${launch.command.join(' ')}` : '可从项目交付入口启动。'}${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
-      return () => {
+      return async () => {
         runSignal.throwIfAborted()
         if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) { blocked('收口前产物或验证输入发生变化，本次未交付。'); return }
+        if (candidate) {
+          await promoteSoftwareRelease(candidate, { version, scope, at: new Date().toISOString() }, runSignal,
+            () => prdScopeFingerprint(readPrdBackplane(input.projectId)) === scope && versionOf() === version)
+          saveSoftwareRegressionBaseline(input.projectId, version)
+        }
         resetProjectAttemptScope(input.projectId, 'lean-repair')
         commitDesktopDelivery(input.projectId, runSignal)
         emit('stage_changed', { stage: 'delivered' })

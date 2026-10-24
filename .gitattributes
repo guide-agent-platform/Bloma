@@ -1,2 +1,4 @@
 # Preserve the byte hashes of the frozen experiment report and data exports.
 outputs/experiment-report-20261017/** -text whitespace=cr-at-eol
+tests/fixtures/software-import/*.pdf -text
+tests/fixtures/software-import/*.docx -text
