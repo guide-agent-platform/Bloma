@@ -146,6 +146,8 @@ const electronAPI: ElectronAPI = {
   project: {
     create: (input: ProjectCreateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CREATE, input),
+    import: (input: import('../shared/types').ProjectImportInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_IMPORT, input),
     list: (input: ProjectListInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST, input),
     archive: (input: ProjectArchiveInput) =>

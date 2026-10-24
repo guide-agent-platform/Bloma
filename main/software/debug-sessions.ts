@@ -13,7 +13,7 @@ import { writeTextFileAtomic } from '../../storage/json-store'
 import { electronEntry, observeGuiStep } from './gui-observer'
 import { softwareEnvironment } from './command-runtime'
 import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
-import { verificationFingerprint } from '../desktop/verification-fingerprint'
+import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { materializeGuiFixtures } from '../desktop/gui-fixtures'
 
 export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string }

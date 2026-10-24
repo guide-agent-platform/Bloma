@@ -39,9 +39,17 @@ import { trackAnalytics } from '../delivery/track-analytics'
 
 
 import { safeInvoke, extractRequestId, requireFields, validateProjectCreate } from './shared';
+import { importSoftwareProject } from '../software/import-project'
 
 export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   void mainWindow
+  ipcMain.handle(IPC_CHANNELS.PROJECT_IMPORT, async (_event, payload: unknown) => safeInvoke(extractRequestId(payload), async () => {
+    const input = requireFields<import('../../shared/types').ProjectImportInput>(payload, ['mode'])
+    if (!['quick', 'longterm'].includes(input.mode)) throw Error('IMPORT_MODE_INVALID')
+    const selected = await dialog.showOpenDialog(mainWindow, { title: '打开已有工程（创建独立工作副本）', properties: ['openDirectory'] })
+    if (selected.canceled || !selected.filePaths[0]) return { canceled: true }
+    return { canceled: false, project: await importSoftwareProject(selected.filePaths[0], input.mode) }
+  }))
   ipcMain.handle(IPC_CHANNELS.PROJECT_CREATE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateProjectCreate(payload)

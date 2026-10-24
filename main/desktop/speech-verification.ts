@@ -4,7 +4,7 @@ import { getPromaHome } from '../../storage/config-paths'
 import { mainRootDir } from '../platform/paths'
 import { speechModelRoot } from '../platform/speech/model-manifest'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
-import { verificationFingerprint } from './verification-fingerprint'
+import { verificationFingerprint, declaredVerificationPolicy } from './verification-fingerprint'
 import { createHash } from 'node:crypto'
 
 export interface SpeechVerificationSpec { module: string; factory: string; method: string; rate_argument?: boolean }
@@ -24,7 +24,7 @@ export function hasCurrentMicrophoneEvidence(projectId: string, root: string, sp
   if (hasAcceptedSpeechComponent(root, speech)) return true
   try {
     const saved = JSON.parse(readFileSync(microphonePath(projectId), 'utf8'))
-    const fingerprint = verificationFingerprint(root)
+    const fingerprint = verificationFingerprint(root, null, declaredVerificationPolicy(root))
     return Boolean(fingerprint && saved.fingerprint === fingerprint && saved.spec === JSON.stringify(speech) &&
       saved.result?.microphone?.status === 'passed' && saved.result?.real_decode_calls >= 4 &&
       Date.now() - Date.parse(saved.at) >= 0 && Date.now() - Date.parse(saved.at) < 24 * 60 * 60 * 1000)
@@ -63,7 +63,7 @@ export async function runHostSpeechProbe(options: { projectId: string; root: str
         !existsSync(join(root, ...speech.module.split('.'))) && !existsSync(join(root, `${speech.module.replace(/\./g, '/')}.py`))) {
       throw new Error('语音模块/工厂/方法声明不可用')
     }
-    const fingerprint = verificationFingerprint(root)
+    const policy = declaredVerificationPolicy(root), fingerprint = verificationFingerprint(root, null, policy)
     if (!fingerprint) throw new Error('语音源码版本不可确认')
     const tools = join(mainRootDir(), 'templates/tools')
     const command = resolveDriverVenvCommand(['python', '-B', '-X', 'utf8', join(tools, 'speech_probe.py'),
@@ -81,7 +81,7 @@ export async function runHostSpeechProbe(options: { projectId: string; root: str
     if (result.status === 'passed' && (execution.code !== 0 || (result.real_decode_calls ?? 0) < 3 || result.tests?.length !== 3 || !result.tests.every(test => test.passed))) {
       throw new Error('缺少真实模型解码与固定反例通过证据')
     }
-    if (verificationFingerprint(root) !== fingerprint) throw new Error('探针期间语音源码变化，本轮作废')
+    if (verificationFingerprint(root, null, policy) !== fingerprint) throw new Error('探针期间语音源码变化，本轮作废')
     if (options.microphone && result.status === 'passed' && result.microphone?.status === 'passed') {
       const path = microphonePath(options.projectId)
       mkdirSync(join(getPromaHome(), 'host-evidence'), { recursive: true })

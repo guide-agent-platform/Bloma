@@ -10,6 +10,7 @@ import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type Dri
 import { verificationFingerprint } from './verification-fingerprint'
 import { GUI_ACTION_KINDS } from './gui-tool-contract'
 import { materializeGuiFixtures } from './gui-fixtures'
+import { isSoftwareProject } from './workflow-policy'
 
 type Action = { id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
   | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
@@ -113,7 +114,9 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     result.suite_hash = createHash('sha256').update(bytes).digest('hex'); result.covers = suite.covers
     if (suite.scope_hash !== options.scopeHash) throw new Error('GUI_SCOPE_STALE')
     if (suite.design_hash && suite.design_hash !== options.designHash) throw new Error('GUI_DESIGN_STALE')
-    const before = verificationFingerprint(options.root)
+    let fingerprintPolicy: 'standard' | 'software' = 'standard'
+    try { if (isSoftwareProject(options.projectId)) fingerprintPolicy = 'software' } catch { /* legacy standalone fixture */ }
+    const before = verificationFingerprint(options.root, null, fingerprintPolicy)
     if (!before) throw new Error('GUI_SOURCE_UNREADABLE')
     result.scope_hash = options.scopeHash; result.source_fingerprint = before
     const root = realpathSync(options.root)
@@ -147,7 +150,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
       result.status = 'passed'
     }
     }
-    result.source_unchanged = verificationFingerprint(root) === before
+    result.source_unchanged = verificationFingerprint(root, null, fingerprintPolicy) === before
     if (!result.source_unchanged || !readFileSync(path).equals(bytes)) throw new Error('GUI_INPUT_CHANGED')
   } catch (error) {
     if (callerSignal?.aborted) throw error

@@ -28,10 +28,11 @@ function metadata(sessionId: string) {
     return sessionCache.sessions.get(sessionId)
   } catch { return undefined }
 }
-function ledgerPath(projectId: string, home = getPromaHome()): string {
+export function projectUsageLedgerPath(projectId: string, home = getPromaHome()): string {
   const safeId = /^[A-Za-z0-9_-]+$/.test(projectId) ? projectId : 'unassigned'
   return join(home, 'usage-ledger', `${safeId}.jsonl`)
 }
+const ledgerPath = projectUsageLedgerPath
 function append(event: LedgerEvent): void {
   try {
     mkdirSync(join(getPromaHome(), 'usage-ledger'), { recursive: true })

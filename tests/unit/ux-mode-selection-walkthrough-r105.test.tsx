@@ -59,6 +59,19 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
     expect(card('mode-card-quick').btn()).toBeTruthy()
     expect(card('mode-card-longterm').btn()).toBeTruthy()
   })
+  it('opens an existing project through the directory-copy channel, handles cancellation and does not create another template project', async () => {
+    const create = vi.fn(), open = vi.fn().mockResolvedValueOnce({ ok: true, data: { canceled: true } })
+      .mockResolvedValueOnce({ ok: true, data: { canceled: false, project: { project_id: 'existing', name: 'Existing' } } })
+    ;(window as never as { electronAPI: unknown }).electronAPI = { project: { create, import: open } }
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '打开已有工程' }))
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect((screen.getByRole('button', { name: '打开已有工程' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(onModeSelected).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '打开已有工程' }))
+    await waitFor(() => expect(onModeSelected).toHaveBeenCalledWith('quick', undefined))
+    expect(create).not.toHaveBeenCalled()
+  })
 
   it('[M2·成功] 点快速卡 → create 调用带 mode=quick → 三 atom 设置+onModeSelected(quick)', async () => {
     const create = vi.fn().mockResolvedValue({ ok: true, data: { project_id: 'p1', name: 'N' } })

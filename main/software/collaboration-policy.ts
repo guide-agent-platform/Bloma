@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { ToolContext } from '../agent/loop/agent-loop'
 import type { DelegationParentContext } from '../agent/delegation/delegation-context'
-import { verificationFingerprint } from '../desktop/verification-fingerprint'
+import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { hasSoftwareSessionProcess } from './process-manager'
 import { hasDebugSession } from './debug-sessions'
 

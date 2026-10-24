@@ -64,6 +64,9 @@ export async function runCoreVerification(options: CoreVerificationOptions): Pro
 async function runFreshCoreVerification(options: CoreVerificationOptions): Promise<CoreVerificationResult> {
   const result: CoreVerificationResult = { status: 'unverified', summary: '已生成，核心功能待验证。', checked_at: new Date().toISOString(), missing: [], evidence: [] }
   const root = options.sandboxRoot
+  let fingerprintPolicy: 'standard' | 'software' = 'standard'
+  try { if (isSoftwareProject(options.projectId)) fingerprintPolicy = 'software' } catch { /* legacy isolated verification */ }
+  const fingerprintOf = (directory: string, context: unknown) => verificationFingerprint(directory, context, fingerprintPolicy)
   let dataRoot: string | undefined
   try {
     options.signal?.throwIfAborted()
@@ -75,12 +78,12 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     if (!required.length) throw new Error('没有已确认的核心需求')
     if (new Set(required.map(item => item.id)).size !== required.length) throw new Error('功能项编号重复，不能确定覆盖关系')
     const context = requirementVerificationContext(backplane)
-    const fingerprint = verificationFingerprint(root, context)
+    const fingerprint = fingerprintOf(root, context)
     result.fingerprint = fingerprint
     if (!fingerprint) throw new Error('验证输入不可完整读取，不能运行或复用未知版本证据')
     if (backplane.lean_brief) {
       await verifyLeanBehavior(options, root, backplane, result)
-      if (verificationFingerprint(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
+      if (fingerprintOf(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
         result.status = 'unverified'; result.missing.push('验证期间目标或产物变化，本次结果作废')
         for (const row of result.requirements ?? []) row.verification = 'unverified'
       }
@@ -143,7 +146,7 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
         result.missing.push(`场景「${scenario.name}」(${scenario.input}) 未通过：${outcome}${observed.length ? `；脚本实际输出的场景名：${JSON.stringify(observed)}。登记名称必须逐字一致，请核对引号、空格与动态输入。` : ''}`)
       }
     }
-    if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
+    if (fingerprintOf(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
     const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane, manifest: raw, signal: options.signal }, options.capabilityVerifiers)
     for (const outcome of capabilities) { result.missing.push(...outcome.missing); Object.assign(result, outcome.report) }
     let designHash: string | undefined
@@ -177,7 +180,7 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     for (const executed of reports) if (executed.routing !== 'pass') result.missing.push(executed.routingReason, executed.stderrExcerpt.slice(0, 300))
     // PRD lives outside the generated root. Re-read it after all probes, rather than
     // hashing the same in-memory requirements captured at the start twice.
-    if (verificationFingerprint(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
+    if (fingerprintOf(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
       result.missing.push('验证期间源码或需求契约变化，本次结果作废')
       for (const item of result.requirements) item.verification = 'unverified'
     }

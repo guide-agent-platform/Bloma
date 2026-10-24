@@ -39,6 +39,9 @@ it.skipIf(process.platform !== 'win32')('keeps an actually checked local trial b
   const core = JSON.parse(readFileSync(join(trial!.root, '00_VERIFY/core-verification.json'), 'utf8'))
   expect(core).toMatchObject({ status: 'environment_blocked', local_status: 'passed', distribution: { clean_environment: 'unverified' } })
   expect(messages.join()).toContain('独立交付尚未完成')
+  const noNewFacts: SDKQuery = async function* () { throw Error('unchanged environment must not spend another model request') }
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'same-block', content: '继续', maxTokens: 4096, signal: AbortSignal.timeout(30000) }, noNewFacts, {}, deps)
+  expect(calls).toBe(2); expect(findProject(project.project_id).status).toBe('active')
   expect(await launchSoftwareForUser(project.project_id, root, trial!.launch, async () => {})).toMatchObject({ started: true, detail: '5' })
   writeFileSync(join(root, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, mode: 'command', command: ['node', 'app.cjs'] }))
   expect((await qualifySoftwareArtifact(root, parsed.brief)).status).toBe('unverified')

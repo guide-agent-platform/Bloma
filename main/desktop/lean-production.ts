@@ -13,7 +13,7 @@ import { leanBudget, withLeanRuntime } from './lean-budget'
 import { guardDispatcherCompletion } from './dispatcher-completion'
 import { provisionDesktopSkeletonV2 } from './skeleton-provision'
 import { runCoreVerification, type CoreVerificationResult } from './core-verification'
-import { verificationFingerprint } from './verification-fingerprint'
+import { verificationFingerprint, softwareVerificationFingerprint } from './verification-fingerprint'
 import { consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
 import { commitDesktopDelivery } from './delivery-state'
 import { defaultLaunchSmokeGate, defaultQuickSecurityGate, type DesktopRouteDeps, type DesktopRouteInput } from './desktop-route'
@@ -35,6 +35,8 @@ import { stopSoftwareSession } from '../software/process-manager'
 import { closeDebugSessions } from '../software/debug-sessions'
 import { prepareSoftwareRelease, promoteSoftwareRelease, verifyReleaseSource } from '../software/release-store'
 import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
+import { importedProjectContext } from '../software/import-project'
+import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type SoftwareRunStatus } from '../software/run-state'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -43,6 +45,14 @@ const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(par
  * dispatcher dialogue, PHASE_ADVANCE markers or synthetic architecture stages. */
 export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopRouteDeps): Promise<void> {
   const project = findProject(input.projectId)
+  if (isSoftwareProject(input.projectId) && /^(?:继续|恢复|查看进度|查看结果)[。！!\s]*$/.test(input.content.trim())) {
+    const saved = readSoftwareRunState(input.projectId)
+    if (saved?.status === 'waiting_environment' && saved.operationId === project.lean_operation_id && saved.source
+      && saved.source === softwareVerificationFingerprint(project.root_path)) {
+      deps.publish(input, 'message_delta', { text: saved.error ?? '本机试用版本已保留，独立环境验收仍待完成；当前没有新的环境证据。' })
+      deps.complete(input.sessionId, input.projectId, 'incomplete'); return
+    }
+  }
   if (/^(?:谢谢|谢谢你|好的|收到|查看进度|查看结果)[。！!\s]*$/.test(input.content.trim()) || project.status === 'completed' && /^(?:继续|恢复)[。！!\s]*$/.test(input.content.trim())
     && !readCorrectionSubmission(input.projectId) && !hasActiveCorrectionSession(input.projectId)) {
     deps.publish(input, 'message_delta', { text: project.status === 'completed' ? '产物和验证记录已保留，可启动试用或继续提出修改。' : '当前现场已保留，可继续制作或提出具体修改。' })
@@ -86,22 +96,28 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   if (signal.aborted) return
   if (isStop(input.content)) {
     if (project.status !== 'completed') updateProject(input.projectId, { desktop_blocked: { reason: 'user-stop', note: input.content.slice(0, 200), at: new Date().toISOString() } })
+    if (isSoftwareProject(input.projectId)) saveSoftwareRunState({ projectId: input.projectId, sessionId: input.sessionId, runId: randomUUID(), status: 'cancelled', error: input.content.slice(0, 200) })
     deps.publish(input, 'message_delta', { text: '已停止，已有文件和修改意见已保留。' }); deps.complete(input.sessionId, input.projectId, 'incomplete'); return
   }
   const brief = readPrdBackplane(input.projectId), scope = prdScopeFingerprint(brief)
   const software = isSoftwareProject(input.projectId)
+  const runId = randomUUID()
+  const checkpoint = (status: SoftwareRunStatus, patch: { error?: string; candidateId?: string; source?: string; check?: { path: string; sha256: string } } = {}) => {
+    if (software) saveSoftwareRunState({ projectId: input.projectId, sessionId: input.sessionId, runId, status, ...patch })
+  }
   const collaboration = software ? createSoftwareCollaborationPolicy(input.projectId, project.root_path, input.sessionId) : undefined
   const versionOf = () => {
     const current = readPrdBackplane(input.projectId)
     const rules = [guiSuitePath(input.projectId), cliSuitePath(input.projectId)].map(file =>
       existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : null)
     return verificationFingerprint(project.root_path, { scope: prdScopeFingerprint(current), confirmed: Boolean(current.user_confirmed_at),
-      ux: findProject(input.projectId).ux_confirmation ?? null, rules })
+      ux: findProject(input.projectId).ux_confirmation ?? null, rules }, software ? 'software' : 'standard')
   }
   const emit = (type: Parameters<DesktopRouteDeps['publish']>[1], payload: Record<string, unknown>) => deps.publish(input, type, payload)
-  const blocked = (reason: string, confirmation = false) => {
+  const blocked = (reason: string, confirmation = false, state: SoftwareRunStatus = 'blocked') => {
     updateProject(input.projectId, { status: 'active', current_stage: confirmation ? 'blocked_for_user_decision' : 'generating_mvp', desktop_phase: confirmation ? undefined : 'desktop-implement',
       desktop_blocked: { reason: 'verification-incomplete', note: reason, at: new Date().toISOString() } })
+    checkpoint(confirmation ? 'waiting_user' : state, { error: reason })
     emit('message_delta', { text: reason }); deps.complete(input.sessionId, input.projectId, 'incomplete')
   }
   if (!brief.user_confirmed_at || !brief.lean_brief) { blocked('目标尚未确认，本次没有开始制作。', true); return }
@@ -109,6 +125,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   try { ux = readConfirmedUxBinding(input.projectId, brief) } catch (error) { blocked(String(error), true); return }
   if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2(project.root_path, project.name, { includeScaffold: false })
   const budget = leanBudget(input.projectId, 'desktop-implement')
+  checkpoint('running', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined })
   const runSignal = signal
   const query: SDKQuery = budget.wrap(input.query)
   const baseTools = collaboration ? buildSoftwareAgentTools(input.projectId, 'parent', collaboration,
@@ -120,6 +137,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   const system = [
     software ? SOFTWARE_ENGINEERING_INSTRUCTIONS : '根据已确认目标直接制作、集成和修复程序，中文简短报告实际结果。你持有项目文件和受控执行工具；先完成真实主使用路径，再补全本次承诺。仅独立且能减少总工作的任务才委派。',
     `项目根：${project.root_path}。已有平台组件和骨架优先复用，当前未有的环境先探测；不重做已证明的环境研究。不要求架构文档、阶段任务书或推进标记。`,
+    ...(software && project.imported_source ? [JSON.stringify(importedProjectContext(input.projectId))] : []),
     ux?.html_path ? `已确认外观：${ux.html_path}，先读后沿用；用户后续修改仅改相关部分。` : brief.lean_brief.ui === 'required' ? '用户明确授权直接制作界面，无需先画草图。' : '本任务无需额外外观设计。',
     '局部外观和缺陷直接修改。用户新增、删除业务能力或改变业务预期时，先用propose_scope_change保留原功能及新增预期并等待确认，不能在旧任务单下宣称新增功能已验收。',
     JSON.stringify({ goal: brief.positioning, requirements: brief.requirements.map(row => ({ id: row.id, description: row.description,
@@ -155,8 +173,8 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         shouldPause: () => scopePending,
         beforeComplete: ctx => guardDispatcherCompletion(ctx), publish: emit })
       initial = false
-      if (scopePending) { deps.complete(input.sessionId, input.projectId, 'incomplete'); return }
-      if (result.status !== 'completed') { blocked(result.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result.termination_detail?.reason ?? result.status}），可沿当前现场继续。`); return }
+      if (scopePending) { checkpoint('waiting_user'); deps.complete(input.sessionId, input.projectId, 'incomplete'); return }
+      if (result.status !== 'completed') { blocked(result.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result.termination_detail?.reason ?? result.status}），可沿当前现场继续。`, false, result.status === 'cancelled' ? 'cancelled' : 'blocked'); return }
       // Integration checks own a quiet tree. Never race outstanding writers or dev servers.
       stopDelegations(input.sessionId)
       if (software) { await closeDebugSessions(input.projectId, input.sessionId); await stopSoftwareSession(input.projectId, input.sessionId); emit('software_preview_changed', { preview_url: null }) }
@@ -172,6 +190,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         catch (error) { runSignal.throwIfAborted(); preparationFailure = `发布候选未准备完成：${String(error)}` }
       }
       const checkRoot = candidate?.root ?? project.root_path
+      checkpoint('verifying', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined, candidateId: candidate?.id })
       const core: CoreVerificationResult = preparationFailure ? { status: 'unverified', checked_at: new Date().toISOString(), summary: preparationFailure, missing: [preparationFailure], evidence: [] }
         : deps.coreVerification ? await deps.coreVerification(input.projectId, runSignal)
         : await runCoreVerification({ projectId: input.projectId, sandboxRoot: checkRoot, signal: runSignal, reuse: !software })
@@ -197,10 +216,16 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       }
       if (failure) {
         if (core.status === 'environment_blocked' && !cleanEnvironmentPending) { blocked(failure); return }
-        const attempt = consumeProjectAttempt(input.projectId, 'lean-repair', 2)
+        if (software) {
+          const progress = recordSoftwareRepair({ projectId: input.projectId, sessionId: input.sessionId, runId, error: failure,
+            source: softwareVerificationFingerprint(project.root_path), candidateId: candidate?.id,
+            observations: { gui: core.host_gui?.steps, cli: core.host_cli?.cases } })
+          if (!progress.allowed) { blocked(`连续${progress.repeats}次验证得到相同失败观察，尚无可见改善，已停止自动重试并保留现场：\n${failure}`); return }
+        }
+        const attempt = consumeProjectAttempt(input.projectId, 'lean-repair', software ? undefined : 2)
         if (!attempt.allowed) { blocked(failure); return }
         emit('message_delta', { text: '验证发现具体缺口，我会沿当前现场局部修复。' })
-        task = `宿主实际验证反馈（${attempt.used}/2）：\n${failure}\n保留已正确实现，不改已确认目标或测试期望；核对失败入口后做最小修复。`
+        task = `宿主实际验证反馈（修复${attempt.used}${software ? '，共享原请求与费用预算' : '/2'}）：\n${failure}\n保留已正确实现，不改已确认目标或测试期望；核对失败入口后做最小修复。`
         continue
       }
       if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) {
@@ -213,22 +238,28 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         runSignal.throwIfAborted()
         if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) { blocked('收口前产物或验证输入发生变化，本次未交付。'); return }
         if (candidate) {
-          await promoteSoftwareRelease(candidate, { version, scope, at: new Date().toISOString() }, runSignal,
-            () => prdScopeFingerprint(readPrdBackplane(input.projectId)) === scope && versionOf() === version)
+          const began = Date.now(); let accounted = false
+          try {
+            await promoteSoftwareRelease(candidate, { version, scope, at: new Date().toISOString() }, runSignal,
+              () => { budget.recordRuntime(Date.now() - began); accounted = true; return prdScopeFingerprint(readPrdBackplane(input.projectId)) === scope && versionOf() === version })
+          } finally { if (!accounted) budget.recordRuntime(Date.now() - began) }
           saveSoftwareRegressionBaseline(input.projectId, version)
         }
         if (cleanEnvironmentPending) {
-          blocked(`本机功能、安全及启动检查已通过，可以从交付入口试用。${core.distribution!.detail}`)
+          blocked(`本机功能、安全及启动检查已通过，可以从交付入口试用。${core.distribution!.detail}`, false, 'waiting_environment')
           return
         }
         resetProjectAttemptScope(input.projectId, 'lean-repair')
+        const report = join(candidate?.root ?? project.root_path, '00_VERIFY/core-verification.json')
+        checkpoint('verified', { candidateId: candidate?.id, source: software ? softwareVerificationFingerprint(project.root_path) : undefined,
+          ...(existsSync(report) ? { check: { path: report, sha256: createHash('sha256').update(readFileSync(report)).digest('hex') } } : {}) })
         commitDesktopDelivery(input.projectId, runSignal)
         emit('stage_changed', { stage: 'delivered' })
         deps.persistAssistant(input.sessionId, text); emit('message_delta', { text }); deps.complete(input.sessionId, input.projectId)
       }
     }
   } catch (error) {
-    blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。' : `当前执行受阻：${error instanceof Error ? error.message : String(error)}`)
+    blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。' : `当前执行受阻：${error instanceof Error ? error.message : String(error)}`, false, runSignal.aborted ? 'interrupted' : 'blocked')
   } finally {
     runSignal.removeEventListener('abort', cancelChildren)
     disposeParentDelegationState(input.sessionId)

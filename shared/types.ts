@@ -46,6 +46,7 @@ export const IPC_CHANNELS = {
   PERMISSION_RESPONSE: 'permission:response',
   PERMISSION_SET_MODE: 'permission:set-mode',
   PROJECT_CREATE: 'project:create',
+  PROJECT_IMPORT: 'project:import',
   PROJECT_LIST: 'project:list',
   PROJECT_ARCHIVE: 'project:archive',
   PROJECT_UNARCHIVE: 'project:unarchive',
@@ -1243,6 +1244,8 @@ export interface ProjectCreateInput extends RequestEnvelope {
   mode: ProjectMode
   initial_message?: string
 }
+export interface ProjectImportInput extends RequestEnvelope { mode: ProjectMode }
+export interface ProjectImportResult { canceled: boolean; project?: Project }
 
 /** 修复账本条目（2026-09-26 运行审计 P1-02；实现见 main/coding/repair-ledger.ts）。 */
 export interface RepairLedgerEntry {
@@ -1257,6 +1260,7 @@ export interface RepairLedgerEntry {
 }
 
 export interface Project {
+  imported_source?: { path: string; head?: string; branch?: string; dirty: boolean; baseline_digest: string }
   /** Host-selected production workflow. Missing = historical compatibility. */
   workflow_version?: import('./workflow-version').ModernWorkflowVersion
   /** Stable during a task/repair/resume; a new user task after delivery gets a new allowance. */
@@ -1796,6 +1800,7 @@ export type ElectronAPI = {
   }
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
+    import(input: ProjectImportInput): Promise<ApiResult<ProjectImportResult>>
     list(input: ProjectListInput): Promise<ApiResult<Project[]>>
     archive(input: ProjectArchiveInput): Promise<ApiResult<Project>>
     unarchive(input: ProjectUnarchiveInput): Promise<ApiResult<Project>>

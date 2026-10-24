@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { rmSyncWithRetry } from '../../platform/storage/fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -224,7 +224,7 @@ export function externalResourceViolation(htmlContent: string): string | null {
 }
 
 /** 递归收集项目内文件（跳过非产物目录），返回相对路径列表。 */
-function collectProjectFiles(root: string, subDir = ''): string[] {
+function collectProjectFiles(root: string, subDir = '', software = false, budget = { files: 0 }): string[] {
   const out: string[] = []
   const base = subDir ? join(root, subDir) : root
   let entries
@@ -237,9 +237,11 @@ function collectProjectFiles(root: string, subDir = ''): string[] {
     const rel = subDir ? `${subDir}/${entry.name}` : entry.name
     if (entry.isDirectory()) {
       if (SKIPPED_DIRS.has(entry.name)) continue
-      if (rel.split('/').length >= LIST_DEPTH_LIMIT) continue
-      out.push(...collectProjectFiles(root, rel))
+      if (software && ['.venv', 'venv', '__pycache__', '.cache', '00_HISTORY'].includes(entry.name)) continue
+      if (rel.split('/').length >= (software ? 48 : LIST_DEPTH_LIMIT)) continue
+      out.push(...collectProjectFiles(root, rel, software, budget))
     } else if (entry.isFile()) {
+      if (software && ++budget.files > 100000) throw Error('FILE_SEARCH_LIMIT_EXCEEDED: 请限定子目录')
       out.push(rel)
     }
   }
@@ -368,6 +370,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   }
 
   const guardRepairBudget = (ctx: ToolContext): ToolOutcome | undefined => {
+    // software-v1 already shares durable request/output/runtime admission and
+    // observes host failure progress. Do not add a second three-write cutoff.
+    if (options.software) return undefined
     if (!ctx.state.test_failed) return undefined
     ctx.state.edits_after_test_failure += 1
     if (ctx.state.edits_after_test_failure > EDIT_BUDGET_AFTER_TEST_FAILURE) {
@@ -489,7 +494,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         if (!resolved.ok) return { output: resolved.error, isError: true }
         subDir = resolved.rel
       }
-      const files = collectProjectFiles(projectRoot(), subDir)
+      const files = collectProjectFiles(projectRoot(), subDir, options.software)
       // R0.2（2026-09-19 狗粮 7601e5ae）：平台托管目录不再伪装成「空目录」——模型据
       // 「目录为空」误判 express 未 vendor、白白零依赖重写；如实说明托管与供货保证。
       const topDir = subDir.split('/')[0]
@@ -533,10 +538,12 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       }
       const glob = typeof toolInput.glob === 'string' && toolInput.glob.trim() ? toolInput.glob.trim().replace(/^\*/, '') : ''
       const hits: string[] = []
-      for (const rel of collectProjectFiles(projectRoot())) {
+      let skippedLargeFiles = 0
+      for (const rel of collectProjectFiles(projectRoot(), '', options.software)) {
         if (glob && !rel.endsWith(glob)) continue
         let content: string
         try {
+          if (options.software && statSync(join(projectRoot(), rel)).size > 2 * 1024 * 1024) { skippedLargeFiles++; continue }
           content = readFileSync(join(projectRoot(), rel), 'utf8')
         } catch {
           continue
@@ -550,10 +557,10 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         }
         if (hits.length >= GREP_HIT_LIMIT) break
       }
-      if (hits.length === 0) return { output: `未找到匹配（模式：${toolInput.pattern}${glob ? `，文件过滤：${glob}` : ''}）。` }
+      if (hits.length === 0) return { output: `未找到匹配（模式：${toolInput.pattern}${glob ? `，文件过滤：${glob}` : ''}）。${skippedLargeFiles ? `跳过${skippedLargeFiles}个大文件，需按文件有界读取。` : ''}` }
       return {
         output: `命中 ${hits.length} 处${hits.length >= GREP_HIT_LIMIT ? '（达到上限 50，可能还有更多）' : ''}：\n${hits.join('\n')}`,
-        detail: { hits: hits.length },
+        detail: { hits: hits.length, ...(skippedLargeFiles ? { skipped_large_files: skippedLargeFiles } : {}) },
       }
     },
   }
@@ -743,7 +750,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         subDir = resolved.rel
       }
       const matcher = globToRegExp(pattern)
-      const hits = collectProjectFiles(projectRoot(), subDir).filter((rel) => matcher.test(rel))
+      const hits = collectProjectFiles(projectRoot(), subDir, options.software).filter((rel) => matcher.test(rel))
       if (hits.length === 0) {
         // R0.2：命中不了平台托管目录（node_modules 等）时如实说明，防「找不到 = 不存在」误判
         const targetsManaged = [pattern, subDir].some((seg) => seg && seg.split('/').includes('node_modules'))

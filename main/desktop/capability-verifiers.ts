@@ -52,7 +52,7 @@ const llmVerifier: CapabilityVerifier = { id: 'llm', async run(ctx) {
   if (!needed && !spec) return
   const ids = new Set(ctx.backplane.requirements.map(item => item.id))
   if (spec && (!Array.isArray(spec.covers) || !spec.covers.length || spec.covers.some(id => !ids.has(id)) || required.some(item => !spec.covers.includes(item.id)))) throw new Error('模型入口覆盖声明缺失、悬空或漏掉模型需求')
-  const result = spec ? await runHostLlmProbe(ctx.root, spec, undefined, ctx.signal) : undefined
+  const result = spec ? await runHostLlmProbe(ctx.root, spec, undefined, ctx.signal, ctx.projectId) : undefined
   const status = result?.status ?? 'unverified'
   return { status, features: Object.fromEntries([...new Set([...required.map(item => item.id), ...(spec?.covers ?? [])])].map(id => [id, status])),
     report: result ? { llm: result } : undefined,

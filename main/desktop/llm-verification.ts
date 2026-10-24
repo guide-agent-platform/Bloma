@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { resolveSoftwareCommand, softwareEnvironment } from '../software/command-runtime'
 import { mainRootDir } from '../platform/paths'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
-import { verificationFingerprint } from './verification-fingerprint'
+import { verificationFingerprint, declaredVerificationPolicy } from './verification-fingerprint'
 
 export interface LlmVerificationSpec { runtime?: 'node'; module: string; factory: string; method: string; covers: string[] }
 export interface LlmVerificationResult {
@@ -14,7 +14,7 @@ export interface LlmVerificationResult {
   request_count?: number
   error?: string
 }
-export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, spawn: DriverSpawn = execFileDriverSpawn, signal?: AbortSignal): Promise<LlmVerificationResult> {
+export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, spawn: DriverSpawn = execFileDriverSpawn, signal?: AbortSignal, projectId?: string): Promise<LlmVerificationResult> {
   let temporary: string | undefined
   try {
     signal?.throwIfAborted()
@@ -22,12 +22,15 @@ export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, s
     if (!identifier(spec.factory) || !identifier(spec.method) || (spec.runtime === 'node'
       ? typeof spec.module !== 'string' || isAbsolute(spec.module) || spec.module.split(/[\\/]/).includes('..') || !/\.(?:cjs|mjs|js)$/.test(spec.module)
       : spec.runtime !== undefined || !identifier(spec.module))) throw new Error('模型入口声明不合法')
-    const fingerprint = verificationFingerprint(root)
+    const policy = spec.runtime === 'node' ? 'software' : declaredVerificationPolicy(root)
+    const fingerprint = verificationFingerprint(root, null, policy)
     if (!fingerprint) throw new Error('模型入口源码不可完整读取')
     const executable = resolveDriverVenvCommand(['python'], root)[0]!
-    if (spec.runtime === 'node') temporary = mkdtempSync(join(tmpdir(), 'bloma-llm-node-'))
+    if (spec.runtime === 'node' || policy === 'software' && projectId) temporary = mkdtempSync(join(tmpdir(), 'bloma-llm-probe-'))
     const resolved = spec.runtime === 'node' ? resolveSoftwareCommand(root,
-      ['node', join(mainRootDir(), 'templates/tools/llm_entry_probe.cjs'), root, JSON.stringify(spec)], softwareEnvironment('host-llm-probe', join(temporary!, 'data'))) : {
+      ['node', join(mainRootDir(), 'templates/tools/llm_entry_probe.cjs'), root, JSON.stringify(spec)], softwareEnvironment(projectId ?? 'host-llm-probe', join(temporary!, 'data'))) : policy === 'software' && projectId ? {
+      ...resolveSoftwareCommand(root, ['python', '-X', 'utf8', '-B', join(mainRootDir(), 'templates/tools/llm_entry_probe.py'), root, JSON.stringify(spec)], softwareEnvironment(projectId, join(temporary!, 'data'))),
+    } : {
       command: [executable, '-X', 'utf8', '-B', join(mainRootDir(), 'templates/tools/llm_entry_probe.py'), root, JSON.stringify(spec)],
       env: { ...buildDriverEnv({ env_whitelist: ['APP_DATA_DIR'] } as never, process.env), LLM_PROVIDER: 'real', APP_DATA_DIR: join(root, '00_VERIFY/llm-data') } }
     const result = await spawn({ ...resolved, cwd: root, timeoutMs: 30000, signal })
@@ -36,7 +39,7 @@ export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, s
     if (parsed.probe_version !== 1 || !['passed', 'failed', 'environment_blocked'].includes(parsed.status)) throw new Error('模型探针结果不合法')
     const names = ['real_request', 'auth_error', 'model_error', 'rate_limited', 'invalid_response', 'unconfigured']
     if (parsed.status === 'passed' && (result.code !== 0 || parsed.request_count !== 5 || parsed.tests?.length !== 6 || names.some(name => !parsed.tests?.some(test => test.name === name && test.passed)))) throw new Error('模型探针证据不完整')
-    if (verificationFingerprint(root) !== fingerprint) throw new Error('模型探针期间源码发生变化')
+    if (verificationFingerprint(root, null, policy) !== fingerprint) throw new Error('模型探针期间源码发生变化')
     return parsed
   } catch (error) {
     if (signal?.aborted) throw error

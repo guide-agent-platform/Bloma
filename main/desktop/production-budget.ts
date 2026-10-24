@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../../storage/json-store'
@@ -12,7 +12,14 @@ interface BudgetState {
   phaseStarts?: Record<string, number>
   runtimeMs?: number
   runtimeStartedAt?: number
+  runtimeHeartbeatAt?: number
+  runtimeOwner?: string
+  runtimePid?: number
+  runtimeUncertainMs?: number
 }
+const liveRuntimeLeases = new Map<string, string>()
+export const RUNTIME_HEARTBEAT_MS = 5000
+const RUNTIME_LEASE_MS = 15000
 export interface ProductionLimits { requests: number; output: number; perResponse: number; phaseRequests: number }
 const PHASE_REQUESTS: Record<string, number> = { 'desktop-arch': 64, 'desktop-scaffold': 32, 'desktop-implement': 160, 'desktop-verify': 64 }
 export const PRODUCTION_LIMITS = { requests: 256, output: 262144, perResponse: 16384 }
@@ -24,15 +31,20 @@ export function productionDeadlineMs(phase: string): number {
  * retries. This measures requests/output, not money; existing monetary policy is
  * still authoritative. No prompts, keys or generated code enter this record. */
 export function createProductionBudget(projectId: string, scope: string, phase: string,
-  limits: ProductionLimits = { ...PRODUCTION_LIMITS, phaseRequests: PHASE_REQUESTS[phase] ?? 64 }) {
+  limits: ProductionLimits = { ...PRODUCTION_LIMITS, phaseRequests: PHASE_REQUESTS[phase] ?? 64 }, runtimeMode: 'legacy' | 'lease' = 'legacy') {
   const key = createHash('sha256').update(`${projectId}\n${scope}`).digest('hex')
   const file = join(getPromaHome(), 'harness-budgets', `${key}.json`)
+  let ownedLease: string | undefined
   const load = (): BudgetState => {
     let value: BudgetState
     try { value = readJsonFile<BudgetState>(file, { version: 1, requests: 0, output: 0, phases: {} }) }
     catch { throw new Error('HARNESS_BUDGET_UNREADABLE: 运行预算记录损坏，未发起请求') }
     if (value.runtimeMs !== undefined && (!Number.isSafeInteger(value.runtimeMs) || value.runtimeMs < 0)) throw new Error('HARNESS_BUDGET_UNREADABLE')
     if (value.runtimeStartedAt !== undefined && (!Number.isSafeInteger(value.runtimeStartedAt) || value.runtimeStartedAt < 0)) throw new Error('HARNESS_BUDGET_UNREADABLE')
+    if ([value.runtimeHeartbeatAt, value.runtimeUncertainMs].some(time => time !== undefined && (!Number.isSafeInteger(time) || time < 0))
+      || value.runtimeOwner !== undefined && !/^[a-f0-9-]{36}$/.test(value.runtimeOwner)
+      || value.runtimePid !== undefined && (!Number.isSafeInteger(value.runtimePid) || value.runtimePid < 1)
+      || value.runtimeHeartbeatAt !== undefined && (value.runtimeStartedAt === undefined || value.runtimeHeartbeatAt < value.runtimeStartedAt)) throw Error('HARNESS_BUDGET_UNREADABLE')
     if (value.version !== 1 || !Number.isSafeInteger(value.requests) || value.requests < 0 || !Number.isSafeInteger(value.output)
       || value.output < 0 || !value.phases || typeof value.phases !== 'object' || Array.isArray(value.phases)
       || Object.values(value.phases).some(n => !Number.isSafeInteger(n) || n < 0)
@@ -45,6 +57,7 @@ export function createProductionBudget(projectId: string, scope: string, phase: 
   }
   const reserve = (requested: number) => {
     const state = load()
+    if (runtimeMode === 'lease' && liveRuntimeLeases.has(key) && state.runtimeOwner !== liveRuntimeLeases.get(key)) throw Error('HARNESS_RUNTIME_LEASE_LOST')
     if (state.requests >= limits.requests || (state.phases[phase] ?? 0) >= limits.phaseRequests) throw new Error('HARNESS_REQUEST_BUDGET_EXHAUSTED')
     const tokens = Math.min(requested, limits.perResponse, limits.output - state.output)
     if (tokens < 512) throw new Error('HARNESS_OUTPUT_BUDGET_EXHAUSTED')
@@ -91,18 +104,40 @@ export function createProductionBudget(projectId: string, scope: string, phase: 
   return { wrap, executionScope: `${key}-${phase}`, snapshot: () => ({ ...load(), limits, file }), recordRuntime: (milliseconds: number) => {
     if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) throw new Error('HARNESS_RUNTIME_INVALID')
     const state = load(); state.runtimeMs = (state.runtimeMs ?? 0) + milliseconds; persist(state)
+  }, heartbeatRuntime: () => {
+    if (runtimeMode !== 'lease') return
+    const state = load()
+    if (!ownedLease || state.runtimeOwner !== ownedLease || state.runtimeStartedAt === undefined) throw Error('HARNESS_RUNTIME_LEASE_LOST')
+    state.runtimeHeartbeatAt = Math.max(state.runtimeStartedAt, Date.now()); persist(state)
   }, startRuntime: () => {
     const state = load(), now = Date.now()
-    // A crashed process has no completed interval. Charge its outstanding time
-    // conservatively instead of clearing the limit on restart.
-    if (state.runtimeStartedAt !== undefined) state.runtimeMs = (state.runtimeMs ?? 0) + Math.max(0, now - state.runtimeStartedAt)
+    if (runtimeMode === 'lease') {
+      if (liveRuntimeLeases.has(key)) throw Error('HARNESS_RUNTIME_ALREADY_ACTIVE')
+      if (state.runtimeStartedAt !== undefined) {
+        if (state.runtimePid && state.runtimePid !== process.pid) {
+          let alive = true
+          try { process.kill(state.runtimePid, 0) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') alive = false }
+          if (alive) throw Error('HARNESS_RUNTIME_LEASE_ACTIVE: 旧执行宿主仍可能存活，请先关闭旧实例；不接管其进程或同时写入工程')
+        }
+        if (state.runtimeOwner && now - (state.runtimeHeartbeatAt ?? state.runtimeStartedAt) < RUNTIME_LEASE_MS) throw Error('HARNESS_RUNTIME_LEASE_ACTIVE: 等待旧执行租约过期后继续，不接管仍可能运行的任务')
+        const heartbeat = state.runtimeHeartbeatAt ?? state.runtimeStartedAt
+        const known = Math.max(0, heartbeat - state.runtimeStartedAt), tail = Math.min(RUNTIME_HEARTBEAT_MS, Math.max(0, now - heartbeat))
+        state.runtimeMs = (state.runtimeMs ?? 0) + known + tail
+        state.runtimeUncertainMs = (state.runtimeUncertainMs ?? 0) + Math.max(0, now - heartbeat - tail)
+      }
+      ownedLease = randomUUID(); state.runtimeOwner = ownedLease; state.runtimeHeartbeatAt = now; state.runtimePid = process.pid
+    } else if (state.runtimeStartedAt !== undefined) state.runtimeMs = (state.runtimeMs ?? 0) + Math.max(0, now - state.runtimeStartedAt)
     state.runtimeStartedAt = now; persist(state)
+    if (ownedLease) liveRuntimeLeases.set(key, ownedLease)
     return state.runtimeMs ?? 0
   }, finishRuntime: () => {
-    const state = load()
-    if (state.runtimeStartedAt === undefined) throw new Error('HARNESS_RUNTIME_NOT_STARTED')
-    state.runtimeMs = (state.runtimeMs ?? 0) + Math.max(0, Date.now() - state.runtimeStartedAt)
-    delete state.runtimeStartedAt; persist(state)
+    try {
+      const state = load()
+      if (state.runtimeStartedAt === undefined) throw new Error('HARNESS_RUNTIME_NOT_STARTED')
+      if (runtimeMode === 'lease' && (!ownedLease || state.runtimeOwner !== ownedLease)) throw Error('HARNESS_RUNTIME_LEASE_LOST')
+      state.runtimeMs = (state.runtimeMs ?? 0) + Math.max(0, Date.now() - state.runtimeStartedAt)
+      delete state.runtimeStartedAt; delete state.runtimeHeartbeatAt; delete state.runtimeOwner; delete state.runtimePid; persist(state)
+    } finally { if (liveRuntimeLeases.get(key) === ownedLease) liveRuntimeLeases.delete(key); ownedLease = undefined }
   }, phaseStartedAt: () => {
     const state = load()
     if (!state.phaseStarts?.[phase]) {

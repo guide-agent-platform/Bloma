@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, openSync, readSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { isHostPresentationOutput } from './host-verification-outputs'
 
@@ -10,12 +10,13 @@ const EXECUTABLE_FILE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css)$/i
 const INPUT_FILE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css|json|txt|toml|yaml|yml|onnx)$/i
 
 /** Unknown/unreadable/linked inputs disable reuse; they never mean unchanged. */
-export function verificationFingerprint(root: string | undefined, context: unknown = null): string | undefined {
+export function verificationFingerprint(root: string | undefined, context: unknown = null, policy: 'standard' | 'software' = 'standard'): string | undefined {
   if (!root || !existsSync(root)) return undefined
   try {
     const hash = createHash('sha256').update('bloma-verification-v1\n').update(JSON.stringify(context))
     let count = 0
     let bytes = 0
+    const buffer = Buffer.allocUnsafe(1024 * 1024)
     const visit = (dir: string, relative = '', executableOnly = false) => {
       for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
         if (EXCLUDED.has(entry.name)) continue
@@ -26,9 +27,15 @@ export function verificationFingerprint(root: string | undefined, context: unkno
         if (entry.isDirectory()) { visit(path, `${rel}/`, executableOnly || MUTABLE_DIRECTORIES.has(entry.name)); continue }
         // Report/data names are not authority to hide executable test or product code.
         if (!(executableOnly ? EXECUTABLE_FILE : INPUT_FILE).test(entry.name)) continue
-        const size = statSync(path).size
-        if (++count > 5000 || (bytes += size) > 32 * 1024 * 1024) throw new Error('verification input budget')
-        hash.update(JSON.stringify(rel)).update('\0').update(readFileSync(path)).update('\0')
+        const before = statSync(path), size = before.size
+        if (++count > (policy === 'software' ? 100000 : 5000) || (bytes += size) > (policy === 'software' ? 1024 : 32) * 1024 * 1024) throw new Error('verification input budget')
+        hash.update(JSON.stringify(rel)).update('\0')
+        const fd = openSync(path, 'r')
+        try { let length: number; while ((length = readSync(fd, buffer)) > 0) hash.update(buffer.subarray(0, length)) }
+        finally { closeSync(fd) }
+        const after = statSync(path)
+        if (after.size !== size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw Error('verification input changed during read')
+        hash.update('\0')
       }
     }
     visit(root)
@@ -36,4 +43,10 @@ export function verificationFingerprint(root: string | undefined, context: unkno
   } catch {
     return undefined
   }
+}
+export const softwareVerificationFingerprint = (root: string | undefined, context: unknown = null) => verificationFingerprint(root, context, 'software')
+/** V2 normal-entry projects include software probes invoked without a project
+ * record. Historical V1 experiments keep their original input budget. */
+export function declaredVerificationPolicy(root: string): 'standard' | 'software' {
+  try { return JSON.parse(readFileSync(join(root, 'LAUNCH.json'), 'utf8')).schema_version === 2 ? 'software' : 'standard' } catch { return 'standard' }
 }

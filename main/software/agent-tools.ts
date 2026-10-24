@@ -10,6 +10,7 @@ import { buildSoftwareImageTool } from './image-tool'
 import { buildSoftwareInspectTool } from './inspect-tool'
 import { prepareSoftwareRuntime, projectRuntimeRequest } from './runtime-manager'
 import { runtimeBindingVersion } from './runtime-bindings'
+import { buildRepositoryContextTool } from './repository-context'
 
 type Policy = ReturnType<typeof createSoftwareCollaborationPolicy>
 const FILE_TOOLS = new Set(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file'])
@@ -17,7 +18,7 @@ export function buildSoftwareAgentTools(projectId: string, role: DelegationRunRo
   const readonly = ['review', 'research', 'explore'].includes(role)
   const files = buildAgentTools({ projectId, role: readonly ? 'research' : 'implement', realFullstackVariant: true, software: true,
     assertFileWrite: policy.assertFileWrite }).filter(tool => FILE_TOOLS.has(tool.name))
-  const tools = [...files, buildProductionContextTool(projectId), buildSoftwareImageTool(projectId)]
+  const tools = [...files, buildProductionContextTool(projectId), buildSoftwareImageTool(projectId), buildRepositoryContextTool(projectId)]
   if (role === 'parent') tools.push(...buildSoftwareExecutionTools(projectId, policy.assertCommand, previewChanged), environmentTool(projectId), prepareEnvironmentTool(projectId, policy), buildSoftwareInspectTool(projectId, policy, previewChanged))
   return tools
 }
