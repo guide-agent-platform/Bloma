@@ -71,7 +71,7 @@ Electron点选改为宿主在正常程序中安装选择层，复制用户数据
 - `software-final-ui-compat.log`：4文件/26项通过，含新增用户明确重启旧版本的UI行为、不宣传不支持的点选、原纠错与制作流程、公开创建到实际Python GUI/CLI的兼容链。与上述记录存在重叠，不相加。
 - `software-visual-closure.log`：2文件/5项通过，补充真实Electron默认DOM检查不附图（避免未知/纯文本渠道400）、显式附图、真实浏览器操作及点选工具栏布局；类型检查最终记录 `software-closure-typecheck.log`。
 - `node scripts/software-agent-acceptance.mjs`：构建后的域代码在真实Electron main中运行；公开创建、目标确认、一次HTML草图、真实Pi工具、真实npm安装React/Vite、真实构建、浏览器保存/关闭重开、正常启动和交付通过；故意破坏真实成品后failed。固定SDK回放4次，付费请求0。结果 `software-bundled-acceptance.json`，日志 `software-bundled-acceptance-pass.log`，截图 `software-react-screenshots/`。
-- 类型检查 `software-last-types.log`/`software-release-types.log`、构建 `software-release-build.log`、隔离主窗启动 `software-electron-smoke.log`、文档检查 `software-docs-check.log`通过。最终布局/纯文本兼容修改后另生成 `software-final-build.log` 和发布清单；不重复相加测试数量。
+- 类型检查最终 `software-closure-typecheck.log`、构建最终 `software-final-build.log`、隔离主窗启动最终 `software-final-electron-smoke.log`、文档检查最终 `software-final-docs.log`通过。构建主包中动态 `__require(` 数量0；不重复相加测试数量。
 
 失败日志保留：早期测试夹具的API类型/异常断言错误、真实异步退出竞态、纠错关闭后再次访问Playwright进程句柄的错误均有对应修复与复验。验收脚本自身先遇到Electron ESM顶层等待ready和Windows绝对路径import问题，已改为异步run与file URL；这些失败不能当成产品生成失败或通过证据。
 
@@ -84,3 +84,11 @@ Electron点选改为宿主在正常程序中安装选择层，复制用户数据
 3. npm CLI已提供；当前机器上的Node/Electron/浏览器和Python实际验证不等于在无任何开发环境的新机器上完成安装包验收。发行版运行时、离线依赖与真正独立打包需要单独环境验证。
 4. 用户数据独立于测试/源码，版本变化前备份；已运行旧实例须用户明确选择重启更新。备份目前留在项目专属数据目录，未增加完整恢复管理界面；运行服务仍读现有源目录，不宣称具备不可变发布快照。
 5. 泛用命令不是OS沙箱。共享工作目录写入权限仅由文件工具强制，任意命令因此保留在主负责人；需要子Agent也能任意执行时，应先实现真正隔离的工作树/运行环境与集成，而不是继续加提示词。
+
+## 本地交接
+
+工程提交：`08ff959`（版本边界）、`0a20d15`（命令与服务）、`df7fa0a`（完整接线、协作、使用/纠错与验证）。新构建已生成，运行中的原实例没有被替换；正常退出再启动后，新建项目使用software-v1，原项目仍保留原流程。未push。
+
+`run-artifacts/software-release-manifest.json`记录工程提交、三个构建文件的SHA256、精确验证口径及日志位置。所有付费模型调用为0；固定回放与真实模型质量评价严格分开。用户原有production-workflow文档两行未纳入这些提交。
+
+下一步最有价值的是用同一个软件任务、相同起始材料与明确费用上限，比较这套harness和Proma的真实端到端结果；在验证渠道、当次额度与单次成本硬限额之前不启动该实验。先记录可用率、首次可用时间、实际费用、功能/视觉盲评和修改成功率，再决定是否扩展多Agent或跨模型组合。
