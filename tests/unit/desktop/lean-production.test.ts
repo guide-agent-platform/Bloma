@@ -11,10 +11,26 @@ import type { SDKQueryOptions, SDKQuery } from '../../../main/orchestration/stag
 import { leanBudget } from '../../../main/desktop/lean-budget'
 import { readCorrectionSubmission, saveCorrectionSubmission } from '../../../main/desktop/correction-outbox'
 import { cliSuitePath } from '../../../main/desktop/lean-cli-check'
+import { MonetaryBudgetError } from '../../../main/platform/llm/monetary-budget'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-lean-build-')); process.env.PROMA_HOME = home })
 afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }) })
+it('preserves reservation details through Pi instead of reporting actual spend as exhausted', async () => {
+  const f = setup('quick')
+  let calls = 0
+  const refused: SDKQuery = async function* () {
+    calls++
+    throw new MonetaryBudgetError('MONETARY_BUDGET_EXHAUSTED', { cap_rmb: 3, accounted_upper_rmb: .841395,
+      reported_upper_rmb: .841395, unresolved_reserve_rmb: 0, next_request_reserve_rmb: 2.162688, remaining_rmb: 2.158605, shortfall_rmb: .004083 })
+  }
+  await enterDesktopLine(f.input, refused, {}, f.deps)
+  expect(calls).toBe(1)
+  expect(findProject(f.project.project_id)).toMatchObject({ status: 'active', desktop_blocked: { note: expect.stringContaining('0.004083') } })
+  expect(f.deps.persistAssistant).toHaveBeenCalledWith('s', expect.stringContaining('预留不足不等于实际花完预算'))
+  expect(f.deps.coreVerification).not.toHaveBeenCalled()
+  expect(f.deps.complete).toHaveBeenLastCalledWith('s', f.project.project_id, 'incomplete')
+})
 function setup(mode: 'quick' | 'longterm') {
   const project = createProject({ request_id: 'create', mode }, { workflowVersion: 'lean-v1' })
   const parsed = parseLeanBrief(JSON.stringify({ action: 'brief', goal: '输出42', ui: 'none', requirements: [{ description: '计算结果', expected: '输出42' }] }),

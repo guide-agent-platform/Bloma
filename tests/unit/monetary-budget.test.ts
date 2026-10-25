@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget } from '../../main/platform/llm/monetary-budget'
+import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget, MonetaryBudgetError, monetaryStopMessage } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
 import { activateMonetaryPolicy, activeMonetaryPolicyPath } from '../../main/platform/llm/monetary-epoch'
@@ -23,6 +23,23 @@ const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'u
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  it('distinguishes insufficient reservation from actual spending without sending, repricing or resetting anything', async () => {
+    const path = fixture(), rate = JSON.parse(readFileSync(path, 'utf8'))
+    rate.models[0].context_tokens = 1048576; writeFileSync(path, JSON.stringify(rate))
+    reserveModelRequest(url, body, path)!.settle({ input_tokens: 416697, output_tokens: 1000 }, true)
+    const before = readFileSync(path + '.state.json', 'utf8'), request = JSON.stringify({ model: 'M1', max_tokens: 8192 })
+    let refusal: unknown
+    try { await reserveModelRequestWhenAvailable(url, request, undefined, path) } catch (error) { refusal = error }
+    expect(refusal).toBeInstanceOf(MonetaryBudgetError)
+    expect(refusal).toMatchObject({ message: 'MONETARY_BUDGET_EXHAUSTED', admission: {
+      cap_rmb: 3, accounted_upper_rmb: .841394, reported_upper_rmb: .841394,
+      unresolved_reserve_rmb: 0, next_request_reserve_rmb: 2.162688, remaining_rmb: 2.158606, shortfall_rmb: .004082,
+    } })
+    expect(monetaryStopMessage(refusal)).toContain('预留不足不等于实际花完预算')
+    expect(monetaryStopMessage(refusal)).toContain('0.004082')
+    expect(readFileSync(path + '.state.json', 'utf8')).toBe(before)
+    expect(monetaryStopMessage(new Error('MONETARY_BUDGET_EXHAUSTED'))).toBeUndefined()
+  })
   it('restores only a settled model while another policy member remains reserved', () => {
     const original = fixture(20), temporary = fixture(20)
     const policy = JSON.parse(readFileSync(original, 'utf8'))

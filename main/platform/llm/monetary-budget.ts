@@ -10,8 +10,26 @@ interface Entry { id: string; model: string; host: string; at?: string; home?: s
 interface BalanceCheckpoint { id: string; host: string; model: string; covered_request_ids: string[]; spent_upper_micro_rmb: number; evidence_path: string; evidence_sha256: string }
 interface State { version: 1; policy_hash: string; entries: Entry[]; balance_checkpoints?: BalanceCheckpoint[] }
 
+export interface MonetaryAdmissionDetails {
+  cap_rmb: number
+  accounted_upper_rmb: number
+  reported_upper_rmb: number
+  unresolved_reserve_rmb: number
+  next_request_reserve_rmb: number
+  remaining_rmb: number
+  shortfall_rmb: number
+}
 export class MonetaryBudgetError extends Error {
-  constructor(code: string) { super(code); this.name = 'MonetaryBudgetError' }
+  constructor(code: string, readonly admission?: MonetaryAdmissionDetails) { super(code); this.name = 'MonetaryBudgetError' }
+}
+/** Keep the stable machine code while explaining admission versus actual spend.
+ * Never suggest that a conservative reservation is an invoice or bad API key. */
+export function monetaryStopMessage(error: unknown): string | undefined {
+  if (!(error instanceof MonetaryBudgetError) || error.message !== 'MONETARY_BUDGET_EXHAUSTED') return
+  const d = error.admission
+  if (!d) return '本地金额保护没有放行下一次模型请求，费用和当前进度已保留。这可能是剩余额度不足以覆盖请求预留，并不表示已实际花完预算。'
+  const rmb = (value: number) => value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
+  return `下一次模型请求尚未发出：本地金额上限 ${rmb(d.cap_rmb)} 元，已计入责任上界 ${rmb(d.accounted_upper_rmb)} 元（已报告计价 ${rmb(d.reported_upper_rmb)} 元，未结算请求预留 ${rmb(d.unresolved_reserve_rmb)} 元）。可用 ${rmb(d.remaining_rmb)} 元，本次最坏情况需预留 ${rmb(d.next_request_reserve_rmb)} 元，差 ${rmb(d.shortfall_rmb)} 元。预留不足不等于实际花完预算，也不是渠道余额不足。当前文件、用量和进度已保留。`
 }
 const fail = (code: string): never => { throw new MonetaryBudgetError(code) }
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
@@ -107,7 +125,17 @@ export function reserveModelRequest(url: string, body: string, policyPath = proc
   })()
   try { mutate(state => {
     const spent = accountedSpent(state, host, rate.model)
-    if (spent + reserved > Math.floor(rate.cap_rmb * 1_000_000)) fail('MONETARY_BUDGET_EXHAUSTED')
+    if (spent + reserved > Math.floor(rate.cap_rmb * 1_000_000)) {
+      const entries = state.entries.filter(row => row.host === host && row.model === rate.model)
+      const cap = Math.floor(rate.cap_rmb * 1_000_000)
+      throw new MonetaryBudgetError('MONETARY_BUDGET_EXHAUSTED', {
+        cap_rmb: cap / 1e6, accounted_upper_rmb: spent / 1e6,
+        reported_upper_rmb: entries.filter(row => row.status === 'reported').reduce((sum, row) => sum + row.charged_micro_rmb, 0) / 1e6,
+        unresolved_reserve_rmb: entries.filter(row => row.status === 'reserved' || row.status === 'unknown').reduce((sum, row) => sum + row.charged_micro_rmb, 0) / 1e6,
+        next_request_reserve_rmb: reserved / 1e6, remaining_rmb: Math.max(0, cap - spent) / 1e6,
+        shortfall_rmb: (spent + reserved - cap) / 1e6,
+      })
+    }
     state.entries.push({ id, model: rate.model, host, at: new Date().toISOString(), home: process.env.PROMA_HOME,
       ...(waitedMs > 0 ? { budget_wait_ms: waitedMs } : {}),
       reserved_micro_rmb: reserved, charged_micro_rmb: reserved, status: 'reserved' })

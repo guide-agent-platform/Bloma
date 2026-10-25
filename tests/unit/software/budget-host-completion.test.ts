@@ -9,12 +9,13 @@ import { syncDocuments } from '../../../main/project/document-sync'
 import { enterDesktopLine } from '../../../main/desktop/desktop-route'
 import { activeSoftwareRelease } from '../../../main/software/release-store'
 import type { SDKQuery } from '../../../main/orchestration/stages/orchestration-contracts'
+import { MonetaryBudgetError } from '../../../main/platform/llm/monetary-budget'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-budget-host-')); process.env.PROMA_HOME = home })
 afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 it.each([{ output: 5, rules: true, cancel: false, passed: true }, { output: 999, rules: true, cancel: false, passed: false },
-  { output: 5, rules: false, cancel: false, passed: false }, { output: 5, rules: true, cancel: true, passed: false }])('runs host checks after admission stops, without manufacturing PASS or overruling cancellation ($passed/$output/$rules/$cancel)', async ({ output, rules, cancel, passed }) => {
+  { output: 5, rules: false, cancel: false, passed: false }, { output: 5, rules: true, cancel: true, passed: false }].flatMap(row => [{ ...row, monetary: false }, { ...row, monetary: true }]))('runs host checks after admission stops, without manufacturing PASS or overruling cancellation ($passed/$output/$rules/$cancel/$monetary)', async ({ output, rules, cancel, passed, monetary }) => {
   const project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' }), controller = new AbortController()
   const parsed = parseLeanBrief(JSON.stringify({ action: 'brief', goal: '输出5', ui: 'none', delivery: 'command', requirements: [{ description: '输出5', expected: '输出5' }] }),
     { projectId: project.project_id, sessionId: 's', source: '输出5', previous: readPrdBackplane(project.project_id), software: true })!
@@ -23,7 +24,12 @@ it.each([{ output: 5, rules: true, cancel: false, passed: true }, { output: 999,
   let calls = 0
   const use = (id: string, name: string, input: Record<string, unknown>) => ({ type: 'tool_use' as const, id, name, input })
   const query: SDKQuery = async function* () {
-    if (++calls > 1) { if (cancel) controller.abort(); throw Error('REQUEST_BUDGET_EXHAUSTED') }
+    if (++calls > 1) {
+      if (cancel) controller.abort()
+      throw monetary ? new MonetaryBudgetError('MONETARY_BUDGET_EXHAUSTED', { cap_rmb: 3, accounted_upper_rmb: .841395,
+        reported_upper_rmb: .841395, unresolved_reserve_rmb: 0, next_request_reserve_rmb: 2.162688, remaining_rmb: 2.158605, shortfall_rmb: .004083 })
+        : Error('REQUEST_BUDGET_EXHAUSTED')
+    }
     yield { type: 'assistant', message: { role: 'assistant', content: [use('app', 'write_file', { path: 'app.cjs', content: `console.log(${output})` }),
       use('launch', 'write_file', { path: 'LAUNCH.json', content: JSON.stringify({ schema_version: 2, command: ['node', 'app.cjs'], mode: 'command' }) }),
       ...(rules ? [use('check', 'register_cli_check', { expectations: { 'F-001': '输出5' }, cases: [{ name: 'five', covers: ['F-001'], args: [], stdout: '5', exit_code: 0 }] })] : [])] } }

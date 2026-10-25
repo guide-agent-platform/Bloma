@@ -66,8 +66,9 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   }
   writeFileSync(join(root, ui === 'electron' ? 'main.cjs' : 'server.cjs'), ui === 'electron' ? mainSource('v2') : serverSource('v2'))
   expect(JSON.parse((await tool.execute({ mode: 'read', debug_session_id: id }, context)).output).stale).toBe(true)
-  expect((await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('stale', '#version', 'v1')] }, context)).isError).toBe(true)
-  const reloaded = await tool.execute({ mode: 'reload', debug_session_id: id, steps: [check('new-backend', '#version', 'v2'), check('data', '#count', '1')] }, context)
+  // An explicit act from a persisted transcript has the same automatic reload
+  // semantics as an omitted mode; it must observe the new backend, never v1.
+  const reloaded = await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('new-backend', '#version', 'v2'), check('data', '#count', '1')] }, context)
   expect(reloaded.isError, reloaded.output).not.toBe(true); expect(JSON.parse(reloaded.output)).toMatchObject({ version: 4, stale: false })
   if (ui === 'browser') expect((await tool.execute({ steps: [{ id: 'draft', kind: 'fill', selector: '#draft', value: 'retained browser storage' }] }, context)).isError).not.toBe(true)
   abort.abort(); await closeDebugSessions(project.project_id, 's')

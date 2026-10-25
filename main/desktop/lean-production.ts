@@ -38,6 +38,7 @@ import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
 import { verifySoftwareCandidate } from '../software/verification'
 import { importedProjectContext } from '../software/import-project'
 import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type SoftwareRunStatus } from '../software/run-state'
+import { monetaryStopMessage } from '../platform/llm/monetary-budget'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -85,7 +86,9 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
       signal => runLeanProductionInner({ ...input, signal }, deps))
     await finish?.()
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
+    const code = error instanceof Error ? error.message : String(error)
+    const monetaryNotice = monetaryStopMessage(error)
+    const reason = monetaryNotice ? `${code}：${monetaryNotice}` : code
     if (!input.signal?.aborted && !/LEASE_ACTIVE|ALREADY_ACTIVE/.test(reason)) updateProject(input.projectId, { status: 'active', current_stage: 'generating_mvp', desktop_phase: 'desktop-implement',
       desktop_blocked: { reason: 'verification-incomplete', note: reason, at: new Date().toISOString() } })
     const text = `本次执行未完成，现场与用量保留：${reason}`
@@ -141,7 +144,14 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   }
   checkpoint('running', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined })
   const runSignal = signal
-  const query: SDKQuery = budget.wrap(input.query)
+  const budgetedQuery = budget.wrap(input.query)
+  let monetaryFailure: unknown
+  // Pi persists an error string. Retain this run's typed refusal at the query
+  // boundary so its cost breakdown survives the native session adapter.
+  const query: SDKQuery = async function* (prompt, options) {
+    try { yield* budgetedQuery(prompt, options) }
+    catch (error) { if (monetaryStopMessage(error)) monetaryFailure = error; throw error }
+  }
   const baseTools = collaboration ? buildSoftwareAgentTools(input.projectId, 'parent', collaboration,
     url => emit('software_preview_changed', { preview_url: url ?? null })) : buildDesktopChildTools(input.projectId, 'implement', 'diff')
   let scopePending = false
@@ -193,11 +203,13 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         beforeComplete: ctx => guardDispatcherCompletion(ctx), publish: emit }) }
       catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
-        const admissionStopped = /^(?:HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED|REQUEST_BUDGET_EXHAUSTED|MONETARY_(?:BUDGET|OPERATION)_EXHAUSTED)$/.test(reason)
+        const detailedError = monetaryFailure instanceof Error && reason.includes(monetaryFailure.message) ? monetaryFailure : error
+        const admissionCode = detailedError instanceof Error ? detailedError.message : reason
+        const admissionStopped = /^(?:HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED|REQUEST_BUDGET_EXHAUSTED|MONETARY_(?:BUDGET|OPERATION)_EXHAUSTED)$/.test(admissionCode)
         const registered = brief.lean_brief.ui === 'required' ? guiSuitePath(input.projectId) : cliSuitePath(input.projectId)
-        if (!software || runSignal.aborted || !admissionStopped || !existsSync(registered)) throw error
+        if (!software || runSignal.aborted || !admissionStopped || !existsSync(registered)) throw detailedError
         modelBudgetStop = reason
-        emit('message_delta', { text: '模型请求额度已到，已有验收规则。我会停止模型调用，继续运行宿主检查；只有实际通过才交付。' })
+        emit('message_delta', { text: `${monetaryStopMessage(detailedError) ?? '模型请求额度已到，当前进度已保留。'}已有验收规则，我会停止模型调用，继续运行宿主检查；只有实际通过才交付。` })
       }
       initial = false
       if (scopePending) { checkpoint('waiting_user'); deps.complete(input.sessionId, input.projectId, 'incomplete'); return }
@@ -306,7 +318,9 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
+    const monetaryNotice = monetaryStopMessage(error)
     blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。'
+      : monetaryNotice ? `${reason}：${monetaryNotice}`
       : /^HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED$/.test(reason) ? leanBudgetStopMessage(input.projectId, 'desktop-implement', reason)
       : `当前执行受阻：${reason}`, false, runSignal.aborted ? 'interrupted' : 'blocked')
   } finally {

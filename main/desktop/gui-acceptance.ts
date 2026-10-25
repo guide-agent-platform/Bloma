@@ -13,6 +13,7 @@ import { materializeGuiFixtures } from './gui-fixtures'
 import { isSoftwareProject } from './workflow-policy'
 
 type Action = ({ id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
+  | { id: string; kind: 'select'; selector: string; value?: string; label?: string }
   | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
   | { id: string; kind: 'press'; selector: string; key: string }
   | { id: string; kind: 'scroll'; selector: string }
@@ -65,7 +66,7 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
     if (step.kind === 'unlock_data') { if (storageFault !== 'lock') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
     if (step.kind === 'storage_restore') { if (storageFault !== 'full') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
     if (['restart', 'corrupt_data', 'remove_data'].includes(step.kind) && storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
-    if (['fill', 'click', 'expect'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw new Error(`GUI_SELECTOR_INVALID: steps[${index}].selector需要真实CSS选择器`)
+    if (['fill', 'select', 'click', 'expect'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw new Error(`GUI_SELECTOR_INVALID: steps[${index}].selector需要真实CSS选择器`)
     if (['press', 'scroll', 'drag', 'upload', 'native_upload', 'download'].includes(step.kind) && (!('selector' in step) || typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw Error(`GUI_SELECTOR_INVALID: steps[${index}].selector缺失`)
     if (step.kind === 'press' && (typeof step.key !== 'string' || !step.key || step.key.length > 128)) throw Error(`GUI_KEY_INVALID: steps[${index}].key缺失`)
     if (step.kind === 'drag' && (typeof step.target_selector !== 'string' || !step.target_selector || step.target_selector.length > 512)) throw Error(`GUI_DRAG_TARGET_INVALID: steps[${index}].target_selector缺失`)
@@ -79,6 +80,8 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
       || step.contains !== undefined && (typeof step.contains !== 'string' || !step.contains || step.contains.length > 4096)
       || step.nonempty !== undefined && step.nonempty !== true)) throw Error(`GUI_FILE_EXPECT_INVALID: steps[${index}]需equals/contains/sha256/nonempty恰好一项`)
     if (step.kind === 'fill' && (typeof step.value !== 'string' || step.value.length > 4096)) throw new Error(`GUI_VALUE_INVALID: steps[${index}].value需要不超过4096字符的输入文本`)
+    if (step.kind === 'select' && ([step.value, step.label].filter(value => value !== undefined).length !== 1
+      || [step.value, step.label].some(value => value !== undefined && (typeof value !== 'string' || value.length > 4096)))) throw Error(`GUI_SELECT_INVALID: steps[${index}]需value或label字符串恰好一项`)
     if (step.kind === 'expect' && ([step.equals !== undefined, step.contains !== undefined, step.nonempty !== undefined].filter(Boolean).length !== 1
       || step.equals !== undefined && (typeof step.equals !== 'string' || step.equals.length > 4096)
       || step.contains !== undefined && (typeof step.contains !== 'string' || !step.contains || step.contains.length > 4096)
@@ -128,6 +131,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
       const { observeSoftwareGui } = await import('../software/gui-observer')
       Object.assign(result, await observeSoftwareGui({ projectId: options.projectId, root, launch: launch.launch, suite, temporary, signal: options.signal }))
     } else {
+    if (suite.steps.some(step => step.kind === 'select')) throw Error('GUI_SELECT_RUNTIME_UNSUPPORTED: select仅用于Electron/浏览器原生下拉框')
     if (suite.steps.some(step => step.has_text !== undefined)) throw Error('GUI_TEXT_LOCATOR_RUNTIME_UNSUPPORTED: has_text仅用于Electron/浏览器；此运行时需真实CSS')
     if (!launch?.ok || launch.launch.command.length !== 2 || !/^python(?:3)?(?:\.exe)?$/i.test(basename(launch.launch.command[0]))) throw new Error('GUI_NATIVE_ENTRY_UNSUPPORTED')
     const entry = realpathSync(resolve(root, launch.launch.command[1])), rel = relative(root, entry)

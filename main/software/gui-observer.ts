@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve } from 'node:path'
-import type { BrowserContext, ElectronApplication, Page } from 'playwright'
+import type { BrowserContext, ElectronApplication, Locator, Page } from 'playwright'
 import type { LaunchDeclaration } from '../desktop/launch-smoke'
 import { splitSteps, type GuiAcceptanceSuite, type GuiAcceptanceResult } from '../desktop/gui-acceptance'
 import { softwareEnvironment } from './command-runtime'
@@ -26,6 +26,19 @@ export function electronEntry(root: string, command: readonly string[]): { execu
   if (!existsSync(executablePath)) throw new Error('ELECTRON_EXECUTABLE_MISSING: 请先安装工程依赖或使用实际打包入口')
   if (!args.length && basename(executablePath).toLowerCase() === 'electron.exe') args = ['.']
   return { executablePath, args }
+}
+
+async function selectGuiOption(locator: Locator, choice: { value?: string; label?: string }, allowLabelFallback = false): Promise<string> {
+  const options = await locator.evaluate(element => element instanceof HTMLSelectElement
+    ? Array.from(element.options, option => ({ value: option.value, label: option.label })) : null)
+  if (!options) throw Error('GUI_SELECT_ELEMENT_REQUIRED: select需要真实select控件，不要修改产品控件来适配调试')
+  let matches = options.filter(option => choice.value !== undefined ? option.value === choice.value : option.label === choice.label)
+  if (!matches.length && allowLabelFallback) matches = options.filter(option => option.label === choice.value)
+  if (matches.length !== 1 || options.filter(option => option.value === matches[0]?.value).length !== 1) {
+    throw Object.assign(Error('GUI_SELECT_OPTION_NOT_UNIQUE: 按value或label精确选择一个已有选项'), { actual: options.slice(0, 20) })
+  }
+  await locator.selectOption({ value: matches[0].value })
+  return locator.inputValue()
 }
 
 export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps'][number], context?: { data: string; fixtures?: GuiAcceptanceSuite['fixtures']; nativeProcessRoot?: number; signal?: AbortSignal }): Promise<unknown> {
@@ -56,7 +69,13 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
       }))) }, selector: step.selector, has_text: step.has_text,
     })
   }
-  if (step.kind === 'fill') { await locator.fill(step.value); return await locator.inputValue() }
+  if (step.kind === 'select') return selectGuiOption(locator, step)
+  if (step.kind === 'fill') {
+    // Durable older transcripts used fill for selects. Preserve their intended
+    // value/visible-label choice instead of forcing the model to redesign a UI.
+    if (await locator.evaluate(element => element instanceof HTMLSelectElement)) return selectGuiOption(locator, { value: step.value }, true)
+    await locator.fill(step.value); return await locator.inputValue()
+  }
   if (step.kind === 'click') { await locator.click(); return 'clicked' }
   if (step.kind === 'press') { await locator.press(step.key); return 'key pressed' }
   if (step.kind === 'scroll') { await locator.scrollIntoViewIfNeeded(); return 'scrolled into view' }

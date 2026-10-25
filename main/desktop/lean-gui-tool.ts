@@ -33,7 +33,7 @@ export function buildLeanGuiTool(projectId: string): AgentLoopTool {
         const suite = sealGuiFixtures(projectId, project.root_path, parseGuiSuite({ ...input, expectations: authoritative, version: 1, scope_hash: scope, design_hash: project.ux_confirmation.design_hash,
           covers: brief.requirements.map(row => row.id) }))
         const refs = suite.acceptance_refs
-        if (!suite.steps.some(step => ['fill', 'click', 'upload', 'native_upload', 'download', 'press', 'drag'].includes(step.kind)) || !refs || Object.entries(refs).some(([id, features]) =>
+        if (!suite.steps.some(step => ['fill', 'select', 'click', 'upload', 'native_upload', 'download', 'press', 'drag'].includes(step.kind)) || !refs || Object.entries(refs).some(([id, features]) =>
           !suite.steps.some(step => step.id === id && ['expect', 'expect_file'].includes(step.kind)) || !Array.isArray(features) || !features.length
           || features.some(fid => !suite.covers.includes(fid))) || suite.covers.some(fid => !Object.values(refs).some(ids => ids.includes(fid)))) throw new Error(`GUI_EXPECT_OBSERVATIONS_REQUIRED: acceptance_refs必须为expect步骤id→F编号数组，需覆盖${suite.covers.join(',')}，并至少实际fill或click一次`)
         const previous = existsSync(guiSuitePath(projectId)) ? parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8'))) : undefined

@@ -33,7 +33,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
             if (!['opening', 'ready'].includes(snapshot.state)) { input = { ...input, debug_session_id: undefined }; mode = 'open' }
             else {
               input = { ...input, debug_session_id: existing }
-              if (mode === undefined || mode === 'open') mode = snapshot.stale ? 'reload' : 'act'
+              if (mode === undefined || mode === 'open' || mode === 'act') mode = snapshot.stale ? 'reload' : 'act'
             }
           } else mode = 'open'
         }
