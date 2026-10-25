@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { beforeEach, afterEach, it, expect } from 'vitest'
@@ -10,6 +10,8 @@ import { enterDesktopLine } from '../../../main/desktop/desktop-route'
 import { activeSoftwareRelease } from '../../../main/software/release-store'
 import type { SDKQuery } from '../../../main/orchestration/stages/orchestration-contracts'
 import { MonetaryBudgetError } from '../../../main/platform/llm/monetary-budget'
+import { debugWorkspace } from '../../../main/software/debug-workspace'
+import { softwareVerificationFingerprint } from '../../../main/desktop/verification-fingerprint'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-budget-host-')); process.env.PROMA_HOME = home })
@@ -26,6 +28,15 @@ it.each([{ output: 5, rules: true, cancel: false, passed: true }, { output: 999,
   const query: SDKQuery = async function* () {
     if (++calls > 1) {
       if (cancel) controller.abort()
+      if (monetary && !rules) {
+        // A previous host observation and a later file change are distinct.
+        // This fixture does not claim a real GUI run or business PASS.
+        writeFileSync(join(debugWorkspace(project.project_id, 's'), 'checkpoint.json'), JSON.stringify({
+          id: '00000000-0000-0000-0000-000000000001', projectId: project.project_id, sessionId: 's', version: 1,
+          state: 'closed', source: softwareVerificationFingerprint(project.root_path),
+        }))
+        writeFileSync(join(project.root_path, 'app.cjs'), 'console.log(5) // later unobserved edit')
+      }
       throw monetary ? new MonetaryBudgetError('MONETARY_BUDGET_EXHAUSTED', { cap_rmb: 3, accounted_upper_rmb: .841395,
         reported_upper_rmb: .841395, unresolved_reserve_rmb: 0, next_request_reserve_rmb: 2.162688, remaining_rmb: 2.158605, shortfall_rmb: .004083 })
         : Error('REQUEST_BUDGET_EXHAUSTED')
@@ -40,4 +51,5 @@ it.each([{ output: 5, rules: true, cancel: false, passed: true }, { output: 999,
   expect(calls).toBe(2); expect(findProject(project.project_id).status === 'completed').toBe(passed)
   expect(Boolean(await activeSoftwareRelease(project.project_id))).toBe(passed)
   if (cancel) expect(existsSync(join(project.root_path, '00_VERIFY/launch-smoke.json'))).toBe(false)
+  if (monetary && !rules) expect(findProject(project.project_id).desktop_blocked?.note).toContain('上次宿主观察之后的修改')
 }, 60000)

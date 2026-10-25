@@ -52,6 +52,12 @@ function savedCheckpoint(projectId: string, sessionId: string): DebugSnapshot | 
 export function retainedDebugFixtures(projectId: string, sessionId: string) {
   return savedCheckpoint(projectId, sessionId)?.fixtures ?? []
 }
+/** Historical observation identity only; it grants no ownership of old PIDs and
+ * does not imply that the observed version passed business acceptance. */
+export function retainedDebugVersion(projectId: string, sessionId: string) {
+  const snapshot = savedCheckpoint(projectId, sessionId)
+  return snapshot?.source ? { source: snapshot.source, version: snapshot.version } : undefined
+}
 function owned(projectId: string, sessionId: string, id: string): DebugSession {
   const session = sessions.get(id)
   if (!session) {

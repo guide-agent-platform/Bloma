@@ -32,7 +32,7 @@ import { isSoftwareProject } from './workflow-policy'
 import { createSoftwareCollaborationPolicy } from '../software/collaboration-policy'
 import { buildSoftwareAgentTools, SOFTWARE_ENGINEERING_INSTRUCTIONS } from '../software/agent-tools'
 import { stopSoftwareSession } from '../software/process-manager'
-import { closeDebugSessions } from '../software/debug-sessions'
+import { closeDebugSessions, retainedDebugVersion } from '../software/debug-sessions'
 import { prepareSoftwareRelease, promoteSoftwareRelease, verifyReleaseSource } from '../software/release-store'
 import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
 import { verifySoftwareCandidate } from '../software/verification'
@@ -122,6 +122,13 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   }
   const emit = (type: Parameters<DesktopRouteDeps['publish']>[1], payload: Record<string, unknown>) => deps.publish(input, type, payload)
   const blocked = (reason: string, confirmation = false, state: SoftwareRunStatus = 'blocked') => {
+    if (software && /\b(?:MONETARY_(?:BUDGET|OPERATION)_EXHAUSTED|HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED|REQUEST_BUDGET_EXHAUSTED)\b/.test(reason)) {
+      try {
+        const observed = retainedDebugVersion(input.projectId, input.sessionId)
+        const current = observed && softwareVerificationFingerprint(project.root_path)
+        if (current && current !== observed.source) reason += '\n当前文件还包含上次宿主观察之后的修改，尚未确认这些修改能正常运行；不能把上次可用画面当作当前版本。修改与旧观察已保留，恢复时应先核对这部分差异。'
+      } catch { reason += '\n无法核对上次观察版本，当前修改仍未验收；恢复时先核对文件和运行结果。' }
+    }
     updateProject(input.projectId, { status: 'active', current_stage: confirmation ? 'blocked_for_user_decision' : 'generating_mvp', desktop_phase: confirmation ? undefined : 'desktop-implement',
       desktop_blocked: { reason: 'verification-incomplete', note: reason, at: new Date().toISOString() } })
     checkpoint(confirmation ? 'waiting_user' : state, { error: reason })

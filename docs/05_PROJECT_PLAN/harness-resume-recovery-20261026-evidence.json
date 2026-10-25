@@ -1,0 +1,107 @@
+{
+  "overall_status": "incomplete",
+  "repair_baseline": "f945353",
+  "project_id": "063292c4-8693-48ba-b9d9-5662f9cca830",
+  "session_id": "30ff26a2-5e86-4042-b239-f90e1debb80a",
+  "project_status": "active",
+  "blocked": {
+    "reason": "verification-incomplete",
+    "note": "MONETARY_BUDGET_EXHAUSTED：下一次模型请求尚未发出：本地金额上限 3 元，已计入责任上界 0.960841 元（已报告计价 0.960841 元，未结算请求预留 0 元）。可用 2.039159 元，本次最坏情况需预留 2.162688 元，差 0.123529 元。预留不足不等于实际花完预算，也不是渠道余额不足。当前文件、用量和进度已保留。",
+    "at": "2026-10-25T16:32:49.881Z"
+  },
+  "resume_physical_requests": 2,
+  "case_physical_requests": 42,
+  "added_priced_upper_rmb": 0.119446,
+  "money": [
+    {
+      "model": "deepseek-flash",
+      "host": "api.deepseek.com",
+      "cap_rmb": 3,
+      "accounted_upper_rmb": 0.960841,
+      "remaining_rmb": 2.039159,
+      "reported_peak_rmb": 0.960841
+    }
+  ],
+  "shared_window_requests": 55,
+  "last_two_requests": [
+    {
+      "model": "deepseek-flash",
+      "status": "reported",
+      "input_tokens_limit": 1048576,
+      "output_tokens_limit": 1024,
+      "charged_micro_rmb": 568
+    },
+    {
+      "model": "deepseek-flash",
+      "status": "reported",
+      "input_tokens_limit": 1048576,
+      "output_tokens_limit": 7610,
+      "charged_micro_rmb": 118878
+    }
+  ],
+  "failed_candidate": {
+    "status": "failed",
+    "candidate_id": "7820686494e339521ecfc9e6e478bc91a5fe6831d3900a41ffe34a838d70b7b9",
+    "checks_passed": 5,
+    "page_errors": [
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')",
+      "Cannot read properties of null (reading 'value')"
+    ],
+    "error": "TimeoutError: locator.selectOption: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('#record-course')\u001b[22m\n"
+  },
+  "operator_intervention": {
+    "at": "2026-10-25T16:37:52.7539124Z",
+    "intervention": "Codex operator restored exactly one partially edited HTML file from previously independently passing candidate",
+    "project_id": "063292c4-8693-48ba-b9d9-5662f9cca830",
+    "source_snapshot": "3d89c3f5ba17db2ffb8d4f1868ae89a0cbc288d1a1b4785910f81f973f3e3672",
+    "restored_path": "public/index.html",
+    "failed_sha256": "83FF47C7BA017BB08E9ECDC0C8753D0A58708C024EF7759A2D7A53C376DB1C00",
+    "restored_sha256": "01F300C553406F398F2BE92D85F0C2524F71DD2685D045E2DB8B66C364BF6BF0",
+    "all_other_original_source_hashes_unchanged": true,
+    "rules_changed": false,
+    "provider_calls_added": 0
+  },
+  "restored_independent_qa": {
+    "status": "passed",
+    "candidate_id": "3d7eb3289f659116c7459c9c5b6785598f91c7a3926f3eeaa751fbd83866d7bd",
+    "checks": [
+      "create_two_courses_and_reject_blank",
+      "task_creation_required_title_and_initial_stats",
+      "edit_task_and_combined_filters_search_reset",
+      "status_change_updates_done_and_overdue",
+      "rename_course_keeps_task_relationships",
+      "study_records_and_invalid_minutes_rejected_without_mutation",
+      "referenced_course_delete_blocked_no_mutation",
+      "actual_json_download_contains_all_entities_and_foreign_keys",
+      "delete_updates_stats_and_cancel_import_preserves_data",
+      "confirmed_replace_restores_deleted_records_and_repeat_import_no_duplicates",
+      "reject_broken_backup_and_download_proves_no_mutation",
+      "reject_missing_backup_and_download_proves_no_mutation",
+      "reject_dangling_backup_and_download_proves_no_mutation",
+      "actual_backend_and_browser_restart_preserves_ids_fields_and_relationships"
+    ],
+    "remote_requests": [],
+    "page_errors": [],
+    "launches": [
+      {
+        "pid": 151348,
+        "url": "http://127.0.0.1:4173/"
+      },
+      {
+        "pid": 135712,
+        "url": "http://127.0.0.1:4173/"
+      }
+    ],
+    "source_and_rules_unchanged": true,
+    "monetary_ledgers_unchanged": true,
+    "provider_requests_added": 0
+  },
+  "original_accounting_unchanged": true
+}

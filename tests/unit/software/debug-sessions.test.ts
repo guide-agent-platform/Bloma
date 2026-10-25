@@ -7,7 +7,8 @@ import { createProject, updateProject } from '../../../main/project/project-serv
 import { debugWorkspace } from '../../../main/software/debug-workspace'
 import { buildSoftwareInspectTool } from '../../../main/software/inspect-tool'
 import { createSoftwareCollaborationPolicy } from '../../../main/software/collaboration-policy'
-import { closeDebugSessions, readDebugSession } from '../../../main/software/debug-sessions'
+import { closeDebugSessions, readDebugSession, retainedDebugVersion } from '../../../main/software/debug-sessions'
+import { softwareVerificationFingerprint } from '../../../main/desktop/verification-fingerprint'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { startSoftwareProcess, stopSoftwareSession } from '../../../main/software/process-manager'
 
@@ -67,10 +68,12 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   }
   writeFileSync(join(root, ui === 'electron' ? 'main.cjs' : 'server.cjs'), ui === 'electron' ? mainSource('v2') : serverSource('v2'))
   expect(JSON.parse((await tool.execute({ mode: 'read', debug_session_id: id }, context)).output).stale).toBe(true)
+  expect(retainedDebugVersion(project.project_id, 's')?.source).not.toBe(softwareVerificationFingerprint(root))
   // An explicit act from a persisted transcript has the same automatic reload
   // semantics as an omitted mode; it must observe the new backend, never v1.
   const reloaded = await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('new-backend', '#version', 'v2'), check('data', '#count', '1')] }, context)
   expect(reloaded.isError, reloaded.output).not.toBe(true); expect(JSON.parse(reloaded.output)).toMatchObject({ version: 4, stale: false })
+  expect(retainedDebugVersion(project.project_id, 's')).toEqual({ source: softwareVerificationFingerprint(root), version: 4 })
   if (ui === 'browser') expect((await tool.execute({ steps: [{ id: 'draft', kind: 'fill', selector: '#draft', value: 'retained browser storage' }] }, context)).isError).not.toBe(true)
   abort.abort(); await closeDebugSessions(project.project_id, 's')
   expect(readDebugSession(project.project_id, 's', id).state).toBe('closed')
