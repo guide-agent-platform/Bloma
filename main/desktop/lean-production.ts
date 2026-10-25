@@ -35,6 +35,7 @@ import { stopSoftwareSession } from '../software/process-manager'
 import { closeDebugSessions } from '../software/debug-sessions'
 import { prepareSoftwareRelease, promoteSoftwareRelease, verifyReleaseSource } from '../software/release-store'
 import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
+import { verifySoftwareCandidate } from '../software/verification'
 import { importedProjectContext } from '../software/import-project'
 import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type SoftwareRunStatus } from '../software/run-state'
 
@@ -193,36 +194,54 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       const version = versionOf()
       if (!version || prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope) { blocked('验证前目标或文件版本发生变化，请沿当前版本继续。'); return }
       let candidate: Awaited<ReturnType<typeof prepareSoftwareRelease>> | undefined
-      let preparationFailure: string | undefined
-      if (software) {
-        try { candidate = await prepareSoftwareRelease(input.projectId, project.root_path, runSignal) }
-        catch (error) { runSignal.throwIfAborted(); preparationFailure = `发布候选未准备完成：${String(error)}` }
-      }
-      const checkRoot = candidate?.root ?? project.root_path
-      checkpoint('verifying', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined, candidateId: candidate?.id })
-      const core: CoreVerificationResult = preparationFailure ? { status: 'unverified', checked_at: new Date().toISOString(), summary: preparationFailure, missing: [preparationFailure], evidence: [] }
-        : deps.coreVerification ? await deps.coreVerification(input.projectId, runSignal)
-        : await runCoreVerification({ projectId: input.projectId, sandboxRoot: checkRoot, signal: runSignal, reuse: !software })
-      runSignal.throwIfAborted()
-      let failure: string | undefined
-      const cleanEnvironmentPending = software && core.local_status === 'passed' && core.distribution?.status === 'environment_blocked'
-      if (core.status !== 'passed' && !cleanEnvironmentPending) failure = `${core.summary}\n${core.missing.join('\n')}`
-      else {
-        const security = deps.securityScan ? deps.securityScan(input.projectId) : defaultQuickSecurityGate(input.projectId)
-        if (!security || !security.passed || security.blocking > 0) failure = `安全检查未通过或未执行：${security?.listing ?? '无有效证据'}`
+      let core: CoreVerificationResult, failure: string | undefined, cleanEnvironmentPending = false
+      if (software && !deps.coreVerification && !deps.securityScan && !deps.launchSmoke) {
+        // The agent tool and final delivery share one verifier. Every fresh
+        // attempt invalidates earlier receipts, including failures at closure.
+        checkpoint('verifying', { source: softwareVerificationFingerprint(project.root_path) })
+        const checked = await verifySoftwareCandidate(input.projectId, input.requestId, runSignal)
+        candidate = checked.candidate
+        core = checked.core ?? { status: 'unverified', checked_at: new Date().toISOString(), summary: checked.summary, missing: [checked.summary], evidence: [] }
+        cleanEnvironmentPending = checked.status === 'environment_blocked' && core.local_status === 'passed'
+          && core.distribution?.status === 'environment_blocked' && checked.launch?.passed === true
+        if (checked.status !== 'passed' && !cleanEnvironmentPending) failure = checked.summary
+        if (checked.launch) writeTextFileAtomic(join(project.root_path, '00_VERIFY/launch-smoke.json'), JSON.stringify(checked.launch, null, 2))
+        checkpoint('verifying', { source: softwareVerificationFingerprint(project.root_path), candidateId: candidate?.id })
+      } else {
+        let preparationFailure: string | undefined
+        if (software) {
+          try { candidate = await prepareSoftwareRelease(input.projectId, project.root_path, runSignal) }
+          catch (error) { runSignal.throwIfAborted(); preparationFailure = `发布候选未准备完成：${String(error)}` }
+        }
+        const checkRoot = candidate?.root ?? project.root_path
+        const priorSecurity = software && !preparationFailure
+          ? deps.securityScan ? deps.securityScan(input.projectId) : defaultQuickSecurityGate(input.projectId, checkRoot) : undefined
+        checkpoint('verifying', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined, candidateId: candidate?.id })
+        core = preparationFailure ? { status: 'unverified', checked_at: new Date().toISOString(), summary: preparationFailure, missing: [preparationFailure], evidence: [] }
+          : software && (!priorSecurity?.passed || priorSecurity.blocking > 0) ? { status: 'unverified', checked_at: new Date().toISOString(), summary: `执行产品前的静态检查未通过：${priorSecurity?.listing ?? '扫描未能完成'}`, missing: [], evidence: [] }
+          : deps.coreVerification ? await deps.coreVerification(input.projectId, runSignal)
+          : await runCoreVerification({ projectId: input.projectId, sandboxRoot: checkRoot, signal: runSignal, reuse: !software })
+        runSignal.throwIfAborted()
+        cleanEnvironmentPending = software && core.local_status === 'passed' && core.distribution?.status === 'environment_blocked'
+        if (core.status !== 'passed' && !cleanEnvironmentPending) failure = `${core.summary}\n${core.missing.join('\n')}`
         else {
-          const declared = readLaunchDeclaration(checkRoot)
-          const command = brief.lean_brief.ui === 'none' && declared?.ok && declared.launch.mode === 'command'
-          const launch = deps.launchSmoke ? await deps.launchSmoke(input.projectId, runSignal) : command
-            ? await runLaunchSmoke(checkRoot, { signal: runSignal, allowCleanExit: true }) : software ? await runLaunchSmoke(checkRoot, { signal: runSignal }) : await defaultLaunchSmokeGate(input.projectId, runSignal)
-          runSignal.throwIfAborted()
-          writeTextFileAtomic(join(project.root_path, '00_VERIFY/launch-smoke.json'), JSON.stringify(launch, null, 2))
-          if (brief.lean_brief.ui === 'required' && launch?.criteria?.degraded) { blocked('正常窗口验证环境不可用，程序已保留，未将仅存活检查当作交付通过。'); return }
-          const browser = software && brief.lean_brief.delivery === 'browser' && declared?.ok && declared.launch.ui === 'browser'
-          const windowReady = brief.lean_brief.ui !== 'required' || browser && launch?.http_ready === true || launch?.criteria && launch.criteria.window_found && launch.criteria.responsive && launch.criteria.stable && launch.criteria.closed_gracefully
-          if (!launch?.passed || !windowReady) failure = `正常启动未通过：${launch?.detail ?? '未执行或证据缺失'}\n${launch?.outputExcerpt ?? ''}`
+          const security = software ? priorSecurity : deps.securityScan ? deps.securityScan(input.projectId) : defaultQuickSecurityGate(input.projectId)
+          if (!security || !security.passed || security.blocking > 0) failure = `安全检查未通过或未执行：${security?.listing ?? '无有效证据'}`
+          else {
+            const declared = readLaunchDeclaration(checkRoot)
+            const command = brief.lean_brief.ui === 'none' && declared?.ok && declared.launch.mode === 'command'
+            const launch = deps.launchSmoke ? await deps.launchSmoke(input.projectId, runSignal) : command
+              ? await runLaunchSmoke(checkRoot, { signal: runSignal, allowCleanExit: true }) : software ? await runLaunchSmoke(checkRoot, { signal: runSignal }) : await defaultLaunchSmokeGate(input.projectId, runSignal)
+            runSignal.throwIfAborted()
+            writeTextFileAtomic(join(project.root_path, '00_VERIFY/launch-smoke.json'), JSON.stringify(launch, null, 2))
+            if (brief.lean_brief.ui === 'required' && launch?.criteria?.degraded) { blocked('正常窗口验证环境不可用，程序已保留，未将仅存活检查当作交付通过。'); return }
+            const browser = software && brief.lean_brief.delivery === 'browser' && declared?.ok && declared.launch.ui === 'browser'
+            const windowReady = brief.lean_brief.ui !== 'required' || browser && launch?.http_ready === true || launch?.criteria && launch.criteria.window_found && launch.criteria.responsive && launch.criteria.stable && launch.criteria.closed_gracefully
+            if (!launch?.passed || !windowReady) failure = `正常启动未通过：${launch?.detail ?? '未执行或证据缺失'}\n${launch?.outputExcerpt ?? ''}`
+          }
         }
       }
+      runSignal.throwIfAborted()
       if (failure) {
         if (modelBudgetStop) { blocked(`模型请求额度已到，宿主检查未通过，未再调用模型：\n${failure}`); return }
         if (core.status === 'environment_blocked' && !cleanEnvironmentPending) { blocked(failure); return }

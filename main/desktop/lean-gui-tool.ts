@@ -38,14 +38,14 @@ export function buildLeanGuiTool(projectId: string): AgentLoopTool {
           || features.some(fid => !suite.covers.includes(fid))) || suite.covers.some(fid => !Object.values(refs).some(ids => ids.includes(fid)))) throw new Error(`GUI_EXPECT_OBSERVATIONS_REQUIRED: acceptance_refs必须为expect步骤id→F编号数组，需覆盖${suite.covers.join(',')}，并至少实际fill或click一次`)
         const previous = existsSync(guiSuitePath(projectId)) ? parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8'))) : undefined
         const contract = (value: typeof suite) => JSON.stringify({ refs: value.acceptance_refs, fixtures: value.fixtures, steps: value.steps.map(step => {
-          const { selector: _selector, ...meaning } = step as typeof step & { selector?: string }
+          const { selector: _selector, has_text: _text, ...meaning } = step as typeof step & { selector?: string }
           return meaning
         }) })
         if (previous?.scope_hash === scope && contract(previous) !== contract(suite)) throw new Error('GUI_EXISTING_EXPECTATIONS_CHANGED: 同目标只允许修正控件定位，不能改输入或预期过关')
         if (software) assertRetainedSoftwareBehavior(projectId, 'gui', suite)
         installGuiAcceptanceSuite(projectId, suite)
         updateProject(projectId, { gui_acceptance: { status: 'sealed', scope_hash: scope } })
-        return { output: '已登记当前目标的GUI操作与固定预期，尚未执行或判定通过。', feedback: { schema_version: 1, execution: 'completed', verification: 'not_applicable', source: 'host', scope: 'gui_registration' } }
+        return { output: `已登记当前目标的GUI操作与固定预期，尚未执行或判定通过。${software ? '程序就绪后调用verify_app，宿主会实际检查；通过后可结束，不必重复启动自测。' : ''}`, feedback: { schema_version: 1, execution: 'completed', verification: 'not_applicable', source: 'host', scope: 'gui_registration' } }
       } catch (error) { return guiInputFailure(error) }
     } }
 }

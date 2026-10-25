@@ -39,7 +39,8 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
     input_schema: { type: 'object', properties: {} },
     execute: async (_toolInput, ctx) => {
       const project = findProject(projectId)
-      const result = runSecurityScan({ project_id: projectId, root_path: project.root_path })
+      const result = runSecurityScan({ project_id: projectId, root_path: project.root_path,
+        ...(project.workflow_version === 'software-v1' ? { profile: 'local-software' as const } : {}) })
       const blocking = result.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
       if (result.passed) {
         ctx.state.security_all_passed = true

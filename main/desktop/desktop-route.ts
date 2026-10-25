@@ -83,6 +83,7 @@ import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './require
 import { readProductionDigest } from './production-context'
 import { runQuickProductionReview, ensureQuickProductionReview } from './quick-production-review'
 import { runSecurityScan } from '../verification/security-scan'
+import { writeTextFileAtomic } from '../../storage/json-store'
 
 // =========================================================================
 // 桌面线判定
@@ -196,7 +197,7 @@ export interface QuickSecurityGateResult {
 /** 快速通道安全门生产实现：对产物根跑静态扫描（高危/严重 fail-closed）；
  *  扫描器异常或无项目上下文返回 null（跳过留痕——安全门不做可用性单点，与
  *  dispatcher-loop runHostSecurityGate 同哲学）。 */
-export function defaultQuickSecurityGate(projectId: string): QuickSecurityGateResult | null {
+export function defaultQuickSecurityGate(projectId: string, checkedRoot?: string): QuickSecurityGateResult | null {
   let rootPath: string | undefined
   try {
     rootPath = findProject(projectId).root_path
@@ -204,7 +205,9 @@ export function defaultQuickSecurityGate(projectId: string): QuickSecurityGateRe
     return null
   }
   try {
-    const result = runSecurityScan({ project_id: projectId, root_path: rootPath })
+    const result = runSecurityScan({ project_id: projectId, root_path: checkedRoot ?? rootPath,
+      ...(findProject(projectId).workflow_version === 'software-v1' ? { profile: 'local-software' as const } : {}) })
+    if (findProject(projectId).workflow_version === 'software-v1') writeTextFileAtomic(join(checkedRoot ?? rootPath, '00_VERIFY/security-scan.json'), JSON.stringify(result, null, 2))
     const blocking = result.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
     return {
       passed: result.passed,

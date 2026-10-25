@@ -12,14 +12,14 @@ import { GUI_ACTION_KINDS } from './gui-tool-contract'
 import { materializeGuiFixtures } from './gui-fixtures'
 import { isSoftwareProject } from './workflow-policy'
 
-type Action = { id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
+type Action = ({ id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
   | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
   | { id: string; kind: 'press'; selector: string; key: string }
   | { id: string; kind: 'scroll'; selector: string }
   | { id: string; kind: 'drag'; selector: string; target_selector: string }
   | { id: string; kind: 'upload' | 'native_upload' | 'download'; selector: string; path: string }
   | { id: string; kind: 'expect_file'; path: string; equals?: string; contains?: string; sha256?: string; nonempty?: true }
-  | { id: string; kind: 'restart' | 'lock_data' | 'unlock_data' | 'storage_full' | 'storage_restore' | 'corrupt_data' | 'remove_data' }
+  | { id: string; kind: 'restart' | 'lock_data' | 'unlock_data' | 'storage_full' | 'storage_restore' | 'corrupt_data' | 'remove_data' }) & { has_text?: string }
 export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: string[]; steps: Action[]
   /** Host-stamped provenance for automatically prepared controls and expectations. */
   design_hash?: string
@@ -60,6 +60,7 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
     if (!step || typeof step.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(step.id) || ids.has(step.id)
       || !GUI_ACTION_KINDS.includes(step.kind)) throw new Error(`GUI_STEP_INVALID: steps[${index}]需要唯一id及kind（fill/click/expect/restart）；字段名不是action/type/op`)
     ids.add(step.id)
+    if (step.has_text !== undefined && (!('selector' in step) || typeof step.has_text !== 'string' || !step.has_text.trim() || step.has_text.length > 200)) throw Error(`GUI_TEXT_LOCATOR_INVALID: steps[${index}].has_text需1-200字符并配合selector`)
     if (step.kind === 'lock_data' || step.kind === 'storage_full') { if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = step.kind === 'lock_data' ? 'lock' : 'full' }
     if (step.kind === 'unlock_data') { if (storageFault !== 'lock') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
     if (step.kind === 'storage_restore') { if (storageFault !== 'full') throw new Error('GUI_DATA_LOCK_UNBALANCED'); storageFault = undefined }
@@ -87,7 +88,7 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
   if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
   const groups = splitSteps(suite)
   if (groups.length > 8) throw new Error(`GUI_RESTART_LIMIT_EXCEEDED: ${groups.length}>8`)
-  const emptySegment = groups.findIndex(group => !group.length || !options.allowActionsOnly && !group.some(step => step.kind === 'expect' || step.kind === 'expect_file'))
+  const emptySegment = groups.findIndex(group => !options.allowActionsOnly && (!group.length || !group.some(step => step.kind === 'expect' || step.kind === 'expect_file')))
   if (emptySegment >= 0) throw new Error(`GUI_SEGMENT_NEEDS_ASSERTION: 第${emptySegment + 1}段缺少expect；restart后也需实际断言，不要以restart结尾`)
   return suite
 }
@@ -127,6 +128,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
       const { observeSoftwareGui } = await import('../software/gui-observer')
       Object.assign(result, await observeSoftwareGui({ projectId: options.projectId, root, launch: launch.launch, suite, temporary, signal: options.signal }))
     } else {
+    if (suite.steps.some(step => step.has_text !== undefined)) throw Error('GUI_TEXT_LOCATOR_RUNTIME_UNSUPPORTED: has_text仅用于Electron/浏览器；此运行时需真实CSS')
     if (!launch?.ok || launch.launch.command.length !== 2 || !/^python(?:3)?(?:\.exe)?$/i.test(basename(launch.launch.command[0]))) throw new Error('GUI_NATIVE_ENTRY_UNSUPPORTED')
     const entry = realpathSync(resolve(root, launch.launch.command[1])), rel = relative(root, entry)
     if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !entry.endsWith('.py')) throw new Error('GUI_ENTRY_OUTSIDE_PROJECT')

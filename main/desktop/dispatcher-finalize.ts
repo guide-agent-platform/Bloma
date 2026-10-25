@@ -142,7 +142,8 @@ function runHostSecurityGate(input: { projectId: string; sandboxRoot?: string })
     }
   }
   try {
-    const result = runSecurityScan({ project_id: input.projectId, root_path: rootPath })
+    const result = runSecurityScan({ project_id: input.projectId, root_path: rootPath,
+      ...(findProject(input.projectId).workflow_version === 'software-v1' ? { profile: 'local-software' as const } : {}) })
     const blocking = result.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
     return {
       passed: result.passed,

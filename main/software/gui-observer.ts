@@ -47,7 +47,7 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
     return { size: bytes.length, sha256: digest }
   }
   if (!('selector' in step)) throw new Error(`GUI_ACTION_UNSUPPORTED_FOR_THIS_RUNTIME:${step.kind}`)
-  const locator = page.locator(step.selector)
+  const locator = step.has_text === undefined ? page.locator(step.selector) : page.locator(step.selector).filter({ hasText: step.has_text })
   if (step.kind === 'fill') { await locator.fill(step.value); return await locator.inputValue() }
   if (step.kind === 'click') { await locator.click(); return 'clicked' }
   if (step.kind === 'press') { await locator.press(step.key); return 'key pressed' }
@@ -88,7 +88,7 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
     } catch { /* a genuine async UI may not have its output yet */ }
     await new Promise(resolve => setTimeout(resolve, 75))
   } while (Date.now() < deadline)
-  throw Object.assign(new Error(`GUI_ASSERTION_FAILED:${step.id}`), { actual })
+  throw Object.assign(new Error(`GUI_ASSERTION_FAILED:${step.id}`), { actual, expected: step.equals ?? step.contains ?? 'nonempty', selector: step.selector, has_text: step.has_text })
 }
 
 /** DOM actions are host-owned and run against the normal application. No product

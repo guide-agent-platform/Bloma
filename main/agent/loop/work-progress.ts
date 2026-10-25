@@ -11,7 +11,7 @@ export function createWorkProgress() {
       const waiting = calls.length > 0 && calls.every(call => call.status === 'ok' && ['wait_for_delegations', 'list_delegations'].includes(call.name))
       if (waiting) return { stalled: false, idleTurns, nudge: undefined }
       const acted = calls.some(call => call.status === 'ok' && ['write_file', 'edit_file', 'run_project_script', 'run_project_driver', 'drive_project_app', 'install_packages', 'delegate_agent', 'continue_delegation',
-        'run_command', 'start_service', 'stop_process', 'inspect_app', 'prepare_software_environment', 'register_gui_check', 'register_cli_check'].includes(call.name))
+        'run_command', 'start_service', 'stop_process', 'inspect_app', 'verify_app', 'prepare_software_environment', 'register_gui_check', 'register_cli_check'].includes(call.name))
       idleTurns = acted ? 0 : idleTurns + 1
       return { stalled: idleTurns >= 24, idleTurns, nudge: idleTurns > 0 && idleTurns % 6 === 0
         ? calls.some(call => call.status === 'error' && ['inspect_app', 'register_gui_check', 'register_cli_check'].includes(call.name))

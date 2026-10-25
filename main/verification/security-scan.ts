@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { softwareProcessIssues } from './software-process-check'
 
 /**
  * A3 OWASP 安全扫描器（api-spec §12.9 `run_security_scan`）。
@@ -47,6 +48,8 @@ export interface SecurityScanResult {
 export interface SecurityScanInput {
   project_id: string
   root_path: string
+  /** Host-selected workflow context; never accepted from generated files. */
+  profile?: 'web-sandbox' | 'local-software'
 }
 
 interface ScanRule {
@@ -199,10 +202,13 @@ export function runSecurityScan(input: SecurityScanInput): SecurityScanResult {
     const rel = relative(input.root_path, file).replace(/\\/g, '/')
     const isServerFile = rel === 'server.js' || rel.startsWith('server/')
     const isPyFile = rel.endsWith('.py')
+    if (input.profile === 'local-software' && /\.(?:[cm]?js|[jt]sx?)$/i.test(rel)) issues.push(...softwareProcessIssues(content, rel))
     const pythonCode = isPyFile ? maskPythonStringsAndComments(content).split('\n') : []
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       for (const rule of SCAN_RULES) {
+        if (input.profile === 'local-software' && rule.serverOnly) continue
+        if (input.profile === 'local-software' && rule.nonPyOnly && /\.(?:[cm]?js|[jt]sx?)$/i.test(rel)) continue // syntax-aware software execution checks above
         if (rule.serverOnly && !isServerFile) continue
         if (rule.pyOnly && !isPyFile) continue
         if (rule.nonPyOnly && isPyFile) continue
@@ -212,9 +218,9 @@ export function runSecurityScan(input: SecurityScanInput): SecurityScanResult {
           ? pythonCode[index].replace(/\bdef\s+(?:eval|exec)(?=\s*\()/g, 'def callable') : line
         if (rule.pattern.test(candidate)) {
           issues.push({
-            severity: rule.severity,
+            severity: input.profile === 'local-software' && rule.category === 'external_resource' ? 'medium' : rule.severity,
             category: rule.category,
-            user_visible_summary: rule.summary,
+            user_visible_summary: input.profile === 'local-software' && rule.category === 'external_resource' ? '代码动态加载资源，请核对来源和离线需求；联网能力本身不阻断本机软件交付' : rule.summary,
             file: rel,
             line: index + 1,
           })

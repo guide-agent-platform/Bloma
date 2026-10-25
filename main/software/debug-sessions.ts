@@ -8,6 +8,7 @@ import type { Browser, BrowserContext, BrowserServer, Page, Request } from 'play
 import type { ChildProcess } from 'node:child_process'
 import type { GuiAcceptanceSuite } from '../desktop/gui-acceptance'
 import type { LaunchDeclaration } from '../desktop/launch-smoke'
+import { readLaunchDeclaration } from '../desktop/launch-smoke'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { electronEntry, observeGuiStep } from './gui-observer'
@@ -15,10 +16,12 @@ import { softwareEnvironment } from './command-runtime'
 import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, matchingOwnedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
 import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { materializeGuiFixtures } from '../desktop/gui-fixtures'
+import { observeSoftwareUi } from './ui-observation'
 
 export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string;
   duration_ms?: number; method?: string; url?: string; status?: number }
 export interface DebugSnapshot { id: string; projectId: string; sessionId: string; state: 'opening' | 'ready' | 'closed' | 'failed' | 'interrupted'; version: number; source?: string;
+  ui?: Awaited<ReturnType<typeof observeSoftwareUi>>; data_dir?: string;
   stale: boolean; url?: string; screenshot?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
 interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; data: string; file: string; owner: string; page?: Page;
   child?: ChildProcess; nativeRoot?: number; browser?: BrowserContext; browserClient?: Browser; browserServer?: BrowserServer; externalProcessId?: string; ownedProcessId?: string; stdout?: string; stderr?: string; signal: AbortSignal; abort: () => void;
@@ -105,6 +108,13 @@ async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
 export function hasDebugSession(projectId: string, sessionId: string): boolean {
   return [...sessions.values()].some(entry => entry.snapshot.projectId === projectId && entry.snapshot.sessionId === sessionId && ['opening', 'ready'].includes(entry.snapshot.state))
 }
+export function activeDebugSessionId(projectId: string, sessionId: string) {
+  return [...sessions.values()].find(entry => entry.snapshot.projectId === projectId && entry.snapshot.sessionId === sessionId && ['opening', 'ready'].includes(entry.snapshot.state))?.snapshot.id
+}
+export function assertDebugSessionProcess(projectId: string, sessionId: string, id: string, processId: string): void {
+  const session = owned(projectId, sessionId, id)
+  if (processId !== (session.externalProcessId ?? session.ownedProcessId)) throw Error('DEBUG_PROCESS_MISMATCH: 当前调试窗口连接另一进程，请先关闭再连接指定进程')
+}
 export async function closeDebugSession(projectId: string, sessionId: string, id: string): Promise<DebugSnapshot> {
   const session = owned(projectId, sessionId, id)
   if (session.closing) { await session.closing; return readDebugSession(projectId, sessionId, id) }
@@ -171,13 +181,12 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
   const id = randomUUID(), temporary = mkdtempSync(join(tmpdir(), 'bloma-debug-')), source = verificationFingerprint(input.root)
   if (!source) throw Error('DEBUG_SOURCE_UNREADABLE')
   const session: DebugSession = { root: resolve(input.root), temporary, data: join(temporary, 'data'), file: metadataPath(id), owner: `debug-${id}`,
-    snapshot: { id, projectId: input.projectId, sessionId: input.sessionId, state: 'opening', version: 1, source, stale: false, observations: [], steps: [] },
+    snapshot: { id, projectId: input.projectId, sessionId: input.sessionId, state: 'opening', version: 1, source, stale: false, observations: [], steps: [], data_dir: join(temporary, 'data') },
     signal: input.signal, abort: () => { void closeDebugSession(input.projectId, input.sessionId, id).catch(() => {}) }, seq: 0, logBytes: 0, busy: false, launch: input.launch }
   sessions.set(id, session); persist(session); input.signal.addEventListener('abort', session.abort, { once: true })
   for (const [key, previous] of sessions) if (sessions.size > 128 && previous.finished) sessions.delete(key)
   try {
     const { chromium } = await import('playwright')
-    const environment = softwareEnvironment(input.projectId, session.data)
     if (input.launch.ui === 'electron') {
       if (input.processId) throw Error('DEBUG_ELECTRON_ATTACH_UNSUPPORTED')
       await openManagedElectron(session, input.signal)
@@ -188,10 +197,12 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
           url: input.launch.url, dataDir: session.data, signal: input.signal })
       if (service.root !== resolve(input.root)) throw Error('DEBUG_PROCESS_ROOT_MISMATCH')
       if (!source || service.source !== source) throw Error('DEBUG_PROCESS_SOURCE_CHANGED: 已有服务不是当前源码版本；先stop_process后start_service，不能把旧后端绑定为新代码')
+      if (!service.data_dir) throw Error('DEBUG_PROCESS_DATA_DIR_MISSING')
+      session.data = service.data_dir; session.snapshot.data_dir = service.data_dir
       session.externalProcessId = input.processId; session.snapshot.url = service.url
       if (!input.processId) session.ownedProcessId = service.id
       session.browserServer = await chromium.launchServer({ headless: true,
-        ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }), env: environment, timeout: 20000 })
+        ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }), env: softwareEnvironment(input.projectId, session.data), timeout: 20000 })
       session.child = session.browserServer.process(); session.browserClient = await chromium.connect(session.browserServer.wsEndpoint())
       session.browser = await session.browserClient.newContext({ acceptDownloads: true }); session.page = await session.browser.newPage(); observePage(session, session.page)
       await session.page.goto(service.url!, { waitUntil: 'domcontentloaded', timeout: 15000 })
@@ -214,8 +225,11 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
   session.busy = true
   try {
     input.signal.throwIfAborted()
-    if (input.reload) {
+    const restart = async () => {
       const source = verificationFingerprint(session.root); if (!source) throw Error('DEBUG_SOURCE_UNREADABLE')
+      const declared = readLaunchDeclaration(session.root)
+      const launchKey = (launch: LaunchDeclaration) => JSON.stringify([launch.schema_version, launch.command, launch.ui, launch.mode, launch.url, launch.artifact, launch.window_title])
+      if (!declared?.ok || launchKey(declared.launch) !== launchKey(session.launch)) throw Error('DEBUG_LAUNCH_CHANGED: 正常入口声明已改变，请close后重新open；不能把旧入口冒充当前程序')
       session.activeAction = 'reload'; session.snapshot.state = 'opening'
       if (session.launch.ui === 'electron') {
         await stopSoftwareSession(input.projectId, session.owner); await session.browserClient?.close().catch(() => {})
@@ -229,19 +243,26 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
         if (session.externalProcessId) session.externalProcessId = service.id
         else session.ownedProcessId = service.id
         session.snapshot.version++; session.snapshot.source = source; session.snapshot.url = service.url
+        if (!session.page) throw Error('DEBUG_PAGE_UNAVAILABLE_AFTER_RESTART')
         await session.page.goto(service.url!, { waitUntil: 'domcontentloaded' })
       }
-      input.signal.throwIfAborted(); session.page.setDefaultTimeout(4000); session.snapshot.state = 'ready'
-      session.snapshot.steps = []; session.snapshot.error = undefined; session.stdout = ''; session.stderr = ''; log(session, 'version.reload', '已重启调试入口以绑定新代码，保留隔离持久数据；旧观察保留原版本编号')
-    } else if (readDebugSession(input.projectId, input.sessionId, input.id).stale) throw Error('DEBUG_SOURCE_CHANGED: 先reload以标记新版本；若每次保存业务数据都会触发，核对是否把APP_DATA_DIR覆盖到了项目内，使用宿主提供的工程外数据目录。不能把旧窗口当作新代码')
+      input.signal.throwIfAborted()
+      if (!session.page) throw Error('DEBUG_PAGE_UNAVAILABLE_AFTER_RESTART')
+      session.page.setDefaultTimeout(4000); session.snapshot.state = 'ready'
+      session.snapshot.error = undefined; session.stdout = ''; session.stderr = ''; log(session, 'version.reload', '已重启调试入口以绑定新代码，保留隔离持久数据；旧观察保留原版本编号')
+    }
+    if (input.reload) await restart()
+    else if (readDebugSession(input.projectId, input.sessionId, input.id).stale) throw Error('DEBUG_SOURCE_CHANGED: 先reload以标记新版本；若每次保存业务数据都会触发，核对是否把APP_DATA_DIR覆盖到了项目内，使用宿主提供的工程外数据目录。不能把旧窗口当作新代码')
     session.snapshot.steps = []
     for (const step of input.steps ?? []) {
       input.signal.throwIfAborted(); session.activeAction = step.id
-      if (step.kind === 'restart') throw Error('GUI_ACTION_UNSUPPORTED_IN_SESSION: 重开检查请用正式验收或关闭后重新open')
-      try { const actual = await observeGuiStep(session.page, step, { data: session.data, fixtures: session.snapshot.fixtures, nativeProcessRoot: session.nativeRoot, signal: input.signal }); session.snapshot.steps.push({ id: step.id, passed: true, actual }) }
-      catch (error) { session.snapshot.steps.push({ id: step.id, passed: false, actual: (error as { actual?: unknown }).actual ?? String(error) }); log(session, 'action.failed', String(error)); break }
+      if (step.kind === 'restart') { await restart(); session.snapshot.steps.push({ id: step.id, passed: true, actual: '正常入口已重启，隔离数据保留' }); continue }
+      const bounded = (value: unknown) => typeof value === 'string' && value.length > 2000 ? `${value.slice(0, 2000)}…[省略${value.length - 2000}字符]` : value
+      try { const actual = await observeGuiStep(session.page, step, { data: session.data, fixtures: session.snapshot.fixtures, nativeProcessRoot: session.nativeRoot, signal: input.signal }); session.snapshot.steps.push({ id: step.id, passed: true, actual: bounded(actual) }) }
+      catch (error) { session.snapshot.steps.push({ id: step.id, passed: false, actual: bounded((error as { actual?: unknown }).actual ?? String(error)) }); log(session, 'action.failed', String(error)); break }
     }
     session.activeAction = undefined
+    session.snapshot.ui = await observeSoftwareUi(session.page)
     const screenshotDir = join(getPromaHome(), 'software-debug-sessions', session.snapshot.id); mkdirSync(screenshotDir, { recursive: true })
     session.snapshot.screenshot = join(screenshotDir, `v${session.snapshot.version}-${Date.now()}.png`)
     await session.page.screenshot({ path: session.snapshot.screenshot })

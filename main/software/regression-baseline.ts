@@ -32,7 +32,7 @@ export function assertRetainedSoftwareBehavior(projectId: string, kind: 'gui' | 
     // CSS identities can change with a legitimate redesign; the old observed
     // outputs and their retained feature references cannot silently disappear.
     const signature = (step: GuiAcceptanceSuite['steps'][number]) => {
-      const { id: _id, selector: _selector, timeout_ms: _timeout, ...behavior } = step as unknown as Record<string, unknown>
+      const { id: _id, selector: _selector, has_text: _text, timeout_ms: _timeout, ...behavior } = step as unknown as Record<string, unknown>
       if (behavior.kind === 'expect' && !behavior.property) behavior.property = 'text'
       return JSON.stringify(Object.fromEntries(Object.entries(behavior).sort(([a], [b]) => a.localeCompare(b))))
     }

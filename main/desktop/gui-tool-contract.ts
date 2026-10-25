@@ -10,6 +10,7 @@ export function guiStepsSchema(maxItems = 96, kinds = GUI_ACTION_KINDS) {
       id: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$', description: '唯一操作编号；acceptance_refs引用expect步骤的这个编号。' },
       kind: { type: 'string', enum: kinds, description: '字段名kind；不用action/type/op。' },
       selector: { type: 'string', minLength: 1, maxLength: 512, description: '真实CSS控件选择器，fill/click/expect必填。' },
+      ...(kinds.includes('upload') ? { has_text: { type: 'string', minLength: 1, maxLength: 200, description: 'Electron/浏览器按可见内容过滤selector定位的元素。列表选笔记B用selector:".note-item",has_text:"笔记B"，不要依赖新增/编辑后会变的nth-child。它用于定位，不替代expect的equals/contains。' } } : {}),
       value: { type: 'string', maxLength: 4096, description: '仅fill输入文本；断言精确值使用equals。' },
       path: { type: 'string', description: 'upload/native_upload引用fixtures.path（input/内）；native_upload仅用于Electron的原生Open对话框。download/expect_file使用隔离outputs/内路径。' },
       key: { type: 'string', minLength: 1, maxLength: 128, description: 'press键组合，如Control+A、Enter。' },

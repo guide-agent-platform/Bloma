@@ -18,12 +18,20 @@ import { redactSoftwareOutput } from '../main/software/process-manager'
 import { guiSuitePath } from '../main/desktop/gui-acceptance'
 import { buildLeanGuiTool } from '../main/desktop/lean-gui-tool'
 import { createToolState } from '../main/agent/loop/agent-loop'
+import { handleGuideMessage } from '../main/guide/stages/guide-pipeline'
+import { registerProjectsIpc } from '../main/ipc/projects'
+import { IPC_CHANNELS, type AgentEvent } from '../shared/types'
+import { launchSoftwareForUser } from '../main/software/user-launch'
+import { stopSoftwareSession } from '../main/software/process-manager'
+import { observeSoftwareUi } from '../main/software/ui-observation'
+import { softwareEnvironment } from '../main/software/command-runtime'
 import type { SDKQuery, SDKQueryOptions } from '../main/orchestration/stages/orchestration-contracts'
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 export async function main() {
   const root = resolve(process.env.SOFTWARE_PAID_ROOT!), phase = process.env.SOFTWARE_PAID_PHASE ?? 'preflight'
-  if (!['preflight', 'refresh', 'run', 'resume', 'resume-2', 'verify-only', 'verify-selectors'].includes(phase)) throw Error('UNKNOWN_TEST_PHASE')
+  if (!['preflight', 'refresh', 'run', 'resume', 'resume-2', 'verify-only', 'verify-selectors', 'verify-software-policy', 'fresh-guide'].includes(phase)) throw Error('UNKNOWN_TEST_PHASE')
+  const fresh = phase === 'fresh-guide'
   const hostOnly = phase.startsWith('verify-')
   const home = join(root, 'home'), manifestPath = join(root, 'manifest.json'), policy = join(root, 'monetary-policy.json')
   mkdirSync(root, { recursive: true }); mkdirSync(home, { recursive: true })
@@ -91,7 +99,7 @@ export async function main() {
   process.env.BLOMA_MONETARY_EPOCH_DIR = join(root, 'test-window-epochs')
   const existing = existsSync(policy + '.state.json') ? JSON.parse(readFileSync(policy + '.state.json', 'utf8')).entries.length : 0
   const continuing = /^resume(?:-2)?$/.test(phase) || hostOnly, originalReport = continuing ? JSON.parse(readFileSync(join(root, 'report.json'), 'utf8')) : undefined
-  const requestLimit = phase === 'resume-2' ? 56 : 40
+  const requestLimit = fresh ? 128 : phase === 'resume-2' ? 56 : 40
   if (!hostOnly && existing >= requestLimit) throw Error('TEST_REQUEST_LIMIT_EXHAUSTED')
   const control = createRequestBudget(binding.env, { requests: Math.max(0, requestLimit - existing), outputTokens: 8192, rmb: 3 })
   const paid = control.wrap(anthropicMessagesQueryViaProviders), deadline = AbortSignal.timeout(8 * 60000)
@@ -103,11 +111,11 @@ export async function main() {
     yield* paid(prompt, { ...options, monetaryPolicyPath: policy, thinkingLevel: 'low', maxTokens: Math.min(8192, options.maxTokens ?? 8192),
       signal: AbortSignal.any([options.signal, deadline]), responseHeaderTimeoutMs: 30000 })
   }
-  const reportPath = join(root, hostOnly ? `report-${phase === 'verify-only' ? 'host-only' : 'host-selectors'}.json` : continuing ? `report-continuation-${phase === 'resume-2' ? '02' : '01'}.json` : 'report.json')
+  const reportPath = join(root, fresh ? 'report-fresh-guide-01.json' : phase === 'verify-software-policy' ? 'report-software-policy.json' : hostOnly ? `report-${phase === 'verify-only' ? 'host-only' : 'host-selectors'}.json` : continuing ? `report-continuation-${phase === 'resume-2' ? '02' : '01'}.json` : 'report.json')
   if (existsSync(reportPath)) throw Error('TEST_ALREADY_RAN_PRESERVE_RESULT_DO_NOT_REPEAT')
   const report: any = { version: 1, at: new Date().toISOString(), status: 'running', model: binding.modelName, budget_rmb: 3, scope: 'confirmed short goal → actual software-v1 Pi executor → host checks; one new browser notes task; no comparison/control or claim of general quality' }
   const save = () => writeFileSync(reportPath, safe({ ...report, operation: control.snapshot(), money: existsSync(policy + '.state.json') ? readMonetaryBudget(policy) : [] }))
-  const events = (type: string, payload: unknown) => { appendFileSync(join(root, 'events.jsonl'), safe({ at: new Date().toISOString(), type, payload }) + '\n'); save() }
+  const events = (type: string, payload: unknown) => { appendFileSync(join(root, fresh ? 'events-fresh-guide-01.jsonl' : 'events.jsonl'), safe({ at: new Date().toISOString(), phase, type, payload }) + '\n'); save() }
   try {
     if (continuing && (!originalReport.project_id || !originalReport.tool_qualification || originalReport.status === 'host_checks_passed')) throw Error('ORIGINAL_TEST_NOT_RESUMABLE')
     if (!continuing) {
@@ -119,7 +127,14 @@ export async function main() {
     if (!qualified.some(item => item.type === 'tool_use' && item.name === 'echo' && item.input?.text === 'ready')) throw Error('LIVE_TOOL_QUALIFICATION_FAILED')
     report.tool_qualification = 'real provider emitted structured tool call'
     } else { report.tool_qualification = originalReport.tool_qualification; report.resumes_report_sha256 = hash(readFileSync(join(root, 'report.json'))) }
-    const project = continuing ? findProject(originalReport.project_id) : createProject({ request_id: randomUUID(), mode: 'quick', initial_message: '本机浏览器记事本' }, { workflowVersion: 'software-v1' })
+    let project
+    if (fresh) {
+      const handlers = new Map<string, (...args: any[]) => any>()
+      registerProjectsIpc({ handle: (name: string, handler: (...args: any[]) => any) => handlers.set(name, handler) } as never, {} as never)
+      const created = await handlers.get(IPC_CHANNELS.PROJECT_CREATE)!({}, { request_id: randomUUID(), mode: 'quick', initial_message: '本机浏览器记事本' })
+      if (!created.ok) throw Error('PUBLIC_PROJECT_CREATE_FAILED')
+      project = created.data
+    } else project = continuing ? findProject(originalReport.project_id) : createProject({ request_id: randomUUID(), mode: 'quick', initial_message: '本机浏览器记事本' }, { workflowVersion: 'software-v1' })
     if (phase === 'verify-selectors') {
       const file = guiSuitePath(project.project_id), original = readFileSync(file), suite = JSON.parse(original.toString('utf8'))
       const changed: Array<{ id: string; before: string; after: string }> = []
@@ -134,9 +149,11 @@ export async function main() {
       if (repaired.isError) throw Error(repaired.output)
       report.manual_selector_changes = changed; report.manual_diagnostic_interventions = 2
     }
-    report.project_id = project.project_id; report.root = project.root_path; report.session_id = 'software-smoke'
+    const sessionId = fresh ? 'software-fresh-guide' : 'software-smoke'
+    if (phase === 'verify-software-policy') report.manual_diagnostic_interventions = 2
+    report.project_id = project.project_id; report.root = project.root_path; report.session_id = sessionId
     const goal = '做一个在本机浏览器使用的简单记事本。可以新增、编辑笔记，保存后关闭重开仍保留。界面简洁、操作明确，不需要账号或联网服务。先完成这个小版本。'
-    if (!continuing) {
+    if (!continuing && !fresh) {
     const parsed = parseLeanBrief(JSON.stringify({ action: 'brief', goal, ui: 'required', delivery: 'browser', requirements: [
       { description: '新增和编辑笔记', expected: '能新增两条不同笔记，并修改其中一条，另一条保持不变' },
       { description: '保存并重开', expected: '保存后关闭程序再打开，两条笔记及修改后的内容仍然存在' }] }),
@@ -149,14 +166,44 @@ export async function main() {
     const scope = prdScopeFingerprint(confirmed); updateProject(project.project_id, { ux_confirmation: { prd_fingerprint: scope, design_hash: scope, html_hash: null } })
     }
     save()
+    if (fresh) {
+      report.scope = 'public project creation → actual model short-goal extraction → actual scope confirmation → software executor → host checks and delivery; fresh project and transcript, shared original 3 RMB ledger'
+      report.manual_diagnostic_interventions = 0
+      const cards: AgentEvent[] = [], input = { project_id: project.project_id, session_id: sessionId, request_id: randomUUID(), mode: 'quick' as const, current_stage: 'clarifying' as const,
+        content: goal + '不用草图。' }
+      const publish = (event: AgentEvent) => { if (event.type === 'user_decision_required') cards.push(event); events(event.type, event.payload) }
+      const model = { query, env: binding.env, signal: deadline, sessionId, history: [], maxTokens: 8192, persistAssistant: () => {} }
+      await handleGuideMessage(input, publish, model)
+      const brief = readPrdBackplane(project.project_id)
+      if (!brief.user_confirmed_at) {
+        const card = cards.find(event => event.payload.kind === 'lean_scope'), questions = card?.payload.questions as Array<{ id: string }> | undefined
+        const id = questions?.find(question => question.id.startsWith('lean_confirm:'))?.id
+        if (!id || brief.lean_brief?.delivery !== 'browser') throw Error('EXPECTED_SCOPE_CONFIRMATION_OR_DELIVERY_MISMATCH')
+        report.scope_confirmation = 'actual published scope card selected, no engineering correction'
+        await handleGuideMessage({ ...input, request_id: randomUUID(), content: '按这份做', metadata: { source: 'card_option', selected_option_id: id } }, publish, model)
+      }
+    } else {
     const diagnostic = phase === 'resume-2' ? '宿主诊断：当前反复stale源于把临时验证数据写进项目的tmp-verify-data，保存JSON会改变源码指纹。使用start_service默认提供的工程外APP_DATA_DIR，不再自行覆盖。已有程序不必重建，完成正常入口和register_gui_check登记后让宿主验收。' : ''
     if (diagnostic) report.manual_diagnostic_interventions = 1
     await enterDesktopLine({ projectId: project.project_id, sessionId: 'software-smoke', requestId: randomUUID(), content: continuing ? `继续沿已有程序完成原记事本目标并验证，不重复创建项目。${diagnostic}` : goal, maxTokens: 8192, signal: deadline }, query, binding.env,
       { publish: (_target, type, payload) => events(type, payload), persistAssistant: () => {}, persistSystem: () => {}, complete: (_s, _p, subtype) => { report.completion = subtype ?? 'success' } })
+    }
     const final = findProject(project.project_id), released = await activeSoftwareRelease(project.project_id)
     report.project_status = final.status; report.blocked = final.desktop_blocked; report.release = released?.id
     if (released && existsSync(join(released.root, '00_VERIFY/core-verification.json'))) report.core = JSON.parse(readFileSync(join(released.root, '00_VERIFY/core-verification.json'), 'utf8'))
     report.status = final.status === 'completed' && report.core?.status === 'passed' ? 'host_checks_passed' : 'incomplete'
+    if (released && report.status === 'host_checks_passed') {
+      const { chromium } = await import('playwright')
+      const browser = await chromium.launch({ headless: true, env: softwareEnvironment(project.project_id),
+        ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }) })
+      try {
+        const page = await browser.newPage()
+        const launched = await launchSoftwareForUser(project.project_id, project.root_path, released.launch, async url => { await page.goto(url, { waitUntil: 'networkidle' }) })
+        report.user_launch = { ...launched, ui: await observeSoftwareUi(page), boundary: 'normal user-launch/data path and actual browser; not an independent assertion of every business behavior' }
+        if (!launched.started) throw Error('USER_TRIAL_LAUNCH_FAILED')
+        await page.screenshot({ path: join(root, fresh ? 'fresh-user-launch.png' : 'original-user-launch.png') })
+      } finally { await browser.close(); await stopSoftwareSession(project.project_id, 'user-launch') }
+    }
     report.usage = readProjectUsage(project.project_id)
   } catch (error) { report.status = 'failed'; report.error = String(error) }
   finally {

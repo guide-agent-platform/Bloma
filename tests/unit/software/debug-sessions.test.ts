@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
@@ -36,6 +36,7 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   writeFileSync(join(root, 'sample.txt'), 'frozen persistent fixture')
   const opened = await tool.execute({ mode: 'open', fixtures: [{ path: 'input/sample.txt', source: 'sample.txt' }], steps: [check('initial', '#count', '0'), check('version', '#version', 'v1')] }, context)
   expect(opened.isError, opened.output).not.toBe(true); const id = JSON.parse(opened.output).debug_session_id
+  expect(JSON.parse(opened.output).ui.controls.some((control: { selector: string }) => control.selector === '#inc')).toBe(true)
   writeFileSync(join(root, 'sample.txt'), 'changed source must not replace frozen bytes')
   // Source edits require reload; the registered input remains the frozen copy.
   const uploaded = await tool.execute({ mode: 'reload', debug_session_id: id, fixtures: [{ path: 'input/extra.txt', text: 'additional input' }], steps: [{ id: 'upload', kind: 'upload', selector: '#file', path: 'input/sample.txt' }, check('imported', '#file-text', 'frozen persistent fixture')] }, context)
@@ -44,24 +45,29 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   expect(() => policy.prepare({ parent: context, args: { task: 'parallel writer', role: 'implement', writePaths: ['a.txt'] }, childSessionId: 'child', delegationId: 'd' })).toThrow('STOP_DEV_SERVICE')
   const clicked = await tool.execute({ mode: 'act', debug_session_id: id, steps: [{ id: 'inc', kind: 'click', selector: '#inc' }] }, context)
   expect(clicked.isError, clicked.output).not.toBe(true)
+  expect(JSON.parse(clicked.output).observations.some((row: { kind: string }) => row.kind === 'backend.stdout')).toBe(false)
   const retained = await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('retained', '#count', '1')] }, context)
   expect(retained.isError, retained.output).not.toBe(true)
+  const automatic = await tool.execute({ steps: [check('automatic-state', '#count', '1')] }, context)
+  expect(automatic.isError, automatic.output).not.toBe(true); expect(JSON.parse(automatic.output).debug_session_id).toBe(id)
+  const restarted = await tool.execute({ steps: [{ id: 'restart', kind: 'restart' }, check('after-restart', '#count', '1')] }, context)
+  expect(restarted.isError, restarted.output).not.toBe(true); expect(JSON.parse(restarted.output).version).toBe(3)
   await tool.execute({ mode: 'act', debug_session_id: id, steps: [{ id: 'trigger', kind: 'click', selector: '#crash' }] }, context)
   await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.some(row => row.message.includes('real-renderer-bug'))).toBe(true)
   const logs = JSON.stringify(readDebugSession(project.project_id, 's', id)); expect(logs).not.toMatch(/PRIVATE_BEARER|PRIVATE_KEY|PRIVATE_TOKEN|QUERY_SECRET/)
   if (ui === 'browser') {
     await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error')?.duration_ms).toBeGreaterThanOrEqual(100)
-    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error')).toMatchObject({ action: 'trigger', version: 2, method: 'GET', status: 500, url: `${url}/fail` })
+    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error')).toMatchObject({ action: 'trigger', version: 3, method: 'GET', status: 500, url: `${url}/fail` })
     await tool.execute({ mode: 'act', debug_session_id: id, steps: [{ id: 'slow-request', kind: 'click', selector: '#slow' }] }, context)
     await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow')?.duration_ms, { timeout: 5000 }).toBeGreaterThanOrEqual(1000)
-    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow')).toMatchObject({ action: 'slow-request', version: 2, status: 200, url: `${url}/slow` })
+    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow')).toMatchObject({ action: 'slow-request', version: 3, status: 200, url: `${url}/slow` })
     expect(JSON.stringify(readDebugSession(project.project_id, 's', id))).not.toContain('PRIVATE_QUERY')
   }
   writeFileSync(join(root, ui === 'electron' ? 'main.cjs' : 'server.cjs'), ui === 'electron' ? mainSource('v2') : serverSource('v2'))
   expect(JSON.parse((await tool.execute({ mode: 'read', debug_session_id: id }, context)).output).stale).toBe(true)
   expect((await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('stale', '#version', 'v1')] }, context)).isError).toBe(true)
   const reloaded = await tool.execute({ mode: 'reload', debug_session_id: id, steps: [check('new-backend', '#version', 'v2'), check('data', '#count', '1')] }, context)
-  expect(reloaded.isError, reloaded.output).not.toBe(true); expect(JSON.parse(reloaded.output)).toMatchObject({ version: 3, stale: false })
+  expect(reloaded.isError, reloaded.output).not.toBe(true); expect(JSON.parse(reloaded.output)).toMatchObject({ version: 4, stale: false })
   abort.abort(); await closeDebugSessions(project.project_id, 's')
   expect(readDebugSession(project.project_id, 's', id).state).toBe('closed')
   if (ui === 'browser') await expect(fetch(url, { signal: AbortSignal.timeout(1000) })).rejects.toThrow()
@@ -71,10 +77,23 @@ it('attaches only an owned ready browser service and never kills the borrowed se
   writeFileSync(join(root, 'index.html'), html); writeFileSync(join(root, 'server.cjs'), serverSource('v1'))
   writeFileSync(join(root, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, ui: 'browser', command: ['node', 'server.cjs', String(p)], url }))
   const service = await startSoftwareProcess({ projectId: project.project_id, sessionId: 's', root, command: ['node', 'server.cjs', String(p)], url, signal: context.signal })
+  mkdirSync(join(service.data_dir!, 'outputs'), { recursive: true })
+  writeFileSync(join(service.data_dir!, 'outputs/service-file.txt'), 'actual service output')
   const tool = buildSoftwareInspectTool(project.project_id, createSoftwareCollaborationPolicy(project.project_id, root, 's'))
-  const opened = await tool.execute({ mode: 'open', process_id: service.id }, context)
+  const opened = await tool.execute({ mode: 'open', process_id: service.id, fixtures: [{ path: 'input/borrowed.txt', text: 'actual service data' }],
+    steps: [{ id: 'actual-input', kind: 'upload', selector: '#file', path: 'input/borrowed.txt' },
+      { id: 'input-readback', kind: 'expect', selector: '#file-text', equals: 'actual service data' },
+      { id: 'actual-file', kind: 'expect_file', path: 'outputs/service-file.txt', equals: 'actual service output' }] }, context)
   expect(opened.isError, opened.output).not.toBe(true)
+  expect(JSON.parse(opened.output).data_dir).toBe(service.data_dir)
+  expect(readFileSync(join(service.data_dir!, 'input/borrowed.txt'), 'utf8')).toBe('actual service data')
+  const wrongProcess = await tool.execute({ process_id: 'another-process' }, context)
+  expect(wrongProcess.isError).toBe(true); expect(wrongProcess.output).toContain('DEBUG_PROCESS_MISMATCH')
+  const sameProcess = await tool.execute({ process_id: service.id }, context)
+  expect(sameProcess.isError, sameProcess.output).not.toBe(true)
+  expect(JSON.parse(sameProcess.output).debug_session_id).toBe(JSON.parse(opened.output).debug_session_id)
   await tool.execute({ mode: 'close', debug_session_id: JSON.parse(opened.output).debug_session_id }, context)
+  expect(readFileSync(join(service.data_dir!, 'input/borrowed.txt'), 'utf8')).toBe('actual service data')
   expect(await (await fetch(`${url}/version`)).text()).toBe('v1')
   const automatic = await tool.execute({ mode: 'open' }, context)
   expect(automatic.isError, automatic.output).not.toBe(true)

@@ -13,10 +13,11 @@ import { installGuiAcceptanceSuite, runGuiAcceptance, type GuiAcceptanceSuite } 
 import { createToolState } from '../../../main/agent/loop/agent-loop'
 import { buildSoftwareInspectTool } from '../../../main/software/inspect-tool'
 import { createSoftwareCollaborationPolicy } from '../../../main/software/collaboration-policy'
+import { closeAllDebugSessions, closeDebugSessions } from '../../../main/software/debug-sessions'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-software-verify-')); process.env.PROMA_HOME = home })
-afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
+afterEach(async () => { await closeAllDebugSessions(); if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 it('v2 enables explicit runtimes without relaxing historical v1 validation', () => {
   expect(parseLaunchDeclaration(JSON.stringify({ schema_version: 1, command: ['electron', '.'], ui: 'electron' })).ok).toBe(false)
   expect(parseLaunchDeclaration(JSON.stringify({ schema_version: 2, command: ['electron', '.'], ui: 'electron', window_title: 'App' })).ok).toBe(true)
@@ -73,6 +74,7 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
     expect(plain.images).toBeUndefined()
     expect(JSON.parse(plain.output).visual_review).toBe('not_reviewed_by_model')
   }
+  await closeDebugSessions(project.project_id, 's')
   installGuiAcceptanceSuite(project.project_id, { ...suite, steps: [{ id: 'wrong', kind: 'expect', selector: '#items', equals: '999', timeout_ms: 100 }] })
   const negative = await runGuiAcceptance({ projectId: project.project_id, root, scopeHash: scope, signal: AbortSignal.timeout(45000) })
   expect(negative?.status).toBe('failed')

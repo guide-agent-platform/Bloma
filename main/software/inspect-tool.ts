@@ -11,12 +11,12 @@ import { softwareVerificationFingerprint as verificationFingerprint } from '../d
 import { savePastedImage, MAX_PASTED_IMAGE_BYTES } from '../platform/shell/pasted-images'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { guiInputFailure, guiStepsSchema, SOFTWARE_GUI_ACTION_KINDS } from '../desktop/gui-tool-contract'
-import { actDebugSession, closeDebugSession, openDebugSession, readDebugSession, installDebugFixtures } from './debug-sessions'
+import { actDebugSession, closeDebugSession, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess } from './debug-sessions'
 import { activeSoftwarePreview } from './process-manager'
 import { GUI_FIXTURE_SCHEMA, materializeGuiFixtures, sealGuiFixtures } from '../desktop/gui-fixtures'
 
 export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<typeof createSoftwareCollaborationPolicy>, previewChanged?: (url?: string) => void): AgentLoopTool {
-  return { name: 'inspect_app', description: '正常Electron/浏览器入口的隔离调试。mode=once默认单次后关闭；open保留调试实例并返回debug_session_id；act/read/reload/close带该id复用。open可带process_id连接本项目本会话start_service已启动服务。持续会话保留测试数据、console和失败HTTP观察，源码变化先reload标记新版本；read的since_seq只取新日志。默认DOM与截图路径；仅已知视觉渠道设include_image=true。不改变最终验收输入，调试成功不等于交付通过；Python仍用固定GUI检查。',
+  return { name: 'inspect_app', description: '实际操作Electron/浏览器程序。默认自动打开并持续复用本会话实例，源码变化时重载实际入口并保留测试数据；返回控件定位、当前值和具体失败。无需每次传会话id。restart动作会重启程序并保留数据；mode=once才使用单次全新隔离现场。open可带process_id连接本会话已有服务；read/reload/close可显式控制。默认只有新日志和截图路径，仅已知视觉渠道设include_image=true。调试成功不等于最终验收，完成规则登记后用verify_app。',
     input_schema: { type: 'object', properties: { mode: { type: 'string', enum: ['once', 'open', 'act', 'read', 'reload', 'close'] },
       debug_session_id: { type: 'string' }, process_id: { type: 'string' }, since_seq: { type: 'integer', minimum: 0 },
       include_image: { type: 'boolean' }, fixtures: GUI_FIXTURE_SCHEMA, steps: guiStepsSchema(32, SOFTWARE_GUI_ACTION_KINDS) } },
@@ -25,11 +25,18 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
       let openingDebugId: string | undefined
       try {
         policy.assertCommand(ctx)
-        const mode = input.mode ?? 'once'
+        let mode = input.mode
+        if (mode === undefined) {
+          const existing = input.debug_session_id as string | undefined ?? activeDebugSessionId(projectId, ctx.sessionId)
+          if (existing) { input = { ...input, debug_session_id: existing }; mode = readDebugSession(projectId, ctx.sessionId, existing).stale ? 'reload' : 'act' }
+          else mode = 'open'
+        }
         if (!['once', 'open', 'act', 'read', 'reload', 'close'].includes(String(mode))) throw Error('GUI_DEBUG_MODE_INVALID: mode需once/open/act/read/reload/close')
         if (mode !== 'once') {
           const args = { projectId, sessionId: ctx.sessionId, id: String(input.debug_session_id ?? ''), signal: ctx.signal }
           if (mode !== 'open' && !input.debug_session_id) throw Error('GUI_DEBUG_ID_REQUIRED: 使用open返回的debug_session_id')
+          if (mode !== 'open' && input.process_id) assertDebugSessionProcess(projectId, ctx.sessionId, args.id, String(input.process_id))
+          const cursor = input.since_seq ?? (mode === 'act' || mode === 'reload' ? readDebugSession(projectId, ctx.sessionId, args.id).log_cursor ?? 0 : 0)
           let sealed: GuiAcceptanceSuite | undefined
           let additions: GuiAcceptanceSuite | undefined
           if (mode !== 'read' && mode !== 'close') {
@@ -54,11 +61,16 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
           } else if (mode === 'close') snapshot = await closeDebugSession(projectId, ctx.sessionId, args.id)
           else if (mode === 'read') snapshot = readDebugSession(projectId, ctx.sessionId, args.id, Number(input.since_seq ?? 0))
           else { if (additions) installDebugFixtures(projectId, ctx.sessionId, args.id, additions); snapshot = await actDebugSession({ ...args, steps, reload: mode === 'reload' }) }
+          if (mode === 'act' || mode === 'reload') snapshot = readDebugSession(projectId, ctx.sessionId, args.id, Number(cursor))
           if (mode === 'open' && snapshot.url) previewChanged?.(snapshot.url)
           if (mode === 'close') previewChanged?.(activeSoftwarePreview(projectId, ctx.sessionId))
           const imageBytes = input.include_image === true && snapshot.screenshot ? readFileSync(snapshot.screenshot) : undefined
           const images = imageBytes && imageBytes.length <= MAX_PASTED_IMAGE_BYTES ? [savePastedImage(ctx.sessionId, imageBytes.toString('base64'), 'png')] : undefined
-          return { output: JSON.stringify({ ...snapshot, debug_session_id: snapshot.id, evidence: '持续开发观察，非最终验收凭据' }), images,
+          const failed = snapshot.steps.find(step => !step.passed)
+          return { output: JSON.stringify({ debug_session_id: snapshot.id, state: snapshot.state, stale: snapshot.stale, error: snapshot.error, failed_step: failed,
+            version: snapshot.version, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
+            observations_omitted: snapshot.observations_omitted, data_dir: snapshot.data_dir, url: snapshot.url, screenshot: snapshot.screenshot,
+            visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
             isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed) }
         }
         const root = findProject(projectId).root_path, launch = readLaunchDeclaration(root)

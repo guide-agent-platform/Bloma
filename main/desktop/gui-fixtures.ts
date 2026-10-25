@@ -50,6 +50,17 @@ export function materializeGuiFixtures(projectId: string, suite: GuiAcceptanceSu
     }
   }
 }
+export function frozenGuiFixtureVersion(projectId: string, suite: GuiAcceptanceSuite) {
+  return (suite.fixtures ?? []).map(file => {
+    if (file.text !== undefined) return hash(Buffer.from(file.text))
+    if (!file.sha256) throw Error('GUI_FIXTURE_NOT_SEALED')
+    const target = blobPath(projectId, suite.scope_hash, file.sha256)
+    if (statSync(target).size > MAX_GUI_FIXTURE_BYTES) throw Error('GUI_FIXTURE_SIZE_LIMIT')
+    const bytes = readFileSync(target)
+    if (bytes.length !== file.size || hash(bytes) !== file.sha256) throw Error('GUI_FIXTURE_FROZEN_BYTES_CHANGED')
+    return file.sha256
+  })
+}
 export const GUI_FIXTURE_SCHEMA = { type: 'array', maxItems: 16, description: '每项只传path和text/source二选一；sha256/size由宿主生成。source单文件最多20MiB，总共64MiB。持续调试后续调用可复用已登记path。', items: { type: 'object', required: ['path'], additionalProperties: false, properties: {
   path: { type: 'string', pattern: '^input/[A-Za-z0-9_./-]+$', description: '隔离数据目录中的固定文件名，如input/sample.pdf。' },
   text: { type: 'string', maxLength: 4096, description: '小型文本fixture，与source二选一。' },
