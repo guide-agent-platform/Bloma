@@ -1,0 +1,127 @@
+{
+  "baseline": "8154e25",
+  "overall_status": "incomplete",
+  "product_independent_qa": "passed",
+  "project_id": "063292c4-8693-48ba-b9d9-5662f9cca830",
+  "session_id": "30ff26a2-5e86-4042-b239-f90e1debb80a",
+  "project_status": "active",
+  "stage": "generating_mvp",
+  "blocked": {
+    "reason": "verification-incomplete",
+    "note": "当前执行受阻：MONETARY_BUDGET_EXHAUSTED",
+    "at": "2026-10-25T12:49:48.567Z"
+  },
+  "physical_requests": 40,
+  "case_priced_upper_rmb": 0.661318,
+  "shared_window": [
+    {
+      "model": "deepseek-flash",
+      "host": "api.deepseek.com",
+      "cap_rmb": 3,
+      "accounted_upper_rmb": 0.841395,
+      "remaining_rmb": 2.158605,
+      "reported_peak_rmb": 0.841395
+    }
+  ],
+  "tools": [
+    {
+      "Name": "edit_file",
+      "Count": 14
+    },
+    {
+      "Name": "inspect_app",
+      "Count": 10
+    },
+    {
+      "Name": "inspect_software_environment",
+      "Count": 1
+    },
+    {
+      "Name": "list_files",
+      "Count": 1
+    },
+    {
+      "Name": "read_file",
+      "Count": 5
+    },
+    {
+      "Name": "read_production_context",
+      "Count": 1
+    },
+    {
+      "Name": "start_service",
+      "Count": 1
+    },
+    {
+      "Name": "write_file",
+      "Count": 6
+    }
+  ],
+  "tool_errors": 3,
+  "formal_gui_suite_registered": false,
+  "formal_verified_release": false,
+  "qa": {
+    "at": "2026-10-25T12:52:42.707Z",
+    "finished_at": "2026-10-25T12:53:14.525Z",
+    "status": "passed",
+    "artifact_scope": "unverified generated candidate; does not promote release or mark project complete",
+    "checks": [
+      "create_two_courses_and_reject_blank",
+      "task_creation_required_title_and_initial_stats",
+      "edit_task_and_combined_filters_search_reset",
+      "status_change_updates_done_and_overdue",
+      "rename_course_keeps_task_relationships",
+      "study_records_and_invalid_minutes_rejected_without_mutation",
+      "referenced_course_delete_blocked_no_mutation",
+      "actual_json_download_contains_all_entities_and_foreign_keys",
+      "delete_updates_stats_and_cancel_import_preserves_data",
+      "confirmed_replace_restores_deleted_records_and_repeat_import_no_duplicates",
+      "reject_broken_backup_and_download_proves_no_mutation",
+      "reject_missing_backup_and_download_proves_no_mutation",
+      "reject_dangling_backup_and_download_proves_no_mutation",
+      "actual_backend_and_browser_restart_preserves_ids_fields_and_relationships"
+    ],
+    "launches": [
+      {
+        "pid": 81804,
+        "url": "http://127.0.0.1:4173/"
+      },
+      {
+        "pid": 153124,
+        "url": "http://127.0.0.1:4173/"
+      }
+    ],
+    "remote_requests": [],
+    "page_errors": [],
+    "source_and_rules_unchanged": true,
+    "monetary_ledgers_unchanged": true,
+    "provider_requests_added": 0
+  },
+  "old_accounting_unchanged": true,
+  "raw_hashes": [
+    {
+      "file": "request.txt",
+      "sha256": "785115A5243A149E43DD3508AAA1277E771F5D59420F39363979D5B88794D6B2"
+    },
+    {
+      "file": "independent-plan.json",
+      "sha256": "C1AC2E39A9EBD71D5ADD54361E072781D37218340C45D4D8381D3B1FD646EFA3"
+    },
+    {
+      "file": "manifest.json",
+      "sha256": "2E2BA1E7DE8A5F48C60FB6762523646C6DE6838CA6B633636E9CFDFBC983A94B"
+    },
+    {
+      "file": "events.jsonl",
+      "sha256": "3BC4DCF12D6E50EAABB24EBDD06B48AA4BE008FEE99266BEEA58BA63E675C09A"
+    },
+    {
+      "file": "report-build.json",
+      "sha256": "5215DE2B323A633C5AD2742EB9FC0F78E33B75751375708D782CC458BCB034FA"
+    },
+    {
+      "file": "qa-test.json",
+      "sha256": "9788874C6AC2760576097535C352072C6D53C4EFF96A094EB1A1C611E09BD379"
+    }
+  ]
+}
