@@ -38,7 +38,7 @@ import {
   agentStreamStateFamily,
   decisionConsumedFamily,
 } from '../agent-atoms'
-import type { AgentEvent } from '../../shared/types'
+import type { AgentEvent, LeanScopeView } from '../../shared/types'
 
 // =========================================================================
 // 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom。
@@ -68,6 +68,7 @@ interface ClarificationQuestion {
 }
 
 interface UserDecisionPayload {
+  scope?: LeanScopeView
   kind?: string
   title?: string
   questions?: ClarificationQuestion[]
@@ -91,6 +92,8 @@ interface UserDecisionPayload {
  * 让渡具体偏差「缺了按月统计功能」等），options 为选项列表。
  */
 export interface DecisionCards {
+  kind?: string
+  scope?: LeanScopeView
   title?: string
   /** 决策卡正文（2026-08-29：审查卡的具体问题清单，让用户知情后再选忽略/补充） */
   body?: string
@@ -124,6 +127,8 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
     // 1~3 条：转 CardOption
     // B5 防御：question 缺 id 时兜底（A1 已补 id，此处双保险，避免 key=undefined 崩坏）
     return {
+      kind: payload.kind,
+      scope: payload.scope && typeof payload.scope.goal === 'string' && Array.isArray(payload.scope.features) ? payload.scope : undefined,
       title: payload.title,
       // H3：交付状态三层正文优先（ready 引导卡）；无 delivery_body 走原正文链
       body: extractDeliveryBody(payload) ?? extractDecisionBody(payload),

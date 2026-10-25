@@ -18,6 +18,7 @@ import { registerComposerIpc } from './composer'
 import { resolvePermission, setPermissionMode } from '../agent/permissions/permission-service';
 import { listProjects } from '../project/project-service';
 import { cleanOrphanSessions, forkFrom, listSessions, loadMessages } from '../platform/sessions/session-service';
+import { readPendingDecision } from '../guide/pending-decision'
 
 
 
@@ -163,7 +164,12 @@ export function registerAgentSessionsIpc(ipcMain: IpcMain, mainWindow: BrowserWi
   ipcMain.handle(IPC_CHANNELS.AGENT_LOAD_MESSAGES, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<AgentLoadMessagesInput>(payload, ['session_id'])
-      return loadMessages(input)
+      const result = loadMessages(input)
+      if (result.session.project_id) {
+        try { result.pending_decision = readPendingDecision(result.session.project_id, input.session_id) }
+        catch (error) { result.pending_decision_error = error instanceof Error ? error.message : String(error) }
+      }
+      return result
     })
   })
 

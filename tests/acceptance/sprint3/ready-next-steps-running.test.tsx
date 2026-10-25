@@ -79,6 +79,19 @@ describe('ready_next_steps 引导卡不复位 running', () => {
     expect(store.get(workflowStageAtom)).toBe('ready')
   })
 
+  it('keeps a first lean scope card when no text preceded it and its following blocked stage is passive', () => {
+    const { store, emit } = install()
+    store.set(activeAgentSessionIdAtom, 'lean-first')
+    emit(ev('lean-first', 'p', 'user_decision_required', { kind: 'lean_scope', summary: '新增、保存和重开笔记',
+      questions: [{ id: 'lean_confirm:scope', label: '按这份做' }, { id: 'lean_adjust', label: '补充或修改' }] }))
+    emit(ev('lean-first', 'p', 'stage_changed', { stage: 'blocked_for_user_decision' }))
+    emit(ev('lean-first', 'p', 'completed', { subtype: 'success' }))
+    const state = store.get(agentStreamStateFamily('lean-first'))
+    expect(state.running).toBe(false)
+    expect(state.events.find(item => item.type === 'user_decision_required')?.payload.questions).toHaveLength(2)
+    expect(store.get(hasActiveStreamAtom)).toBe(false)
+  })
+
   it('前台流中弹决策卡：running 保持 true（流未结束）', () => {
     const { store, emit } = install()
     store.set(activeAgentSessionIdAtom, 'session-b')
@@ -111,6 +124,7 @@ describe('ready_next_steps 引导卡不复位 running', () => {
     emit(ev('session-c', 'project-c', 'completed', { subtype: 'blocked' }))
 
     expect(store.get(agentStreamStateFamily('session-c')).running).toBe(false)
+    expect(store.get(agentStreamStateFamily('session-c')).events.some(item => item.type === 'user_decision_required')).toBe(true)
     expect(store.get(hasActiveStreamAtom)).toBe(false)
   })
 })

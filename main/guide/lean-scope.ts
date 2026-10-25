@@ -42,11 +42,18 @@ export function stageLeanScope(projectId: string, sessionId: string, requestId: 
 }
 
 export function publishLeanScope(brief: PrdBackplane, emit: Emit): void {
-  emit('user_decision_required', { kind: 'lean_scope', title: '确认这次要做的内容', summary: renderLeanBrief(brief),
-    questions: [{ id: `lean_confirm:${prdScopeFingerprint(brief)}`, label: '按这份做', description: '确认目标和范围' },
-      { id: 'lean_adjust', label: '补充或修改', description: '保留原话并更新任务单' }, { id: 'lean_pause', label: '稍后再说', description: '暂不开工' }] })
+  emit('user_decision_required', leanScopeDecision(brief))
   updateProject(brief.project_id, { current_stage: 'blocked_for_user_decision' })
   emit('stage_changed', { stage: 'blocked_for_user_decision' })
+}
+
+export function leanScopeDecision(brief: PrdBackplane): Record<string, unknown> {
+  return { kind: 'lean_scope', title: '确认这次要做的内容', summary: renderLeanBrief(brief),
+    scope: { goal: brief.positioning, features: brief.requirements.map(row => ({ id: row.id, description: row.description, expected: brief.acceptance[row.id] ?? '' })),
+      constraints: brief.constraints ?? [], out_of_scope: brief.out_of_scope,
+      usage: brief.lean_brief?.delivery === 'browser' ? '在本机浏览器使用' : brief.lean_brief?.delivery === 'command' ? '通过命令行使用' : '在桌面窗口使用' },
+    questions: [{ id: `lean_confirm:${prdScopeFingerprint(brief)}`, label: '按这份做', description: '确认目标和范围' },
+      { id: 'lean_adjust', label: '补充或修改', description: '告诉我需要改哪里' }, { id: 'lean_pause', label: '稍后再说', description: '先保留，暂不开工' }] }
 }
 
 /** Explicit delegation of appearance; negatives and quoted instructions do not approve. */

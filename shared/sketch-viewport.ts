@@ -1,4 +1,9 @@
 /** Read-only geometry bridge for opaque sketch frames; never exposes the Electron API. */
+export function stripSketchReviewChrome(html: string): string {
+  return html.replace(/<style\b[^>]*\bid=["']bloma-sketch-corrector-style["'][^>]*>[\s\S]*?<\/style\s*>/gi, '')
+    .replace(/<script\b[^>]*\bid=["']bloma-sketch-corrector["'][^>]*>[\s\S]*?<\/script\s*>/gi, '')
+}
+
 export function injectSketchViewport(html: string): string {
   const bridge = `<script data-bloma-viewport>
 (() => {

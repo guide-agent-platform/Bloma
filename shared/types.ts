@@ -1074,6 +1074,8 @@ export interface AgentLoadMessagesResult {
   messages: AgentMessage[]
   total: number
   truncated: boolean
+  pending_decision?: { project_id: string; payload: Record<string, unknown>; preview_url?: string }
+  pending_decision_error?: string
   delegations?: Array<{
     delegation_id: string
     child_session_id: string
@@ -1081,6 +1083,14 @@ export interface AgentLoadMessagesResult {
     goal: string
     status: 'completed' | 'failed' | 'cancelled' | 'unknown'
   }>
+}
+
+export interface LeanScopeView {
+  goal: string
+  features: Array<{ id: string; description: string; expected: string }>
+  constraints: string[]
+  out_of_scope: string[]
+  usage: string
 }
 
 /** U11：清理孤儿会话的结果——被移除的会话数量（无孤儿时 removed=0）。 */

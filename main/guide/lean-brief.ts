@@ -7,6 +7,7 @@ const object = (x: unknown): x is Record<string, unknown> => Boolean(x && typeof
 
 export const LEAN_BRIEF_PROMPT = `把用户目标整理为可执行的短任务单。只问真正阻塞成品方向的疑问，不问内部技术选择，不凑问题或功能数量，不自动增加删除、账号、联网等功能。
 原话与材料完整保留，历史仅作参考，最新明确意见优先；旧功能不得悄悄丢弃。保留既有F编号，新增能力不挤占旧编号。每项必需能力写一个可观察结果，不展开对象、规则、流程或三类状态图谱。未知关键条件只输出 {"action":"clarify","question":"关键问题","options":["选项"]}。
+“先给我看草图、确认后开工”属于制作流程，保留在原话，不列为成品功能；成品本身需要的画图或审批功能仍须保留。
 目标明确输出 {"action":"brief","name":"简短项目名","goal":"目标","ui":"required|none","requirements":[{"id":"已有F编号或省略","description":"必需能力","expected":"实际应看到什么"}],"constraints":[],"out_of_scope":[],"assumptions":[]}。不另写PRD正文、审计报告或实现代码。只输出JSON。`
 
 export function parseLeanBrief(raw: string, context: { projectId: string; sessionId: string; source: string; previous: PrdBackplane; software?: boolean }):

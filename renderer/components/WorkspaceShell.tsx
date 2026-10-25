@@ -4,6 +4,8 @@ import React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { WorkspaceHeader, WorkspaceConnection } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
+import { ScopeConfirmationPanel } from './ScopeConfirmationPanel'
+import type { LeanScopeView } from '../../shared/types'
 import { DesktopArtifactStrip } from './DesktopArtifactStrip'
 import { DeliveryPanel } from './DeliveryPanel'
 import type { AgentMessage } from './atoms'
@@ -27,6 +29,8 @@ import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, PastedImageRef } from './atoms'
 
 export interface WorkspaceShellProps {
+  decisionKind?: string
+  decisionScope?: LeanScopeView
   notice?: string
   /* === ChatPanel props === */
   cardOptions?: CardOption[]
@@ -96,6 +100,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [mobileView, setMobileView] = React.useState<'conversation' | 'preview'>('conversation')
   const conversation = useConversationWidth()
   const busy = useAtomValue(hasActiveStreamAtom)
+  const scopePending = props.decisionKind === 'lean_scope' && Boolean(props.cardOptions?.length && props.onCardOptionSelect)
   const activeSession = useAtomValue(activeAgentSessionIdAtom)
   const requirementDialog = useAtomValue(activeSession ? requirementConfirmFamily(activeSession) : nullRequirementConfirmFallback)
   const prdDialog = useAtomValue(activeSession ? prdConfirmFamily(activeSession) : nullPrdConfirmFallback)
@@ -103,7 +108,8 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const canConfirmSketch = Boolean(props.previewUrl && !props.deliveryPanel && props.onConfirmSketch && (stage === 'sketch_ready' || props.cardOptions?.some(option => option.id === 'ux_confirm_go')))
   const sketchCue = `${project?.project_id ?? ''}:${props.previewUrl ?? ''}`
   React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
-  const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
+  const scene = scopePending ? { chapter: 1, title: '确认需求', description: '核对这次范围，确认后继续' }
+    : workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
   const openTool = (name: 'documents' | 'collaboration' | 'versions' | 'materials' | 'records') => {
     setDocuments(name === 'documents' ? !documents : false)
     setCollaboration(name === 'collaboration' ? !collaboration : false)
@@ -137,7 +143,8 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         <div className="theatre-stage-heading"><div key={scene.title} className="studio-scene-heading"><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" title={focused ? '退出专注预览' : '专注预览'} aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
         <div className="theatre-main" data-panel-open={documents || collaboration || Boolean(localPanel)}>
           <section className="theatre-product" aria-label="软件与当前结果">
-        {props.deliveryPanel
+        {scopePending ? <ScopeConfirmationPanel scope={props.decisionScope} summary={props.decisionBody} options={props.cardOptions!} onSelect={props.onCardOptionSelect!} busy={busy} />
+          : stage === 'generating_sketch' && busy && !props.previewUrl ? <div className="scope-preparing" role="status"><h3>正在准备界面草图</h3><p>需求已确认。草图会在这里展示，等你确认后才开始制作。</p></div> : props.deliveryPanel
           ? <DeliveryPanel embedded />
           : <PreviewPanel embedded
           status={props.previewStatus}
@@ -155,7 +162,6 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onMarkComplete={props.onMarkComplete}
           />}
           </section>
-          {canConfirmSketch && !busy && !props.confirming && !requirementDialog && !prdDialog && !clarificationDialog && !documents && !collaboration && !localPanel && <SketchCharacterReminder key={sketchCue} cue={sketchCue} />}
           {(documents || collaboration || localPanel) && <aside className="theatre-sidepanel" aria-label="项目资料面板">
             <DocumentPanel embedded />
             <CollaborationPanel embedded />
@@ -165,8 +171,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       </main>
       <button type="button" role="separator" aria-label="调整会话栏宽度" aria-orientation="vertical" className="studio-conversation-resizer" title="拖动调整会话栏；方向键微调，双击恢复默认" {...conversation.separatorProps} />
       <section className="theatre-conversation" aria-label="向导与下一步">
+        {canConfirmSketch && !busy && !props.confirming && !requirementDialog && !prdDialog && !clarificationDialog && <SketchCharacterReminder key={sketchCue} cue={sketchCue} />}
         <ChatPanel presentation="theatre"
-          cardOptions={props.cardOptions}
+          cardOptions={scopePending ? undefined : props.cardOptions}
           decisionTitle={props.decisionTitle}
           decisionBody={props.decisionBody}
           onCardOptionSelect={props.onCardOptionSelect}

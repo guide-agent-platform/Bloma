@@ -159,12 +159,12 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     ? pending.unappliedFeedback : `${pending.unappliedFeedback}\n补充意见：${feedback}`
   const current = readPrdBackplane(pending.project_id)
   if (!current.user_confirmed_at || prdStructureIssues(current).length) {
-    pending.publish(makeUxEvent(pending, 'message_delta', { text: '需求尚未确认或存在结构问题，请先完成 PRD 确认，再整理界面设计。' }))
+    pending.publish(makeUxEvent(pending, 'message_delta', { text: '需求尚未确认或存在结构问题，请先确认需求，再整理界面设计。' }))
     pending.publish(makeUxEvent(pending, 'message_completed', { subtype: 'error' }))
     return
   }
   if (pending.prdFingerprint && pending.prdFingerprint !== prdScopeFingerprint(current)) {
-    pending.publish(makeUxEvent(pending, 'message_delta', { text: '需求已变化，旧草图不能继续确认；请先确认新版 PRD，再生成对应设计。' }))
+    pending.publish(makeUxEvent(pending, 'message_delta', { text: '需求已变化，旧草图不能继续确认；请先确认新版需求，再生成对应设计。' }))
     return
   }
   const resolution = resolveChannelEnv({ channelId: pending.channel_id, category: 'sketch',
@@ -174,11 +174,11 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
   const revisionBase = pending
   const publish = pending.publish
   const eventInput = { session_id: pending.session_id, project_id: pending.project_id }
-  publish(makeUxEvent(eventInput, 'stage_changed', { stage: 'clarifying' }))
+  publish(makeUxEvent(eventInput, 'stage_changed', { stage: 'generating_sketch' }))
   publish(makeUxEvent(eventInput, 'message_delta', {
     text: feedback
       ? `好的，按你的意见「${feedback.slice(0, 60)}」调整草图，画好后再请你过目（约需一到三分钟）。`
-      : 'PRD 已确认。我先设计界面外观，在右侧展示静态预览，供你确认视觉与布局；实际操作会在桌面程序中实现（约需一到三分钟）。',
+      : '需求已确认。我先准备界面草图，请你核对布局与外观；确认后再制作实际功能。',
   }))
 
   let sketchUrl: string | null = null
@@ -282,10 +282,14 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
 }
 
 function publishUxCard(pending: PendingUxConfirm): void {
-  const ready = confirmableSketch(pending)
   updateProject(pending.project_id, { current_stage: 'blocked_for_user_decision' })
   pending.publish(makeUxEvent(pending, 'stage_changed', { stage: 'blocked_for_user_decision' }))
-  pending.publish(makeUxEvent(pending, 'user_decision_required', {
+  pending.publish(makeUxEvent(pending, 'user_decision_required', uxDecisionPayload(pending)))
+}
+
+export function uxDecisionPayload(pending: PendingUxConfirm): Record<string, unknown> {
+  const ready = confirmableSketch(pending)
+  return {
     kind: 'ux_confirm',
     title: !ready ? '草图尚未就绪，请选择下一步' : pending.unappliedFeedback ? '当前设计仍有未处理意见，请选择下一步' : '请确认界面草图',
     summary: ready ? pending.sketchSummary ?? '' : '已保留确认的需求和已有意见，尚未开始实现。',
@@ -296,7 +300,7 @@ function publishUxCard(pending: PendingUxConfirm): void {
       ...(ready ? [{ id: UX_CONFIRM_OPTION_DELEGATE, label: '你帮我定', description: '按当前版本直接开工' }] : []),
       { id: UX_CONFIRM_OPTION_DISMISS, label: '稍后再说', description: '先不确认，回对话继续' },
     ],
-  }))
+  }
 }
 
 function confirmableSketch(pending: PendingUxConfirm): boolean {
@@ -568,13 +572,13 @@ async function enterDesktopLineFromPending(pending: PendingUxConfirm): Promise<v
   const production = resolveChannelEnv({ channelId: pending.channel_id, category: 'mvp',
     projectId: pending.project_id, sessionId: pending.session_id })
   await enterDesktopLine(
-    { projectId: pending.project_id, sessionId: pending.session_id, requestId: pending.request_id, content: '开始桌面交付流程', signal: pending.signal,
+    { projectId: pending.project_id, sessionId: pending.session_id, requestId: pending.request_id, content: '按已确认需求和界面开始制作', initialMessagePersisted: true, signal: pending.signal,
       maxTokens: resolveGenerationMaxTokens(production.channel ?? {}) },
     pending.query,
     production.env ?? pending.env,
     {
       publish: (_target, type, payload) => pending.publish(makeUxEvent(pending, type, payload)),
-      persistAssistant: () => undefined,
+      persistAssistant: (sessionId, text) => appendSessionMessage(sessionId, { role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now() }),
       persistSystem: (sessionId, text) => appendSessionMessage(sessionId, { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() }),
       complete: (_sessionId, _projectId, outcome) => pending.publish(makeUxEvent(pending, 'message_completed', { subtype: outcome ?? 'success' })),
     },

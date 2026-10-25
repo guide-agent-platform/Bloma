@@ -19,6 +19,7 @@ import { runUxConfirmGate, restoreUxConfirmation, replayUxConfirmation, hasPendi
   consumeUxConfirmDismiss, startUxAdjustAwait, takeUxAdjustFeedback, takeUxSketchCorrection, runUxAdjustRound } from './ux-confirm'
 import { enterDesktopLine } from '../desktop/desktop-route'
 import { isSoftwareProject } from '../desktop/workflow-policy'
+import { appendSessionMessage } from '../platform/sessions/session-tree'
 
 /** One extraction and one scope confirmation. No legacy PRD/audit/ideas pipeline. */
 export async function handleLeanGuide(input: AgentSendMessageInput, publish: (event: AgentEvent) => void, model?: GuideModelOptions): Promise<void> {
@@ -44,8 +45,9 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
         updateProject(input.project_id, { ux_confirmation: { prd_fingerprint: prdScopeFingerprint(brief), design_hash: hash, html_hash: hash } })
       }
       await enterDesktopLine({ projectId: input.project_id, sessionId: input.session_id, requestId: input.request_id,
-        content: '按已确认目标制作', signal: model.signal, maxTokens: model.maxTokens }, model.query, model.env, {
-        publish: (_target, type, payload) => emit(type, payload), persistAssistant: () => {}, persistSystem: () => {},
+        content: '按已确认目标制作', initialMessagePersisted: true, signal: model.signal, maxTokens: model.maxTokens }, model.query, model.env, {
+        publish: (_target, type, payload) => emit(type, payload),
+        persistAssistant: (sessionId, text) => appendSessionMessage(sessionId, { role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now() }), persistSystem: () => {},
         complete: (_s, _p, subtype) => emit('message_completed', { subtype: subtype ?? 'success' }),
       })
     }
@@ -91,6 +93,7 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   const budget = leanBudget(input.project_id, 'prepare')
   const query = budget.wrap(model.query)
   const software = isSoftwareProject(input.project_id)
+  emit('stage_changed', { stage: 'clarifying' })
   const result = await withLeanRuntime(input.project_id, 'prepare', model.signal, signal => callLlmForJson({ systemPrompt: LEAN_BRIEF_PROMPT + (software ? '\n另填delivery=desktop/browser/command描述用户使用方式；有界面默认desktop，仅用户明确要在浏览器使用才browser；无界面command。distribution描述交付：默认local本机使用，用户明确要复制到其他电脑直接运行用portable，要安装包用installer，只移交源码用source。框架、依赖、语言由工程Agent选择，不让用户做技术问卷。' : ''),
     prompt: JSON.stringify({ previous: brief.lean_brief ? brief : undefined, conversation: source, materials, latest: input.content }),
     query: (text, options) => query(text, { ...options, images, accounting: { projectId: input.project_id, runId: input.request_id, role: 'brief', scope: 'prepare' } }),

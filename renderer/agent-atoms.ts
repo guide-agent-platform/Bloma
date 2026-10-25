@@ -829,16 +829,24 @@ export function setupGlobalAgentListeners(): () => void {
       // 不转判会直接把思考原文拼进回复气泡
       const text = event.type === 'message_delta' && typeof event.payload.text === 'string' ? event.payload.text : ''
       const isTerminal = event.type === 'completed' || event.type === 'error'
+      // A structured decision may be the first output of a short guide run.
+      // Its following idle-stage notification belongs to the SAME run; clearing
+      // events here loses the only confirmation card and strands the user.
+      const decisionPending = previous.events.some(item => item.type === 'user_decision_required')
+        && !store.get(decisionConsumedFamily(event.session_id))
+      const passive = event.type === 'user_decision_required' || event.type === 'stage_changed'
+        && (['sketch_ready', 'ready', 'completed'].includes(String(event.payload.stage))
+          || event.payload.stage === 'blocked_for_user_decision' && decisionPending)
       // 新一轮开始（上一轮已终结，且当前是生成类事件）→ 清空历史 events/content，
       // 折叠组只显示最近一轮工具调用，不累积多轮历史
-      const isNewRun = !previous.running && !isTerminal && NEW_RUN_SIGNALS.has(event.type)
+      const isNewRun = !previous.running && !isTerminal && !passive && NEW_RUN_SIGNALS.has(event.type)
       // 等待决策事件（user_decision_required）不是「运行中」信号：它是「已完成、等用户
       // 决策」的静态信号。就绪引导卡（ready_next_steps）在 completed 之后到达，若照
       // 旧逻辑 running=!isTerminal 会被重新拉回 true → busy → 决策卡选项被禁用、UI
       // 永久停在「生成中」。此处保持上一轮的 running：前台流中弹卡仍为 true、后台
       // 管线完成后的引导/让渡卡仍为 false。
       const running =
-        isTerminal ? false : event.type === 'user_decision_required' ? previous.running : true
+        isTerminal ? false : passive ? previous.running : true
 
       return {
         running,
@@ -1153,6 +1161,7 @@ export async function loadSessionHistory(sessionId: string): Promise<void> {
   const api = window.electronAPI?.agent
   const store = window.__jotai_store__
   if (!api?.loadMessages || !store) return
+  const streamAtStart = store.get(agentStreamStateFamily(sessionId))
   let result = await api.loadMessages({
     request_id: crypto.randomUUID(),
     session_id: sessionId,
@@ -1172,6 +1181,21 @@ export async function loadSessionHistory(sessionId: string): Promise<void> {
   const seen = new Set(recovered.map(identity))
   const live = store.get(agentMessagesFamily(sessionId)).filter(message => !seen.has(identity(message)))
   store.set(agentMessagesFamily(sessionId), [...recovered, ...live].sort((a, b) => a.timestamp - b.timestamp))
+  const currentStream = store.get(agentStreamStateFamily(sessionId))
+  if (currentStream === streamAtStart && !currentStream.running && result.data.pending_decision) {
+    const pending = result.data.pending_decision
+    if (pending.preview_url?.startsWith('bloma-file:')) {
+      store.set(previewUrlsAtom, previous => ({ ...previous, [pending.project_id]: { url: pending.preview_url!, updatedAt: Date.now() } }))
+    }
+    store.set(decisionConsumedFamily(sessionId), false)
+    store.set(agentStreamStateFamily(sessionId), { ...currentStream, events: [...currentStream.events, {
+      event_id: crypto.randomUUID(), session_id: sessionId, project_id: result.data.pending_decision.project_id,
+      type: 'user_decision_required', payload: result.data.pending_decision.payload, created_at: new Date().toISOString(),
+    }] })
+  }
+  if (result.data.pending_decision_error && store.get(activeAgentSessionIdAtom) === sessionId) {
+    store.set(globalUserErrorAtom, `待确认内容未能恢复：${result.data.pending_decision_error}。已有消息保留，尚未自动开工。`)
+  }
   if (result.data.delegations) {
     const current = store.get(delegationsFamily(sessionId))
     const liveIds = new Set(current.map(item => item.delegation_id))

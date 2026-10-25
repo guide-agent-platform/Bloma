@@ -7,10 +7,11 @@
 .character-presenter-art img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .character-decision-stage[data-kind="prd"] { grid-template-columns: minmax(0, 1fr) 300px; width: min(1180px, calc(100vw - 48px)); }
 .character-decision-stage[data-kind="prd"] .character-presenter-art { height: min(540px, 72dvh); }
-.sketch-character-reminder { position: absolute; right: 8px; bottom: 18px; z-index: 5; width: 210px; pointer-events: none; }
+.sketch-character-reminder { position: absolute; right: 8px; top: 0; z-index: 5; max-width: calc(100% - 16px); width: 270px; pointer-events: none; }
 .sketch-character-reminder p { position: relative; margin: 0 0 2px; padding: 12px 29px 12px 13px; border: 1px solid #dfd0e9; border-radius: 13px 13px 3px 13px; background: #f3eafa; color: #725681; font-size: 13px; line-height: 1.85; box-shadow: 0 5px 18px -12px #70538d55; }
 .sketch-character-reminder p button { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; pointer-events: auto; }
-.sketch-character-art { width: 185px; height: min(280px, 38dvh); margin-left: auto; }
+.theatre-conversation > .sketch-character-reminder { display:flex;flex-direction:row-reverse;align-items:center;gap:8px; }
+.theatre-conversation > .sketch-character-reminder .sketch-character-art { display:block;width:42px;height:64px;margin:0;flex-shrink:0; }
 .sketch-character-art img { width: 100%; height: 100%; object-fit: contain; display: block; }
 @media (max-width: 800px) {
   .character-decision-stage { grid-template-columns: minmax(0, 1fr) 150px; gap: 12px; }

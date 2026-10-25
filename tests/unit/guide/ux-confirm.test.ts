@@ -126,11 +126,12 @@ afterEach(() => {
 })
 
 describe('runUxConfirmGate（发门）', () => {
-  it('旁白 + stage_changed(clarifying) + ux_sketch_ready + 确认卡，pending 挂起', async () => {
+  it('旁白 + stage_changed(generating_sketch) + ux_sketch_ready + 确认卡，pending 挂起', async () => {
     const { events, publish } = makePublish()
     await runUxConfirmGate({ ...basePending({ publish }), round: 1 })
     const types = events.map((e) => e.type)
     expect(types).toContain('stage_changed')
+    expect(events.find(e => e.type === 'stage_changed')?.payload.stage).toBe('generating_sketch')
     expect(types).toContain('ux_sketch_ready')
     expect(types).toContain('user_decision_required')
     const card = events.find((e) => e.type === 'user_decision_required')

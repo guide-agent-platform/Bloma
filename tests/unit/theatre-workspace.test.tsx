@@ -12,6 +12,17 @@ import type { Project } from '../../shared/types'
 afterEach(() => { cleanup(); delete window.electronAPI })
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn() })
 describe('软件剧场的完整性', () => {
+  it('places a scope confirmation in the main stage with a single actionable choice', () => {
+    const store = createStore(), select = vi.fn()
+    store.set(currentProjectAtom, { project_id: 'scope-p', name: '课程笔记', mode: 'longterm' } as Project)
+    store.set(workflowStageAtom, 'blocked_for_user_decision')
+    render(<Provider store={store}><WorkspaceShell decisionKind="lean_scope" decisionScope={{ goal: '课程笔记', usage: '本机浏览器', features: [{ id: 'F-001', description: '自动保存', expected: '重开保留' }], constraints: [], out_of_scope: [] }} cardOptions={[{ id: 'confirm', label: '按这份做' }]} onCardOptionSelect={select} /></Provider>)
+    const panel = screen.getByRole('region', { name: '需求确认' })
+    expect(panel.closest('.theatre-product')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '按这份做' })).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: '确认需求' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '按这份做' })); expect(select).toHaveBeenCalledTimes(1)
+  })
   it('the footer keeps the real sketch confirmation callback and disables it only while confirming', () => {
     const store = createStore()
     store.set(currentProjectAtom, { project_id: 'footer-project', name: '测试草图', mode: 'quick' } as Project)

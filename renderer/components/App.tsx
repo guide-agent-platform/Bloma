@@ -783,6 +783,8 @@ const AppRoutes: React.FC = () => {
         onHome={() => setRoute('mode-selection')}
         notice={forkNotice}
         cardOptions={decisionCards?.options}
+        decisionKind={decisionCards?.kind}
+        decisionScope={decisionCards?.scope}
         decisionTitle={decisionCards?.title}
         decisionBody={decisionCards?.body}
         onCardOptionSelect={handleCardOptionSelect}
