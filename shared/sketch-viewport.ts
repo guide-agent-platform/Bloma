@@ -1,4 +1,6 @@
 /** Read-only geometry bridge for opaque sketch frames; never exposes the Electron API. */
+export const PREVIEW_POINTER_EVENT = 'bloma-preview-pointer'
+export interface PreviewPointer { clientX: number; clientY: number; inside: boolean }
 export function stripSketchReviewChrome(html: string): string {
   return html.replace(/<style\b[^>]*\bid=["']bloma-sketch-corrector-style["'][^>]*>[\s\S]*?<\/style\s*>/gi, '')
     .replace(/<script\b[^>]*\bid=["']bloma-sketch-corrector["'][^>]*>[\s\S]*?<\/script\s*>/gi, '')
@@ -7,7 +9,13 @@ export function stripSketchReviewChrome(html: string): string {
 export function injectSketchViewport(html: string): string {
   const bridge = `<script data-bloma-viewport>
 (() => {
-  let token, pending = 0, viewport = '', last = '';
+  let token, pending = 0, pointerFrame = 0, pointer, viewport = '', last = '';
+  const sendPointer = () => { pointerFrame = 0; if (token && pointer) parent.postMessage({ type: 'bloma-preview-pointer', token, ...pointer }, '*'); };
+  addEventListener('pointermove', event => {
+    pointer = { x: Math.max(0, Math.min(1, event.clientX / innerWidth)), y: Math.max(0, Math.min(1, event.clientY / innerHeight)), inside: true };
+    if (!pointerFrame) pointerFrame = requestAnimationFrame(sendPointer);
+  }, { passive: true });
+  document.addEventListener('pointerleave', () => { pointer = { x: 0, y: 0, inside: false }; if (!pointerFrame) pointerFrame = requestAnimationFrame(sendPointer); });
   const measure = () => {
     pending = 0;
     if (!token || !document.body) return;

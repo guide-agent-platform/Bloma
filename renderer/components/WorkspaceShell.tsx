@@ -99,6 +99,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [focused, setFocused] = React.useState(false)
   const [mobileView, setMobileView] = React.useState<'conversation' | 'preview'>('conversation')
   const conversation = useConversationWidth()
+  const previewTarget = React.useRef<HTMLElement>(null)
   const busy = useAtomValue(hasActiveStreamAtom)
   const scopePending = props.decisionKind === 'lean_scope' && Boolean(props.cardOptions?.length && props.onCardOptionSelect)
   const activeSession = useAtomValue(activeAgentSessionIdAtom)
@@ -139,7 +140,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       </aside>
       <div className="studio-body" ref={conversation.containerRef}>
       <nav className="studio-view-switch" aria-label="工作区视图"><button type="button" aria-pressed={mobileView === 'conversation'} onClick={() => setMobileView('conversation')}>对话</button><button type="button" aria-pressed={mobileView === 'preview'} onClick={() => setMobileView('preview')}>草图与程序</button></nav>
-      <main className="theatre-stage">
+      <main className="theatre-stage" ref={previewTarget}>
         <div className="theatre-stage-heading"><div key={scene.title} className="studio-scene-heading"><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" title={focused ? '退出专注预览' : '专注预览'} aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
         <div className="theatre-main" data-panel-open={documents || collaboration || Boolean(localPanel)}>
           <section className="theatre-product" aria-label="软件与当前结果">
@@ -171,7 +172,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       </main>
       <button type="button" role="separator" aria-label="调整会话栏宽度" aria-orientation="vertical" className="studio-conversation-resizer" title="拖动调整会话栏；方向键微调，双击恢复默认" {...conversation.separatorProps} />
       <section className="theatre-conversation" aria-label="向导与下一步">
-        {canConfirmSketch && !busy && !props.confirming && !requirementDialog && !prdDialog && !clarificationDialog && <SketchCharacterReminder key={sketchCue} cue={sketchCue} />}
+        {canConfirmSketch && !focused && !documents && !collaboration && !localPanel && !busy && !props.confirming && !requirementDialog && !prdDialog && !clarificationDialog && <SketchCharacterReminder key={sketchCue} cue={sketchCue} previewRef={previewTarget} />}
         <ChatPanel presentation="theatre"
           cardOptions={scopePending ? undefined : props.cardOptions}
           decisionTitle={props.decisionTitle}

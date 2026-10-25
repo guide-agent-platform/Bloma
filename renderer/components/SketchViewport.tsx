@@ -1,6 +1,6 @@
 import React from 'react'
 import { Scan } from './icons'
-import { injectSketchViewport, stripSketchReviewChrome } from '../../shared/sketch-viewport'
+import { injectSketchViewport, stripSketchReviewChrome, PREVIEW_POINTER_EVENT } from '../../shared/sketch-viewport'
 
 const DESIGN = { width: 1280, height: 800 }
 
@@ -40,7 +40,14 @@ export const SketchViewport: React.FC<{ src?: string; html?: string; readOnly?: 
   React.useEffect(() => {
     const receive = (event: MessageEvent) => {
       const data = event.data
-      if (event.source !== frame.current?.contentWindow || data?.type !== 'bloma-viewport-size' || data.token !== token) return
+      if (event.source !== frame.current?.contentWindow || data?.token !== token) return
+      if (data.type === PREVIEW_POINTER_EVENT) {
+        if (typeof data.inside !== 'boolean' || typeof data.x !== 'number' || typeof data.y !== 'number' || !Number.isFinite(data.x) || !Number.isFinite(data.y) || data.x < 0 || data.x > 1 || data.y < 0 || data.y > 1) return
+        const rect = frame.current?.getBoundingClientRect()
+        if (rect) window.dispatchEvent(new CustomEvent(PREVIEW_POINTER_EVENT, { detail: { clientX: rect.left + data.x * rect.width, clientY: rect.top + data.y * rect.height, inside: data.inside } }))
+        return
+      }
+      if (data.type !== 'bloma-viewport-size') return
       if (typeof data.width !== 'number' || typeof data.height !== 'number' || !Number.isFinite(data.width) || !Number.isFinite(data.height) || data.width < 1280 || data.height < 800 || data.width > 100000 || data.height > 100000) return
       setPage({ width: data.width, height: data.height })
     }

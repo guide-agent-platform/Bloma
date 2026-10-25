@@ -7,20 +7,21 @@
 .character-presenter-art img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .character-decision-stage[data-kind="prd"] { grid-template-columns: minmax(0, 1fr) 300px; width: min(1180px, calc(100vw - 48px)); }
 .character-decision-stage[data-kind="prd"] .character-presenter-art { height: min(540px, 72dvh); }
-.sketch-character-reminder { position: absolute; right: 8px; top: 0; z-index: 5; max-width: calc(100% - 16px); width: 270px; pointer-events: none; }
-.sketch-character-reminder p { position: relative; margin: 0 0 2px; padding: 12px 29px 12px 13px; border: 1px solid #dfd0e9; border-radius: 13px 13px 3px 13px; background: #f3eafa; color: #725681; font-size: 13px; line-height: 1.85; box-shadow: 0 5px 18px -12px #70538d55; }
-.sketch-character-reminder p button { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; pointer-events: auto; }
-.theatre-conversation > .sketch-character-reminder { display:flex;flex-direction:row-reverse;align-items:center;gap:8px; }
-.theatre-conversation > .sketch-character-reminder .sketch-character-art { display:block;width:42px;height:64px;margin:0;flex-shrink:0; }
-.sketch-character-art img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sketch-character-reminder.guide-emergence { position:relative;isolation:isolate;flex-shrink:0;width:100%;height:clamp(340px,42dvh,400px);min-height:340px;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 42% 74%,#e7def490,transparent 67%),linear-gradient(#fcfaff,#fff);border-bottom:1px solid #ede7f3; }
+.guide-emergence::before { content:"";position:absolute;bottom:-13px;left:36px;right:24px;height:35px;border-radius:50%;background:#e8def47a;box-shadow:0 -2px 17px #cab9df35; }
+.guide-emergence-label { position:absolute;left:15px;top:14px;z-index:2;color:#8a769a;font-size:11px;letter-spacing:.06em; }
+.guide-emergence-close { position:absolute;right:11px;top:10px;z-index:4;display:grid;place-items:center;width:25px;height:25px;border:1px solid #e7deed;border-radius:50%;color:#8a769a;background:#ffffffd9;cursor:pointer;pointer-events:auto; }
+.guide-emergence-actor { position:absolute;left:0;right:3px;top:8px;bottom:82px;filter:drop-shadow(0 3px 3px #9880b018); }
+.pointing-guide { display:block;width:100%;height:100%;overflow:visible; }
+.sketch-character-reminder .guide-emergence-caption { position:absolute;left:14px;right:14px;bottom:35px;z-index:3;box-sizing:border-box;margin:0;padding:8px 12px;border:1px solid #ded0eb;border-radius:13px 13px 13px 3px;background:#fffffff2;color:#756080;font-size:12px;line-height:1.65;box-shadow:0 6px 18px -14px #71528f80; }
+.guide-follow-toggle{position:absolute;right:12px;bottom:9px;z-index:4;pointer-events:auto;border:1px solid #e8dfef;border-radius:999px;padding:4px 9px;background:#fff;color:#8a769a;font-size:10px;cursor:pointer;}.guide-follow-toggle:disabled{cursor:default;opacity:.65;}
+.guide-emergence-edge { position:absolute;left:0;right:0;bottom:76px;height:13px;z-index:3;background:linear-gradient(transparent,#fff); }
 @media (max-width: 800px) {
   .character-decision-stage { grid-template-columns: minmax(0, 1fr) 150px; gap: 12px; }
   .character-presenter-art { height: min(300px, 45dvh); }
   .character-presenter-caption { padding: 11px; font-size: 12px; }
   .character-decision-stage[data-kind="prd"] { grid-template-columns: minmax(0, 1fr) 190px; }
   .character-decision-stage[data-kind="prd"] .character-presenter-art { height: min(360px, 50dvh); }
-  .sketch-character-reminder { width: 185px; right: 5px; bottom: 12px; }
-  .sketch-character-art { width: 155px; height: 220px; }
 }
 @media (max-width: 600px), (max-height: 550px) {
   .character-decision-stage { position: relative; grid-template-columns: minmax(0, 1fr); width: min(680px, calc(100vw - 32px)); }
@@ -30,8 +31,9 @@
   .character-decision-stage[data-kind="prd"] { grid-template-columns: minmax(0, 1fr); width: min(680px, calc(100vw - 32px)); }
   .character-decision-stage[data-kind="prd"] .character-presenter-art { height: 120px; }
   .character-presented-card > [role="dialog"], .character-presented-card > [data-ai-id="clarification-card"] { padding-top: 110px !important; max-height: calc(100dvh - 48px) !important; }
-  .sketch-character-reminder { width: 165px; }
-  .sketch-character-art { width: 130px; height: 170px; }
+  .sketch-character-reminder.guide-emergence { height:220px;min-height:220px; }
+  .guide-emergence-actor { top:4px;bottom:72px; }
+  .sketch-character-reminder .guide-emergence-caption { font-size:11px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .character-decision-stage *, .sketch-character-reminder * { animation: none !important; transition: none !important; }
