@@ -9,6 +9,19 @@ const MUTABLE_DIRECTORIES = new Set(['data', '00_VERIFY', '00_UX'])
 const EXECUTABLE_FILE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css)$/i
 const INPUT_FILE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css|json|txt|toml|yaml|yml|onnx)$/i
 
+/** Same input selection as the fingerprint, for bounded source recovery. Business
+ * data, dependencies, Git history and presentation output are not restored. */
+export function* verificationSourceFiles(root: string, prefix = '', executableOnly = false): Generator<{ path: string; relative: string }> {
+  for (const entry of readdirSync(join(root, prefix), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (EXCLUDED.has(entry.name)) continue
+    if (entry.isSymbolicLink()) throw Error('SOURCE_CHECKPOINT_LINK_UNSUPPORTED')
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (isHostPresentationOutput(relative)) continue
+    if (entry.isDirectory()) yield* verificationSourceFiles(root, relative, executableOnly || MUTABLE_DIRECTORIES.has(entry.name))
+    else if ((executableOnly ? EXECUTABLE_FILE : INPUT_FILE).test(entry.name)) yield { path: join(root, relative), relative }
+  }
+}
+
 /** Unknown/unreadable/linked inputs disable reuse; they never mean unchanged. */
 export function verificationFingerprint(root: string | undefined, context: unknown = null, policy: 'standard' | 'software' = 'standard'): string | undefined {
   if (!root || !existsSync(root)) return undefined

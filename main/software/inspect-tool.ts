@@ -11,21 +11,36 @@ import { softwareVerificationFingerprint as verificationFingerprint } from '../d
 import { savePastedImage, MAX_PASTED_IMAGE_BYTES } from '../platform/shell/pasted-images'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { guiInputFailure, guiStepsSchema, SOFTWARE_GUI_ACTION_KINDS } from '../desktop/gui-tool-contract'
-import { actDebugSession, closeDebugSession, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess, retainedDebugFixtures } from './debug-sessions'
-import { activeSoftwarePreview } from './process-manager'
+import { actDebugSession, closeDebugSession, closeDebugSessions, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess, retainedDebugFixtures } from './debug-sessions'
+import { activeSoftwarePreview, stopSoftwareSession } from './process-manager'
+import { restoreSourceFiles, sourceCheckpointChanges } from './source-checkpoints'
 import { GUI_FIXTURE_SCHEMA, materializeGuiFixtures, sealGuiFixtures } from '../desktop/gui-fixtures'
 import { guiVerificationReadiness } from './verification-readiness'
 
 export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<typeof createSoftwareCollaborationPolicy>, previewChanged?: (url?: string) => void): AgentLoopTool {
-  return { name: 'inspect_app', description: '实际操作Electron/浏览器程序。默认自动打开并持续复用本会话实例，源码变化时重载实际入口并保留测试数据；返回控件定位、当前值和具体失败。无需每次传会话id。restart动作会重启程序并保留数据；mode=once才使用单次全新隔离现场。open可带process_id连接本会话已有服务；read/reload/close可显式控制。默认只有新日志和截图路径，仅已知视觉渠道设include_image=true。调试成功不等于最终验收，完成规则登记后用verify_app。',
-    input_schema: { type: 'object', properties: { mode: { type: 'string', enum: ['once', 'open', 'act', 'read', 'reload', 'close'] },
+  return { name: 'inspect_app', description: '实际操作Electron/浏览器程序。script填写项目内JS模块路径，export default async({page,context,expect,assert,dataDir})使用标准Playwright；脚本在不注入平台密钥的独立工程进程执行，支持交互、等待、上传下载及断言。steps兼容旧动作，与script二选一。默认复用实例并自动重载变化；read显示源码检查点、current_source与差异；restore用checkpoint_id/expected_source/paths还原所选文件并备份旧内容。mode=once仅旧steps单次现场。调试和恢复均不等于验收，通过规则后verify_app。',
+    input_schema: { type: 'object', properties: { mode: { type: 'string', enum: ['once', 'open', 'act', 'read', 'reload', 'close', 'restore'] },
       debug_session_id: { type: 'string' }, process_id: { type: 'string' }, since_seq: { type: 'integer', minimum: 0 },
+      script: { type: 'string', minLength: 1, maxLength: 512 }, timeout_ms: { type: 'integer', minimum: 100, maximum: 300000 },
+      checkpoint_id: { type: 'string' }, expected_source: { type: 'string' }, paths: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string' } },
       include_image: { type: 'boolean' }, fixtures: GUI_FIXTURE_SCHEMA, steps: guiStepsSchema(32, SOFTWARE_GUI_ACTION_KINDS) } },
     execute: async (input, ctx) => {
       let temporary: string | undefined
       let openingDebugId: string | undefined
       try {
         policy.assertCommand(ctx)
+        if (input.mode === 'restore') {
+          if (input.script !== undefined || input.steps !== undefined || typeof input.checkpoint_id !== 'string' || typeof input.expected_source !== 'string' || !Array.isArray(input.paths)) throw Error('SOURCE_RESTORE_ARGUMENTS_REQUIRED: 提供checkpoint_id、read返回的current_source和要恢复的paths')
+          for (const path of input.paths) { if (typeof path !== 'string') throw Error('SOURCE_RESTORE_PATH_INVALID'); policy.assertFileWrite(path, ctx) }
+          const before = sourceCheckpointChanges(projectId, ctx.sessionId, findProject(projectId).root_path, input.checkpoint_id)
+          if (before.current_source !== input.expected_source) throw Error('SOURCE_RESTORE_CURRENT_CHANGED')
+          await closeDebugSessions(projectId, ctx.sessionId); await stopSoftwareSession(projectId, ctx.sessionId)
+          ctx.signal.throwIfAborted()
+          const result = restoreSourceFiles(projectId, ctx.sessionId, findProject(projectId).root_path, input.checkpoint_id, input.expected_source, input.paths as string[])
+          previewChanged?.(undefined)
+          return { output: JSON.stringify(result), feedback: { schema_version: 1, execution: 'completed', verification: 'not_applicable', source: 'host', scope: 'source_restore' } }
+        }
+        if (input.script !== undefined && (typeof input.script !== 'string' || !input.script || input.steps !== undefined || ['once', 'read', 'close'].includes(String(input.mode)))) throw Error('BROWSER_SCRIPT_INPUT_INVALID: script需项目内JS模块路径，与steps二选一；不能用于once/read/close')
         let mode = input.mode
         if (mode === undefined || ['open', 'act', 'reload'].includes(String(mode))) {
           const existing = input.debug_session_id as string | undefined ?? activeDebugSessionId(projectId, ctx.sessionId)
@@ -64,22 +79,31 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
             snapshot = await openDebugSession({ projectId, sessionId: ctx.sessionId, root, launch: declared.launch, signal: ctx.signal, processId: input.process_id as string | undefined })
             openingDebugId = snapshot.id
             if (additions) installDebugFixtures(projectId, ctx.sessionId, snapshot.id, additions)
-            snapshot = await actDebugSession({ ...args, id: snapshot.id, steps: steps ?? [{ id: 'screen', kind: 'expect', selector: 'body', nonempty: true }] })
+            snapshot = await actDebugSession({ ...args, id: snapshot.id, script: input.script as string | undefined, timeoutMs: input.timeout_ms as number | undefined,
+              steps: input.script ? undefined : steps ?? [{ id: 'screen', kind: 'expect', selector: 'body', nonempty: true }] })
           } else if (mode === 'close') snapshot = await closeDebugSession(projectId, ctx.sessionId, args.id)
           else if (mode === 'read') snapshot = readDebugSession(projectId, ctx.sessionId, args.id, Number(input.since_seq ?? 0))
-          else { if (additions) installDebugFixtures(projectId, ctx.sessionId, args.id, additions); snapshot = await actDebugSession({ ...args, steps, reload: mode === 'reload' }) }
+          else { if (additions) installDebugFixtures(projectId, ctx.sessionId, args.id, additions); snapshot = await actDebugSession({ ...args, steps, script: input.script as string | undefined, timeoutMs: input.timeout_ms as number | undefined, reload: mode === 'reload' }) }
           if (mode === 'act' || mode === 'reload') snapshot = readDebugSession(projectId, ctx.sessionId, args.id, Number(cursor))
           if (mode === 'open' && snapshot.url) previewChanged?.(snapshot.url)
           if (mode === 'close') previewChanged?.(activeSoftwarePreview(projectId, ctx.sessionId))
           const imageBytes = input.include_image === true && snapshot.screenshot ? readFileSync(snapshot.screenshot) : undefined
           const images = imageBytes && imageBytes.length <= MAX_PASTED_IMAGE_BYTES ? [savePastedImage(ctx.sessionId, imageBytes.toString('base64'), 'png')] : undefined
           const failed = snapshot.steps.find(step => !step.passed)
+          const root = findProject(projectId).root_path
+          let changes: unknown
+          if (mode === 'read' && snapshot.source_checkpoint) {
+            try { changes = sourceCheckpointChanges(projectId, ctx.sessionId, root, snapshot.source_checkpoint.id) }
+            catch (error) { changes = { error: String(error) } }
+          }
           return { output: JSON.stringify({ debug_session_id: snapshot.id, state: snapshot.state, stale: snapshot.stale, error: snapshot.error, failed_step: failed,
+            observed_source: snapshot.source, current_source: verificationFingerprint(root), source_checkpoint: snapshot.source_checkpoint, checkpoint_error: snapshot.checkpoint_error, source_changes: changes,
             verification_readiness: guiVerificationReadiness(projectId),
             version: snapshot.version, resumed_from: snapshot.resumed_from, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
             observations_omitted: snapshot.observations_omitted, data_dir: snapshot.data_dir, url: snapshot.url, screenshot: snapshot.screenshot,
             visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
-            isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed) }
+            isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed)
+              || snapshot.observations.some(row => row.version === snapshot.version && /^renderer\.(?:error|startup_error)$/.test(row.kind)) }
         }
         const root = findProject(projectId).root_path, launch = readLaunchDeclaration(root)
         if (!launch?.ok || !['electron', 'browser'].includes(launch.launch.ui ?? '')) throw Error('INSPECT_RUNTIME_UNSUPPORTED: 请登记实际Electron/浏览器入口；其它入口由对应宿主观察器检查')

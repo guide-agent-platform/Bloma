@@ -97,10 +97,16 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
   return { command, env }
 }
 
-export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string }) {
+export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string } }) {
   input.signal?.throwIfAborted()
   const cwd = projectDirectory(input.root, input.cwd)
   const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir))
+  if (input.browserBinding) {
+    const endpoint = new URL(input.browserBinding.endpoint)
+    if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') throw Error('BROWSER_SCRIPT_OWNED_ENDPOINT_REQUIRED')
+    resolved.env.BLOMA_DEBUG_CDP = endpoint.href
+    resolved.env.BLOMA_DEBUG_PAGE = input.browserBinding.page
+  }
   const timeoutMs = input.timeoutMs ?? 120000
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 300000) throw new Error('COMMAND_TIMEOUT_INVALID')
   return execFileDriverSpawn({ ...resolved, cwd, timeoutMs, signal: input.signal })

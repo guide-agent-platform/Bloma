@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import type { Browser, BrowserContext, BrowserServer, Page, Request } from 'playwright'
@@ -12,21 +12,23 @@ import { readLaunchDeclaration } from '../desktop/launch-smoke'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { electronEntry, observeGuiStep } from './gui-observer'
-import { softwareEnvironment } from './command-runtime'
+import { softwareEnvironment, executeSoftwareCommand } from './command-runtime'
+import { mainRootDir } from '../platform/paths'
 import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, matchingOwnedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
 import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { materializeGuiFixtures } from '../desktop/gui-fixtures'
 import { observeSoftwareUi } from './ui-observation'
 import { debugWorkspace } from './debug-workspace'
+import { saveSourceCheckpoint } from './source-checkpoints'
 
 export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string;
   duration_ms?: number; method?: string; url?: string; status?: number }
 export interface DebugSnapshot { id: string; projectId: string; sessionId: string; state: 'opening' | 'ready' | 'closed' | 'failed' | 'interrupted'; version: number; source?: string;
   ui?: Awaited<ReturnType<typeof observeSoftwareUi>>; data_dir?: string; resumed_from?: string;
-  stale: boolean; url?: string; screenshot?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
+  stale: boolean; url?: string; screenshot?: string; source_checkpoint?: { id: string; files?: number }; checkpoint_error?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
 interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; workspace: string; data: string; file: string; owner: string; page?: Page;
   child?: ChildProcess; nativeRoot?: number; browser?: BrowserContext; browserClient?: Browser; browserServer?: BrowserServer; externalProcessId?: string; ownedProcessId?: string; stdout?: string; stderr?: string; signal: AbortSignal; abort: () => void;
-  activeAction?: string; seq: number; logBytes: number; closing?: Promise<void>; finished?: boolean; timer?: ReturnType<typeof setTimeout>; busy: boolean; launch: LaunchDeclaration }
+  activeAction?: string; cdpEndpoint?: string; seq: number; logBytes: number; closing?: Promise<void>; finished?: boolean; timer?: ReturnType<typeof setTimeout>; busy: boolean; launch: LaunchDeclaration }
 const sessions = new Map<string, DebugSession>()
 const observedPages = new WeakSet<Page>()
 const metadataPath = (id: string) => {
@@ -111,19 +113,23 @@ async function forceOwnedChild(child?: ChildProcess) {
   if (process.platform === 'win32') await new Promise<void>(resolve => execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 5000 }, () => resolve()))
   else child.kill('SIGTERM')
 }
-async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
+async function debugOrigin(signal: AbortSignal) {
   const probe = createServer()
   await new Promise<void>((done, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.1', done) })
   const address = probe.address(); if (!address || typeof address === 'string') throw Error('DEBUG_PORT_UNAVAILABLE')
   await new Promise<void>(done => probe.close(() => done())); signal.throwIfAborted()
-  const entry = electronEntry(session.root, session.launch.command), origin = `http://127.0.0.1:${address.port}`
+  return `http://127.0.0.1:${address.port}`
+}
+async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
+  const entry = electronEntry(session.root, session.launch.command), origin = await debugOrigin(signal)
+  session.cdpEndpoint = origin
   const process = await startSoftwareProcess({ root: session.root, projectId: session.snapshot.projectId, sessionId: session.owner,
-    command: [entry.executablePath, ...entry.args, `--user-data-dir=${join(session.workspace, 'profile')}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${address.port}`],
+    command: [entry.executablePath, ...entry.args, `--user-data-dir=${join(session.workspace, 'profile')}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${new URL(origin).port}`],
     url: `${origin}/json/version`, dataDir: session.data, signal, internal: true })
   session.ownedProcessId = process.id
   session.nativeRoot = process.pid
   const { chromium } = await import('playwright')
-  session.browserClient = await chromium.connectOverCDP(origin)
+  session.browserClient = await chromium.connectOverCDP(origin, { isLocal: true, artifactsDir: join(session.data, 'browser-downloads') })
   session.browser = session.browserClient.contexts()[0]
   if (!session.browser) throw Error('DEBUG_BROWSER_CONTEXT_MISSING')
   session.browser.on('page', page => observePage(session, page))
@@ -221,7 +227,7 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
   const data = previous?.data_dir && resolve(previous.data_dir) === resolve(defaultData) ? defaultData : join(workspace, 'data')
   const session: DebugSession = { root: resolve(input.root), temporary, workspace, data, file: metadataPath(id), owner: `debug-${id}`,
     snapshot: { id, projectId: input.projectId, sessionId: input.sessionId, state: 'opening', version: (previous?.version ?? 0) + 1, source, stale: false, observations: [], steps: [], data_dir: data,
-      ...(previous ? { resumed_from: previous.id, fixtures: previous.fixtures } : {}) },
+      ...(previous ? { resumed_from: previous.id, fixtures: previous.fixtures, source_checkpoint: previous.source_checkpoint } : {}) },
     signal: input.signal, abort: () => { void closeDebugSession(input.projectId, input.sessionId, id).catch(() => {}) }, seq: 0, logBytes: 0, busy: false, launch: input.launch }
   sessions.set(id, session); persist(session); input.signal.addEventListener('abort', session.abort, { once: true })
   for (const [key, previous] of sessions) if (sessions.size > 128 && previous.finished) sessions.delete(key)
@@ -242,10 +248,15 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
       session.externalProcessId = input.processId; session.snapshot.url = service.url
       if (!input.processId) session.ownedProcessId = service.id
       session.browserServer = await chromium.launchServer({ headless: true,
+        args: ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${new URL(session.cdpEndpoint = await debugOrigin(input.signal)).port}`],
         ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }), env: softwareEnvironment(input.projectId, session.data), timeout: 20000 })
-      session.child = session.browserServer.process(); session.browserClient = await chromium.connect(session.browserServer.wsEndpoint())
+      session.child = session.browserServer.process()
+      session.browserClient = await chromium.connectOverCDP(session.cdpEndpoint!, { isLocal: true, artifactsDir: join(session.data, 'browser-downloads') })
       const storage = join(workspace, 'browser-state.json')
-      session.browser = await session.browserClient.newContext({ acceptDownloads: true, ...(existsSync(storage) ? { storageState: storage } : {}) }); session.page = await session.browser.newPage(); observePage(session, session.page)
+      session.browser = session.browserClient.contexts()[0]
+      if (!session.browser) throw Error('DEBUG_BROWSER_CONTEXT_MISSING')
+      if (existsSync(storage)) await session.browser.setStorageState(storage)
+      session.page = await session.browser.newPage(); observePage(session, session.page)
       await session.page.goto(service.url!, { waitUntil: 'domcontentloaded', timeout: 15000 })
     } else throw Error('DEBUG_RUNTIME_UNSUPPORTED: 持续会话首期支持Electron/浏览器；Python仍使用固定GUI检查')
     if (!session.page) throw Error('DEBUG_PAGE_UNAVAILABLE')
@@ -259,7 +270,7 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
     await closeDebugSession(input.projectId, input.sessionId, id); session.snapshot.state = 'failed'; persist(session); throw error
   }
 }
-export async function actDebugSession(input: { projectId: string; sessionId: string; id: string; steps?: GuiAcceptanceSuite['steps']; reload?: boolean; signal: AbortSignal }): Promise<DebugSnapshot> {
+export async function actDebugSession(input: { projectId: string; sessionId: string; id: string; steps?: GuiAcceptanceSuite['steps']; script?: string; timeoutMs?: number; reload?: boolean; signal: AbortSignal }): Promise<DebugSnapshot> {
   const session = owned(input.projectId, input.sessionId, input.id)
   if (session.snapshot.state !== 'ready' || !session.page || session.page.isClosed()) throw Error('DEBUG_SESSION_NOT_READY')
   if (session.busy) throw Error('DEBUG_SESSION_BUSY')
@@ -302,6 +313,18 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
       try { const actual = await observeGuiStep(session.page, step, { data: session.data, fixtures: session.snapshot.fixtures, nativeProcessRoot: session.nativeRoot, signal: input.signal }); session.snapshot.steps.push({ id: step.id, passed: true, actual: bounded(actual) }) }
       catch (error) { session.snapshot.steps.push({ id: step.id, passed: false, actual: bounded((error as { actual?: unknown }).actual ?? String(error)) }); log(session, 'action.failed', String(error)); break }
     }
+    if (input.script) {
+      const script = realpathSync(resolve(session.root, input.script)), rel = relative(realpathSync(session.root), script)
+      if (!rel || rel === '..' || rel.startsWith('..\\') || rel.startsWith('../') || isAbsolute(rel) || !/\.(?:c|m)?js$/i.test(script)) throw Error('BROWSER_SCRIPT_PROJECT_FILE_REQUIRED')
+      if (!session.cdpEndpoint) throw Error('BROWSER_SCRIPT_CONNECTION_UNAVAILABLE')
+      session.activeAction = 'browser-script'
+      const result = await executeSoftwareCommand({ projectId: input.projectId, root: session.root,
+        command: ['node', join(mainRootDir(), 'templates/tools/browser-script.mjs'), script], timeoutMs: input.timeoutMs ?? 30000,
+        signal: input.signal, dataDir: session.data, browserBinding: { endpoint: session.cdpEndpoint, page: session.page.url() } })
+      session.snapshot.steps.push({ id: 'browser-script', passed: result.code === 0,
+        actual: redactSoftwareOutput(result.code === 0 ? result.stdout : result.stderr || result.stdout).slice(-12000) })
+      log(session, result.code === 0 ? 'script.completed' : 'script.failed', `Browser script exited ${result.code}`)
+    }
     session.activeAction = undefined
     session.snapshot.ui = await observeSoftwareUi(session.page)
     if (session.launch.ui === 'browser' && session.browser) {
@@ -310,6 +333,13 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
     const screenshotDir = join(getPromaHome(), 'software-debug-sessions', session.snapshot.id); mkdirSync(screenshotDir, { recursive: true })
     session.snapshot.screenshot = join(screenshotDir, `v${session.snapshot.version}-${Date.now()}.png`)
     await session.page.screenshot({ path: session.snapshot.screenshot })
+    if (!session.snapshot.steps.some(step => !step.passed)
+      && !session.snapshot.observations.some(row => row.version === session.snapshot.version && /^renderer\.(?:error|startup_error)$/.test(row.kind))) {
+      try {
+        session.snapshot.source_checkpoint = saveSourceCheckpoint(input.projectId, input.sessionId, session.root, session.snapshot.source!)
+        session.snapshot.checkpoint_error = undefined
+      } catch (error) { session.snapshot.checkpoint_error = String(error) }
+    }
     persist(session); return readDebugSession(input.projectId, input.sessionId, input.id)
   } catch (error) {
     if (input.reload) { session.snapshot.state = 'failed'; session.snapshot.error = String(error); await closeDebugSession(input.projectId, input.sessionId, input.id) }

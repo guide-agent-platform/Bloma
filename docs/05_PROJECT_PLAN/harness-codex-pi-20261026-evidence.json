@@ -1,0 +1,47 @@
+{
+  "baseline": "a11ec3f",
+  "scope": "native debugging, source recovery and concise engineering guidance",
+  "model_requests_added": 0,
+  "prompt": {
+    "before_characters": 1612,
+    "after_characters": 762,
+    "reduction_percent": 52.7
+  },
+  "native_business_case": {
+    "at": "2026-10-25T17:20:45.685Z",
+    "status": "passed",
+    "project_id": "063292c4-8693-48ba-b9d9-5662f9cca830",
+    "scope": "existing real model product through production inspect_app and standard Playwright scripts; no model requests",
+    "steps": [
+      "create_two_courses_and_reject_blank",
+      "task_creation_required_title_and_initial_stats",
+      "edit_task_and_combined_filters_search_reset",
+      "status_change_updates_done_and_overdue",
+      "rename_course_keeps_task_relationships",
+      "study_records_and_invalid_minutes_rejected_without_mutation",
+      "referenced_course_delete_blocked_no_mutation",
+      "actual_json_download_contains_all_entities_and_foreign_keys",
+      "delete_updates_stats_and_cancel_import_preserves_data",
+      "confirmed_replace_restores_deleted_records_and_repeat_import_no_duplicates",
+      "reject_broken_backup_and_download_proves_no_mutation",
+      "reject_missing_backup_and_download_proves_no_mutation",
+      "reject_dangling_backup_and_download_proves_no_mutation",
+      "actual_backend_and_browser_restart_preserves_ids_fields_and_relationships"
+    ],
+    "checkpoint": {
+      "id": "e1b8c5428b3c979fa08ccc2bf3bd99ff428746cb25892d1bf4270f5e9ba698d7",
+      "files": 11
+    },
+    "old_backend_pid": 149720,
+    "new_debug_session_id": "1d32f541-6fe4-4c20-a12c-c0a6e7ec937f",
+    "original_business_files_unchanged": true,
+    "provider_requests_added": 0,
+    "monetary_ledger_unchanged": true,
+    "checks": 14,
+    "finished_at": "2026-10-25T17:21:20.17Z"
+  },
+  "shared_window_requests": 55,
+  "shared_window_priced_upper_rmb": 0.960841,
+  "older_accounting_unchanged": true,
+  "verification_boundary": "Existing model product and host integration were tested; no claim of fresh autonomous generation or formal delivery"
+}

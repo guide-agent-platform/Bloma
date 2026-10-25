@@ -21,7 +21,7 @@ afterEach(async () => { await closeDebugSessions(project.project_id, 's'); await
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 }) }, 30000)
 const ctx = (signal = new AbortController().signal): ToolContext => ({ projectId: project.project_id, sessionId: 's', requestId: 'r', signal, state: createToolState() })
 async function freePort() { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const a = server.address(); if (!a || typeof a === 'string') throw Error('port'); await new Promise<void>(done => server.close(() => done())); return a.port }
-const html = `<!doctype html><title>Debug fixture</title><h1>Debug fixture</h1><input id="draft"><script>draft.value=localStorage.getItem('draft')||'';draft.oninput=()=>localStorage.setItem('draft',draft.value)</script><button id="inc">Increment</button><button id="crash">Error</button><button id="slow" onclick="fetch('/slow?token=PRIVATE_QUERY').catch(()=>{})">Slow request</button><div id="count"></div><div id="version"></div><script>
+const html = `<!doctype html><meta charset="utf-8"><title>Debug fixture</title><h1>Debug fixture</h1><input id="draft"><select id="flavor" onchange="document.querySelector('#flavor-value').textContent=this.value"><option value="a">甲</option><option value="b">乙</option></select><output id="flavor-value"></output><button id="download" onclick="const a=document.createElement('a');a.href=window.URL.createObjectURL(new Blob(['native download']));a.download='native.txt';a.click()">Export</button><script>draft.value=localStorage.getItem('draft')||'';draft.oninput=()=>localStorage.setItem('draft',draft.value)</script><button id="inc">Increment</button><button id="crash">Error</button><button id="slow" onclick="fetch('/slow?token=PRIVATE_QUERY').catch(()=>{})">Slow request</button><div id="count"></div><div id="version"></div><script>
 const client=window.api||{count:()=>fetch('/count').then(r=>r.text()),inc:()=>fetch('/count',{method:'POST'}),version:()=>fetch('/version').then(r=>r.text())};async function refresh(){document.querySelector('#count').textContent=await client.count();document.querySelector('#version').textContent=await client.version()}document.querySelector('#inc').onclick=async()=>{await client.inc();await refresh()};document.querySelector('#crash').onclick=()=>{console.error('Authorization: Bearer PRIVATE_BEARER');console.log('api_key=PRIVATE_KEY token=PRIVATE_TOKEN');fetch('/fail?token=QUERY_SECRET').catch(()=>{});setTimeout(()=>{throw Error('real-renderer-bug')},0)};refresh()</script><input id="file" type="file"><pre id="file-text"></pre><script>document.querySelector('#file').onchange=async e=>document.querySelector('#file-text').textContent=await e.target.files[0].text()</script>`
 const serverSource = (version: string) => `const fs=require('fs'),path=require('path'),file=path.join(process.env.APP_DATA_DIR,'count');require('http').createServer((q,s)=>{if(q.url==='/count'){if(q.method==='POST')fs.writeFileSync(file,String(Number(fs.existsSync(file)?fs.readFileSync(file):0)+1));s.end(fs.existsSync(file)?fs.readFileSync(file):'0')}else if(q.url==='/version')s.end('${version}');else if(q.url.startsWith('/fail')){setTimeout(()=>{s.writeHead(500);s.end('deliberate error')},125)}else if(q.url.startsWith('/slow'))setTimeout(()=>s.end('slow actual response'),1100);else{s.setHeader('Content-Type','text/html');s.end(fs.readFileSync('index.html'))}}).listen(Number(process.argv[2]),'127.0.0.1')`
 const mainSource = (version: string) => `const{app,BrowserWindow,ipcMain}=require('electron'),fs=require('fs'),path=require('path'),file=path.join(process.env.APP_DATA_DIR,'count');ipcMain.handle('count',()=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):'0');ipcMain.handle('inc',()=>fs.writeFileSync(file,String(Number(fs.existsSync(file)?fs.readFileSync(file):0)+1)));ipcMain.handle('version',()=>'${version}');app.whenReady().then(()=>new BrowserWindow({webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false}}).loadFile('index.html'));app.on('window-all-closed',()=>app.quit())`
@@ -34,11 +34,26 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
     writeFileSync(join(root, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, ui, command: [electron, '.'], window_title: 'Debug fixture' }))
   } else { writeFileSync(join(root, 'server.cjs'), serverSource('v1')); writeFileSync(join(root, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, ui, command: ['node', 'server.cjs', String(p)], url })) }
   const policy = createSoftwareCollaborationPolicy(project.project_id, root, 's'), tool = buildSoftwareInspectTool(project.project_id, policy)
+  writeFileSync(join(root, 'browser-check.mjs'), `import{readFileSync}from'node:fs';import{join}from'node:path';export default async({page,expect,assert,dataDir})=>{
+    assert.equal(Boolean(process.env.ANTHROPIC_AUTH_TOKEN),false);assert.equal(Boolean(process.env.OPENAI_API_KEY),false);
+    await page.locator('#flavor').selectOption({label:'乙'});await expect(page.locator('#flavor-value')).toHaveText('b');
+    const done=page.waitForEvent('download');await page.locator('#download').click();const file=await done;await file.saveAs(join(dataDir,'native-export.txt'));assert.equal(readFileSync(join(dataDir,'native-export.txt'),'utf8'),'native download');return{native:true};}`)
+  writeFileSync(join(root, 'browser-failure.mjs'), `export default async({page,expect})=>{await expect(page.locator('h1')).toHaveText('deliberately wrong',{timeout:250})}`)
+  writeFileSync(join(root, 'browser-timeout.mjs'), 'export default async()=>{while(true){}}')
   const check = (id: string, selector: string, equals: string) => ({ id, kind: 'expect', selector, equals })
   writeFileSync(join(root, 'sample.txt'), 'frozen persistent fixture')
   const opened = await tool.execute({ mode: 'open', fixtures: [{ path: 'input/sample.txt', source: 'sample.txt' }], steps: [check('initial', '#count', '0'), check('version', '#version', 'v1')] }, context)
   expect(opened.isError, opened.output).not.toBe(true); const id = JSON.parse(opened.output).debug_session_id
   expect(JSON.parse(opened.output).verification_readiness.verification).toBe('not_run')
+  const scripted = await tool.execute({ script: 'browser-check.mjs' }, context)
+  expect(scripted.isError, scripted.output).not.toBe(true)
+  expect(JSON.parse(scripted.output).steps[0]).toMatchObject({ id: 'browser-script', passed: true })
+  const scriptFailed = await tool.execute({ script: 'browser-failure.mjs' }, context)
+  expect(scriptFailed.isError).toBe(true); expect(scriptFailed.output).toContain('deliberately wrong')
+  const timedOut = await tool.execute({ script: 'browser-timeout.mjs', timeout_ms: 500 }, context)
+  expect(timedOut.isError).toBe(true)
+  const afterScript = await tool.execute({ steps: [{ id: 'selected-after-script', kind: 'expect', property: 'value', selector: '#flavor', equals: 'b' }] }, context)
+  expect(afterScript.isError, afterScript.output).not.toBe(true)
   expect(JSON.parse(opened.output).ui.controls.some((control: { selector: string }) => control.selector === '#inc')).toBe(true)
   writeFileSync(join(root, 'sample.txt'), 'changed source must not replace frozen bytes')
   // Source edits require reload; the registered input remains the frozen copy.
@@ -87,6 +102,18 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   expect(JSON.parse(resumed.output)).toMatchObject({ resumed_from: id, version: 5, stale: false })
   expect(JSON.parse(resumed.output).debug_session_id).not.toBe(id)
   expect(JSON.parse(resumed.output).data_dir).toBe(JSON.parse(reloaded.output).data_dir)
+  const sourceCheckpoint = JSON.parse(resumed.output).source_checkpoint.id
+  writeFileSync(join(root, 'index.html'), html.replace('<h1>Debug fixture</h1>', '<h1>Half edited UI</h1>'))
+  const dirty = JSON.parse((await tool.execute({ mode: 'read', debug_session_id: JSON.parse(resumed.output).debug_session_id }, ctx())).output)
+  expect(dirty.source_changes.changes).toContainEqual({ path: 'index.html', kind: 'modified' })
+  const staleRestore = await tool.execute({ mode: 'restore', checkpoint_id: sourceCheckpoint, expected_source: sourceCheckpoint, paths: ['index.html'] }, ctx())
+  expect(staleRestore.isError).toBe(true)
+  expect(readDebugSession(project.project_id, 's', JSON.parse(resumed.output).debug_session_id).state).toBe('ready')
+  const restored = await tool.execute({ mode: 'restore', checkpoint_id: sourceCheckpoint, expected_source: dirty.current_source, paths: ['index.html'] }, ctx())
+  expect(restored.isError, restored.output).not.toBe(true)
+  expect(JSON.parse(restored.output)).toMatchObject({ complete_source_match: true, verification: 'not_run' })
+  const recovered = await tool.execute({ steps: [check('recovered-title', 'h1', 'Debug fixture'), check('recovered-data', '#count', '1')] }, ctx())
+  expect(recovered.isError, recovered.output).not.toBe(true)
 }, 150000)
 it('attaches only an owned ready browser service and never kills the borrowed service on debug close', async () => {
   const p = await freePort(), url = `http://127.0.0.1:${p}`, root = project.root_path, context = ctx()
