@@ -37,6 +37,7 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   writeFileSync(join(root, 'sample.txt'), 'frozen persistent fixture')
   const opened = await tool.execute({ mode: 'open', fixtures: [{ path: 'input/sample.txt', source: 'sample.txt' }], steps: [check('initial', '#count', '0'), check('version', '#version', 'v1')] }, context)
   expect(opened.isError, opened.output).not.toBe(true); const id = JSON.parse(opened.output).debug_session_id
+  expect(JSON.parse(opened.output).verification_readiness.verification).toBe('not_run')
   expect(JSON.parse(opened.output).ui.controls.some((control: { selector: string }) => control.selector === '#inc')).toBe(true)
   writeFileSync(join(root, 'sample.txt'), 'changed source must not replace frozen bytes')
   // Source edits require reload; the registered input remains the frozen copy.

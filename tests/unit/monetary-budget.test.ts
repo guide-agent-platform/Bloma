@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget, MonetaryBudgetError, monetaryStopMessage } from '../../main/platform/llm/monetary-budget'
+import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget, MonetaryBudgetError, monetaryStopMessage, fitMonetaryRequest } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
 import { activateMonetaryPolicy, activeMonetaryPolicyPath } from '../../main/platform/llm/monetary-epoch'
@@ -23,6 +23,60 @@ const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'u
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  function nearBoundary() {
+    const path = fixture(), policy = JSON.parse(readFileSync(path, 'utf8'))
+    policy.models[0].context_tokens = 1048576; writeFileSync(path, JSON.stringify(policy))
+    reserveModelRequest(url, body, path)!.settle({ input_tokens: 416697, output_tokens: 1000 }, true)
+    return path
+  }
+  it('fits a near-boundary output ceiling while retaining the full input reserve, cap and prior ledger bytes', () => {
+    const path = nearBoundary(), before = readFileSync(path + '.state.json', 'utf8'), policy = readFileSync(path, 'utf8')
+    const original = JSON.stringify({ model: 'M1', max_tokens: 8192, messages: [{ role: 'user', content: 'Keep my exact goal.' }] })
+    const fitted = fitMonetaryRequest(url, original, path)
+    expect(JSON.parse(fitted)).toEqual({ ...JSON.parse(original), max_tokens: 7681 })
+    expect(readFileSync(path + '.state.json', 'utf8')).toBe(before); expect(readFileSync(path, 'utf8')).toBe(policy)
+    const ticket = reserveModelRequest(url, fitted, path)!
+    const entry = state(path).entries.at(-1)
+    expect(entry).toMatchObject({ input_tokens_limit: 1048576, output_tokens_limit: 7681, reserved_micro_rmb: 2158600 })
+    expect(readMonetaryBudget(path)[0].accounted_upper_rmb).toBe(2.999994)
+    // A stale quote cannot admit a second request while the first is in flight.
+    expect(() => reserveModelRequest(url, fitted, path)).toThrow('MONETARY_BUDGET_EXHAUSTED')
+    ticket.settle(undefined, false)
+    expect(state(path).entries.at(-1)).toMatchObject({ status: 'unknown', charged_micro_rmb: 2158600 })
+    expect(state(path).entries[0]).toEqual(JSON.parse(before).entries[0])
+    const unknown = readFileSync(path + '.state.json', 'utf8')
+    expect(fitMonetaryRequest(url, original, path)).toBe(original)
+    expect(() => reserveModelRequest(url, fitted, path)).toThrow('MONETARY_BUDGET_EXHAUSTED')
+    expect(readFileSync(path + '.state.json', 'utf8')).toBe(unknown)
+  })
+  it('does not reduce below half the requested output, explicit thinking budget, or the minimum useful response', () => {
+    const path = nearBoundary()
+    const thinking = JSON.stringify({ model: 'M1', max_tokens: 8192, thinking: { type: 'enabled', budget_tokens: 8000 } })
+    expect(fitMonetaryRequest(url, thinking, path)).toBe(thinking)
+    const original = JSON.stringify({ model: 'M1', max_tokens: 16384 })
+    expect(fitMonetaryRequest(url, original, path)).toBe(original)
+    expect(() => reserveModelRequest(url, original, path)).toThrow('MONETARY_BUDGET_EXHAUSTED')
+    expect(fitMonetaryRequest(url, body, '')).toBe(body)
+  })
+  it('sends and guards the fitted physical SSE body and settles only the usage actually reported', async () => {
+    const path = nearBoundary(), seen: string[] = []
+    const original = JSON.stringify({ model: 'M1', max_tokens: 8192, messages: [] })
+    const lines = [{ type: 'message_start', message: { usage: { input_tokens: 100 } } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 20 } }, { type: 'message_stop' }]
+    const fetchFn = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => { seen.push(String(init?.body)); return new Response(lines.map(row => `data: ${JSON.stringify(row)}\n\n`).join('')) })
+    await streamSSE({ request: { url, body: original, headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER, monetaryPolicyPath: path,
+      requestGuard: request => seen.push(request.body), onEvent: () => {}, fetchFn })
+    expect(fetchFn).toHaveBeenCalledTimes(1); expect(seen).toHaveLength(2); expect(seen[0]).toBe(seen[1])
+    expect(JSON.parse(seen[0]).max_tokens).toBe(7681)
+    expect(state(path).entries.at(-1)).toMatchObject({ status: 'reported', charged_micro_rmb: 360, output_tokens_limit: 7681 })
+  })
+  it('fits non-streaming probes without generating an extra request', async () => {
+    const path = nearBoundary(); vi.stubEnv('BLOMA_MONETARY_POLICY', path)
+    const fetchFn = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => { expect(JSON.parse(String(init?.body)).max_tokens).toBe(7681); return new Response(JSON.stringify({ usage: { input_tokens: 100, output_tokens: 20 } })) })
+    await fetchWithMonetaryBudget(url, { method: 'POST', body: JSON.stringify({ model: 'M1', max_tokens: 8192 }) }, fetchFn)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(state(path).entries.at(-1)).toMatchObject({ status: 'reported', output_tokens_limit: 7681 })
+  })
   it('distinguishes insufficient reservation from actual spending without sending, repricing or resetting anything', async () => {
     const path = fixture(), rate = JSON.parse(readFileSync(path, 'utf8'))
     rate.models[0].context_tokens = 1048576; writeFileSync(path, JSON.stringify(rate))

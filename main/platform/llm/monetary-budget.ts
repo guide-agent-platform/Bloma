@@ -6,7 +6,7 @@ import type { SDKMessage } from '../../../shared/types'
 type Usage = NonNullable<SDKMessage['usage']>
 interface Rate { host: string; model: string; cap_rmb: number; context_tokens: number; input_rmb_per_million: number; output_rmb_per_million: number; cache_rmb_per_million: number }
 interface Policy { version: 1; models: Rate[] }
-interface Entry { id: string; model: string; host: string; at?: string; home?: string; budget_wait_ms?: number; reserved_micro_rmb: number; charged_micro_rmb: number; status: 'reserved' | 'reported' | 'unknown' | 'reconciled_unauthenticated' | 'reconciled_pre_execution'; usage?: Usage }
+interface Entry { id: string; model: string; host: string; at?: string; home?: string; budget_wait_ms?: number; input_tokens_limit?: number; output_tokens_limit?: number; reserved_micro_rmb: number; charged_micro_rmb: number; status: 'reserved' | 'reported' | 'unknown' | 'reconciled_unauthenticated' | 'reconciled_pre_execution'; usage?: Usage }
 interface BalanceCheckpoint { id: string; host: string; model: string; covered_request_ids: string[]; spent_upper_micro_rmb: number; evidence_path: string; evidence_sha256: string }
 interface State { version: 1; policy_hash: string; entries: Entry[]; balance_checkpoints?: BalanceCheckpoint[] }
 
@@ -70,6 +70,39 @@ export function readMonetaryBudget(policyPath: string) {
     accounted_upper_rmb: accountedSpent(state, rate.host, rate.model) / 1_000_000,
     remaining_rmb: rate.cap_rmb - accountedSpent(state, rate.host, rate.model) / 1_000_000,
     reported_peak_rmb: state.entries.filter(e => e.host === rate.host && e.model === rate.model && e.status === 'reported').reduce((sum, e) => sum + e.charged_micro_rmb, 0) / 1_000_000 }))
+}
+
+/** Read-only output fitting. Input liability, historical charges and the policy
+ * stay intact. The atomic reservation still decides admission after this quote;
+ * concurrent senders cannot spend a stale quote as if it were a reservation.
+ * At most halve an output ceiling, and never violate explicit thinking budgets. */
+export function fitMonetaryRequest(url: string, body: string, policyPath = process.env.BLOMA_MONETARY_POLICY): string {
+  if (!policyPath || !existsSync(`${policyPath}.state.json`)) return body
+  const bytes = readFileSync(policyPath)
+  const policy = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, '')) as Policy
+  const state = JSON.parse(readFileSync(`${policyPath}.state.json`, 'utf8')) as State
+  if (state.policy_hash !== createHash('sha256').update(bytes).digest('hex') || !Array.isArray(state.entries)) fail('MONETARY_STATE_INVALID')
+  const request = JSON.parse(body) as { model?: string; max_tokens?: number; thinking?: { type?: string; budget_tokens?: number } }
+  const host = new URL(url).host, matches = policy.models?.filter(rate => rate.host === host && rate.model === request.model)
+  // Unknown shapes retain the original request and are rejected by normal admission.
+  if (matches?.length !== 1) return body
+  const rate = matches[0], requested = request.max_tokens
+  if (!integer(requested) || !requested || requested > rate.context_tokens || !integer(rate.context_tokens)
+    || !Number.isFinite(rate.cap_rmb) || rate.cap_rmb <= 0
+    || !Number.isFinite(rate.input_rmb_per_million) || rate.input_rmb_per_million < 0
+    || !Number.isFinite(rate.output_rmb_per_million) || rate.output_rmb_per_million <= 0) return body
+  if (state.entries.some(entry => !integer(entry.charged_micro_rmb) || !integer(entry.reserved_micro_rmb))) fail('MONETARY_STATE_INVALID')
+  const spent = accountedSpent(state, host, rate.model), cap = Math.floor(rate.cap_rmb * 1e6)
+  const inputReserve = micro(rate.context_tokens, rate.input_rmb_per_million)
+  const available = cap - spent - inputReserve
+  if (inputReserve + micro(requested, rate.output_rmb_per_million) <= cap - spent || available < 0) return body
+  let limit = Math.min(requested, Math.floor(available / rate.output_rmb_per_million))
+  // Floating point rounding must never turn a quote into a one-micro overspend.
+  while (limit > 0 && micro(limit, rate.output_rmb_per_million) > available) limit--
+  const thinking = request.thinking?.type === 'enabled' && integer(request.thinking.budget_tokens) ? request.thinking.budget_tokens + 1 : 0
+  const minimum = Math.min(requested, Math.max(512, Math.ceil(requested / 2), thinking))
+  if (limit < minimum || limit >= requested) return body
+  return JSON.stringify({ ...request, max_tokens: limit })
 }
 
 /** Optional shared, cross-home spending ceiling. No prompts, keys, or request bodies are persisted.
@@ -138,6 +171,7 @@ export function reserveModelRequest(url: string, body: string, policyPath = proc
     }
     state.entries.push({ id, model: rate.model, host, at: new Date().toISOString(), home: process.env.PROMA_HOME,
       ...(waitedMs > 0 ? { budget_wait_ms: waitedMs } : {}),
+      input_tokens_limit: rate.context_tokens, output_tokens_limit: request.max_tokens,
       reserved_micro_rmb: reserved, charged_micro_rmb: reserved, status: 'reserved' })
   }) } finally { releaseEpoch() }
   return {
@@ -192,11 +226,12 @@ export async function reserveModelRequestWhenAvailable(url: string, body: string
 
 /** Non-streaming probes and provider qualification share the same physical-request ceiling. */
 export async function fetchWithMonetaryBudget(url: string, init: RequestInit, fetchImpl: typeof fetch = fetch): Promise<Response> {
-  const reservation = await reserveModelRequestWhenAvailable(url, String(init.body), init.signal ?? undefined)
+  const originalBody = String(init.body), body = fitMonetaryRequest(url, originalBody)
+  const reservation = await reserveModelRequestWhenAvailable(url, body, init.signal ?? undefined)
   let usage: Usage | undefined
   let completed = false
   try {
-    const response = await fetchImpl(url, init)
+    const response = await fetchImpl(url, body === originalBody ? init : { ...init, body })
     if (reservation && response.ok) {
       const raw = await response.clone().json() as { usage?: Record<string, unknown> }
       const row = raw.usage

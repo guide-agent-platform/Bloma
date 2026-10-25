@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -14,6 +14,7 @@ import { createToolState, runAgentLoop, type ToolContext } from '../../../main/a
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/stages/orchestration-contracts'
 import { validateToolInput } from '../../../main/agent/loop/tool-input-validation'
 import { guiStepsSchema } from '../../../main/desktop/gui-tool-contract'
+import { guiVerificationReadiness } from '../../../main/software/verification-readiness'
 const fixture = JSON.parse(readFileSync(resolve('tests/fixtures/gui-tool-contract/calculator-failed-inputs.json'), 'utf8'))
 const requirements = [{ description: '输入数字与基本运算符并显示算式', expected: '界面上能看到输入的数字和运算符' },
   { description: '执行加减乘除计算并显示结果', expected: '按下等号后显示正确的计算结果' }, { description: '清除当前输入与结果', expected: '按下清除后显示归零或空白状态' }]
@@ -50,16 +51,32 @@ function repairRecordedSteps() {
     ({ id: step.id, kind: step.action, selector: step.selector, ...(step.action === 'expect' ? { equals: step.text } : {}) })) }
 }
 it('corrected real-history input registers without copying expectations; source intent, coverage and frozen assertions remain enforced', async () => {
+  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_missing', next_tool: 'register_gui_check', verification: 'not_run' })
   const tool = buildLeanGuiTool(project.project_id), corrected = repairRecordedSteps()
   expect(tool.input_schema.required).not.toContain('expectations')
   expect(validateToolInput(tool.name, corrected, tool.input_schema)).toBeUndefined()
   expect((await tool.execute(corrected, ctx)).isError).not.toBe(true)
   const saved = JSON.parse(readFileSync(guiSuitePath(project.project_id), 'utf8'))
+  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_registered', next_tool: 'verify_app', verification: 'not_run' })
   expect(saved.expectations).toEqual(Object.fromEntries(requirements.map((row, i) => [`F-00${i + 1}`, row.expected])))
   const wrong = structuredClone(corrected); wrong.steps.find((step: { kind: string }) => step.kind === 'expect').equals = '999'
   expect((await tool.execute(wrong, ctx)).output).toContain('GUI_EXISTING_EXPECTATIONS_CHANGED')
   expect((await tool.execute({ ...corrected, acceptance_refs: { 's-result': ['F-002'] } }, ctx)).output).toContain('GUI_EXPECT_OBSERVATIONS_REQUIRED')
   expect((await tool.execute({ ...corrected, expectations: { 'F-001': 'weakened' } }, ctx)).output).toContain('authoritative_expectations')
+})
+it('readiness rejects stale or unreadable rules without rewriting them or asserting business success', async () => {
+  const tool = buildLeanGuiTool(project.project_id)
+  expect((await tool.execute(repairRecordedSteps(), ctx)).isError).not.toBe(true)
+  const file = guiSuitePath(project.project_id), suite = JSON.parse(readFileSync(file, 'utf8'))
+  suite.scope_hash = 'f'.repeat(64); writeFileSync(file, JSON.stringify(suite))
+  const before = readFileSync(file, 'utf8')
+  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_stale', verification: 'not_run' })
+  expect(readFileSync(file, 'utf8')).toBe(before)
+  writeFileSync(file, '{broken')
+  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_unreadable', verification: 'not_run' })
+  expect(readFileSync(file, 'utf8')).toBe('{broken')
+  updateProject(project.project_id, { ux_confirmation: undefined })
+  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'scope_unconfirmed', verification: 'not_run' })
 })
 it('on-demand guidance exposes the same schema, mapping example and actual host expectations', async () => {
   const result = await buildProductionContextTool(project.project_id).execute({ topic: 'verification-gui' }, ctx), view = JSON.parse(result.output)

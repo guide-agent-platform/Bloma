@@ -14,6 +14,7 @@ import { guiInputFailure, guiStepsSchema, SOFTWARE_GUI_ACTION_KINDS } from '../d
 import { actDebugSession, closeDebugSession, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess, retainedDebugFixtures } from './debug-sessions'
 import { activeSoftwarePreview } from './process-manager'
 import { GUI_FIXTURE_SCHEMA, materializeGuiFixtures, sealGuiFixtures } from '../desktop/gui-fixtures'
+import { guiVerificationReadiness } from './verification-readiness'
 
 export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<typeof createSoftwareCollaborationPolicy>, previewChanged?: (url?: string) => void): AgentLoopTool {
   return { name: 'inspect_app', description: '实际操作Electron/浏览器程序。默认自动打开并持续复用本会话实例，源码变化时重载实际入口并保留测试数据；返回控件定位、当前值和具体失败。无需每次传会话id。restart动作会重启程序并保留数据；mode=once才使用单次全新隔离现场。open可带process_id连接本会话已有服务；read/reload/close可显式控制。默认只有新日志和截图路径，仅已知视觉渠道设include_image=true。调试成功不等于最终验收，完成规则登记后用verify_app。',
@@ -74,6 +75,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
           const images = imageBytes && imageBytes.length <= MAX_PASTED_IMAGE_BYTES ? [savePastedImage(ctx.sessionId, imageBytes.toString('base64'), 'png')] : undefined
           const failed = snapshot.steps.find(step => !step.passed)
           return { output: JSON.stringify({ debug_session_id: snapshot.id, state: snapshot.state, stale: snapshot.stale, error: snapshot.error, failed_step: failed,
+            verification_readiness: guiVerificationReadiness(projectId),
             version: snapshot.version, resumed_from: snapshot.resumed_from, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
             observations_omitted: snapshot.observations_omitted, data_dir: snapshot.data_dir, url: snapshot.url, screenshot: snapshot.screenshot,
             visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
@@ -93,7 +95,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
         const name = files.find(file => file.endsWith('-failed.png')) ?? files.at(-1), file = name ? join(screenshotDir, name) : undefined
         const bytes = result.status !== 'unverified' && file ? readFileSync(file) : undefined
         const images = input.include_image === true && bytes && bytes.length <= MAX_PASTED_IMAGE_BYTES ? [savePastedImage(ctx.sessionId, bytes.toString('base64'), 'png')] : undefined
-        return { output: JSON.stringify({ ...result, screenshot: file, visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '开发观察，不是最终验收凭据', source_unchanged: verificationFingerprint(root) === fingerprint }), images, isError: result.status !== 'passed' }
+        return { output: JSON.stringify({ ...result, screenshot: file, visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '开发观察，不是最终验收凭据', verification_readiness: guiVerificationReadiness(projectId), source_unchanged: verificationFingerprint(root) === fingerprint }), images, isError: result.status !== 'passed' }
       } catch (error) {
         if (openingDebugId) await closeDebugSession(projectId, ctx.sessionId, openingDebugId)
         if (/^GUI_/.test(error instanceof Error ? error.message : String(error))) return guiInputFailure(error)
