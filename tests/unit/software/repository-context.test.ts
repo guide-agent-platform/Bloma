@@ -12,7 +12,9 @@ import { softwareVerificationFingerprint, verificationFingerprint } from '../../
 let home: string, previous: string | undefined, project: ReturnType<typeof createProject>
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-repository-')); process.env.PROMA_HOME = home;
   project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' }) })
-afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
+// The large-repository case removes 5100 actual files on Windows. Keep the
+// behavior assertions intact and budget cleanup separately from the test body.
+afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) }, 60000)
 const ctx = () => ({ projectId: project.project_id, sessionId: 's', requestId: 'r', signal: new AbortController().signal, state: createToolState() })
 it('reuses content-bound declaration/import facts and invalidates same-size edits even when mtime is restored', async () => {
   const root = project.root_path, file = join(root, 'module.ts')

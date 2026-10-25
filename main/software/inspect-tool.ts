@@ -11,7 +11,7 @@ import { softwareVerificationFingerprint as verificationFingerprint } from '../d
 import { savePastedImage, MAX_PASTED_IMAGE_BYTES } from '../platform/shell/pasted-images'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { guiInputFailure, guiStepsSchema, SOFTWARE_GUI_ACTION_KINDS } from '../desktop/gui-tool-contract'
-import { actDebugSession, closeDebugSession, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess } from './debug-sessions'
+import { actDebugSession, closeDebugSession, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess, retainedDebugFixtures } from './debug-sessions'
 import { activeSoftwarePreview } from './process-manager'
 import { GUI_FIXTURE_SCHEMA, materializeGuiFixtures, sealGuiFixtures } from '../desktop/gui-fixtures'
 
@@ -26,10 +26,16 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
       try {
         policy.assertCommand(ctx)
         let mode = input.mode
-        if (mode === undefined) {
+        if (mode === undefined || ['open', 'act', 'reload'].includes(String(mode))) {
           const existing = input.debug_session_id as string | undefined ?? activeDebugSessionId(projectId, ctx.sessionId)
-          if (existing) { input = { ...input, debug_session_id: existing }; mode = readDebugSession(projectId, ctx.sessionId, existing).stale ? 'reload' : 'act' }
-          else mode = 'open'
+          if (existing) {
+            const snapshot = readDebugSession(projectId, ctx.sessionId, existing)
+            if (!['opening', 'ready'].includes(snapshot.state)) { input = { ...input, debug_session_id: undefined }; mode = 'open' }
+            else {
+              input = { ...input, debug_session_id: existing }
+              if (mode === undefined || mode === 'open') mode = snapshot.stale ? 'reload' : 'act'
+            }
+          } else mode = 'open'
         }
         if (!['once', 'open', 'act', 'read', 'reload', 'close'].includes(String(mode))) throw Error('GUI_DEBUG_MODE_INVALID: mode需once/open/act/read/reload/close')
         if (mode !== 'once') {
@@ -41,7 +47,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
           let additions: GuiAcceptanceSuite | undefined
           if (mode !== 'read' && mode !== 'close') {
             const root = findProject(projectId).root_path, existing = mode === 'open' ? undefined : readDebugSession(projectId, ctx.sessionId, args.id)
-            const fixtures = [...new Map([...(existing?.fixtures ?? []), ...((input.fixtures ?? []) as NonNullable<GuiAcceptanceSuite['fixtures']>)].map(file => [file.path, file])).values()]
+            const fixtures = [...new Map([...(existing?.fixtures ?? (mode === 'open' ? retainedDebugFixtures(projectId, ctx.sessionId) : [])), ...((input.fixtures ?? []) as NonNullable<GuiAcceptanceSuite['fixtures']>)].map(file => [file.path, file])).values()]
             const suite = parseGuiSuite({ version: 1, scope_hash: verificationFingerprint(root) ?? '', covers: ['F-001'], fixtures,
               steps: input.steps ?? [{ id: 'fixture_binding', kind: 'expect', selector: 'body', nonempty: true }] }, { allowActionsOnly: true })
             // Existing inputs are already frozen. Adding another input must not
@@ -68,7 +74,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
           const images = imageBytes && imageBytes.length <= MAX_PASTED_IMAGE_BYTES ? [savePastedImage(ctx.sessionId, imageBytes.toString('base64'), 'png')] : undefined
           const failed = snapshot.steps.find(step => !step.passed)
           return { output: JSON.stringify({ debug_session_id: snapshot.id, state: snapshot.state, stale: snapshot.stale, error: snapshot.error, failed_step: failed,
-            version: snapshot.version, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
+            version: snapshot.version, resumed_from: snapshot.resumed_from, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
             observations_omitted: snapshot.observations_omitted, data_dir: snapshot.data_dir, url: snapshot.url, screenshot: snapshot.screenshot,
             visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
             isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed) }

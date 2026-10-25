@@ -101,6 +101,8 @@ def observe(window):
                     passed = actual == step['equals'].replace('{{DATA_DIR}}', os.environ['APP_DATA_DIR'])
                 elif 'contains' in step:
                     passed = isinstance(actual, str) and step['contains'].replace('{{DATA_DIR}}', os.environ['APP_DATA_DIR']) in actual
+                elif step.get('property') == 'count':
+                    passed = isinstance(actual, str) and actual.isdigit() and int(actual) > 0
                 else:
                     passed = isinstance(actual, str) and bool(actual.strip())
                 if passed or step['kind'] != 'expect' or time.monotonic() >= deadline:

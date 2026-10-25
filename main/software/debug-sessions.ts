@@ -17,13 +17,14 @@ import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwa
 import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { materializeGuiFixtures } from '../desktop/gui-fixtures'
 import { observeSoftwareUi } from './ui-observation'
+import { debugWorkspace } from './debug-workspace'
 
 export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string;
   duration_ms?: number; method?: string; url?: string; status?: number }
 export interface DebugSnapshot { id: string; projectId: string; sessionId: string; state: 'opening' | 'ready' | 'closed' | 'failed' | 'interrupted'; version: number; source?: string;
-  ui?: Awaited<ReturnType<typeof observeSoftwareUi>>; data_dir?: string;
+  ui?: Awaited<ReturnType<typeof observeSoftwareUi>>; data_dir?: string; resumed_from?: string;
   stale: boolean; url?: string; screenshot?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
-interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; data: string; file: string; owner: string; page?: Page;
+interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; workspace: string; data: string; file: string; owner: string; page?: Page;
   child?: ChildProcess; nativeRoot?: number; browser?: BrowserContext; browserClient?: Browser; browserServer?: BrowserServer; externalProcessId?: string; ownedProcessId?: string; stdout?: string; stderr?: string; signal: AbortSignal; abort: () => void;
   activeAction?: string; seq: number; logBytes: number; closing?: Promise<void>; finished?: boolean; timer?: ReturnType<typeof setTimeout>; busy: boolean; launch: LaunchDeclaration }
 const sessions = new Map<string, DebugSession>()
@@ -32,7 +33,25 @@ const metadataPath = (id: string) => {
   if (!/^[a-f0-9-]{36}$/.test(id)) throw Error('DEBUG_ID_INVALID')
   return join(getPromaHome(), 'software-debug-sessions', `${id}.json`)
 }
-function persist(session: DebugSession) { writeTextFileAtomic(session.file, JSON.stringify(session.snapshot)) }
+function persist(session: DebugSession) {
+  writeTextFileAtomic(session.file, JSON.stringify(session.snapshot))
+  writeTextFileAtomic(join(session.workspace, 'checkpoint.json'), JSON.stringify(session.snapshot))
+}
+function savedSnapshot(projectId: string, sessionId: string, id: string): DebugSnapshot {
+  const previous = JSON.parse(readFileSync(metadataPath(id), 'utf8')) as DebugSnapshot
+  if (previous.projectId !== projectId || previous.sessionId !== sessionId || previous.id !== id) throw Error('DEBUG_SESSION_NOT_OWNED')
+  return previous
+}
+function savedCheckpoint(projectId: string, sessionId: string): DebugSnapshot | undefined {
+  const file = join(debugWorkspace(projectId, sessionId), 'checkpoint.json')
+  if (!existsSync(file)) return
+  const previous = JSON.parse(readFileSync(file, 'utf8')) as DebugSnapshot
+  if (previous.projectId !== projectId || previous.sessionId !== sessionId) throw Error('DEBUG_CHECKPOINT_IDENTITY_INVALID')
+  return previous
+}
+export function retainedDebugFixtures(projectId: string, sessionId: string) {
+  return savedCheckpoint(projectId, sessionId)?.fixtures ?? []
+}
 function owned(projectId: string, sessionId: string, id: string): DebugSession {
   const session = sessions.get(id)
   if (!session) {
@@ -93,7 +112,7 @@ async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
   await new Promise<void>(done => probe.close(() => done())); signal.throwIfAborted()
   const entry = electronEntry(session.root, session.launch.command), origin = `http://127.0.0.1:${address.port}`
   const process = await startSoftwareProcess({ root: session.root, projectId: session.snapshot.projectId, sessionId: session.owner,
-    command: [entry.executablePath, ...entry.args, `--user-data-dir=${join(session.temporary, 'profile')}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${address.port}`],
+    command: [entry.executablePath, ...entry.args, `--user-data-dir=${join(session.workspace, 'profile')}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${address.port}`],
     url: `${origin}/json/version`, dataDir: session.data, signal, internal: true })
   session.ownedProcessId = process.id
   session.nativeRoot = process.pid
@@ -122,7 +141,12 @@ export async function closeDebugSession(projectId: string, sessionId: string, id
   session.signal.removeEventListener('abort', session.abort)
   session.closing = (async () => {
     let timer: ReturnType<typeof setTimeout> | undefined
-    try { await Promise.race([Promise.allSettled([session.browser?.close(), session.browserClient?.close(), session.browserServer?.close(), stopSoftwareSession(projectId, session.owner)]),
+    try {
+      if (session.launch.ui === 'browser' && session.browser) {
+        try { const state = await session.browser.storageState(); writeTextFileAtomic(join(session.workspace, 'browser-state.json'), JSON.stringify(state)) }
+        catch (error) { log(session, 'state.save_failed', String(error)) }
+      }
+      await Promise.race([Promise.allSettled([session.browser?.close(), session.browserClient?.close(), session.browserServer?.close(), stopSoftwareSession(projectId, session.owner)]),
       new Promise((_, reject) => { timer = setTimeout(() => reject(Error('DEBUG_CLOSE_TIMEOUT')), 8000) })]) }
     finally {
       clearTimeout(timer); await forceOwnedChild(session.child); await stopSoftwareSession(projectId, session.owner)
@@ -156,6 +180,10 @@ export function installDebugFixtures(projectId: string, sessionId: string, id: s
   persist(session)
 }
 export function readDebugSession(projectId: string, sessionId: string, id: string, since = 0): DebugSnapshot {
+  if (!sessions.has(id)) {
+    const previous = savedSnapshot(projectId, sessionId, id)
+    return { ...previous, state: 'interrupted', stale: true, error: 'DEBUG_SESSION_INTERRUPTED: 旧进程未接管，下一次操作将用保留数据重新打开。' }
+  }
   const session = owned(projectId, sessionId, id), current = verificationFingerprint(session.root)
   const processId = session.externalProcessId ?? session.ownedProcessId
   if (processId && ['ready', 'opening'].includes(session.snapshot.state)) {
@@ -178,10 +206,16 @@ export function readDebugSession(projectId: string, sessionId: string, id: strin
 export async function openDebugSession(input: { projectId: string; sessionId: string; root: string; launch: LaunchDeclaration; signal: AbortSignal; processId?: string }): Promise<DebugSnapshot> {
   input.signal.throwIfAborted()
   if (hasDebugSession(input.projectId, input.sessionId)) throw Error('DEBUG_SESSION_ALREADY_OPEN: 复用现有debug_session_id，或先close')
+  const workspace = debugWorkspace(input.projectId, input.sessionId), previous = savedCheckpoint(input.projectId, input.sessionId)
   const id = randomUUID(), temporary = mkdtempSync(join(tmpdir(), 'bloma-debug-')), source = verificationFingerprint(input.root)
   if (!source) throw Error('DEBUG_SOURCE_UNREADABLE')
-  const session: DebugSession = { root: resolve(input.root), temporary, data: join(temporary, 'data'), file: metadataPath(id), owner: `debug-${id}`,
-    snapshot: { id, projectId: input.projectId, sessionId: input.sessionId, state: 'opening', version: 1, source, stale: false, observations: [], steps: [], data_dir: join(temporary, 'data') },
+  // A borrowed start_service default directory is also host-owned and durable.
+  // Arbitrary saved paths are never trusted as a new process data directory.
+  const defaultData = softwareEnvironment(input.projectId).APP_DATA_DIR
+  const data = previous?.data_dir && resolve(previous.data_dir) === resolve(defaultData) ? defaultData : join(workspace, 'data')
+  const session: DebugSession = { root: resolve(input.root), temporary, workspace, data, file: metadataPath(id), owner: `debug-${id}`,
+    snapshot: { id, projectId: input.projectId, sessionId: input.sessionId, state: 'opening', version: (previous?.version ?? 0) + 1, source, stale: false, observations: [], steps: [], data_dir: data,
+      ...(previous ? { resumed_from: previous.id, fixtures: previous.fixtures } : {}) },
     signal: input.signal, abort: () => { void closeDebugSession(input.projectId, input.sessionId, id).catch(() => {}) }, seq: 0, logBytes: 0, busy: false, launch: input.launch }
   sessions.set(id, session); persist(session); input.signal.addEventListener('abort', session.abort, { once: true })
   for (const [key, previous] of sessions) if (sessions.size > 128 && previous.finished) sessions.delete(key)
@@ -204,7 +238,8 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
       session.browserServer = await chromium.launchServer({ headless: true,
         ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }), env: softwareEnvironment(input.projectId, session.data), timeout: 20000 })
       session.child = session.browserServer.process(); session.browserClient = await chromium.connect(session.browserServer.wsEndpoint())
-      session.browser = await session.browserClient.newContext({ acceptDownloads: true }); session.page = await session.browser.newPage(); observePage(session, session.page)
+      const storage = join(workspace, 'browser-state.json')
+      session.browser = await session.browserClient.newContext({ acceptDownloads: true, ...(existsSync(storage) ? { storageState: storage } : {}) }); session.page = await session.browser.newPage(); observePage(session, session.page)
       await session.page.goto(service.url!, { waitUntil: 'domcontentloaded', timeout: 15000 })
     } else throw Error('DEBUG_RUNTIME_UNSUPPORTED: 持续会话首期支持Electron/浏览器；Python仍使用固定GUI检查')
     if (!session.page) throw Error('DEBUG_PAGE_UNAVAILABLE')
@@ -263,6 +298,9 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
     }
     session.activeAction = undefined
     session.snapshot.ui = await observeSoftwareUi(session.page)
+    if (session.launch.ui === 'browser' && session.browser) {
+      writeTextFileAtomic(join(session.workspace, 'browser-state.json'), JSON.stringify(await session.browser.storageState()))
+    }
     const screenshotDir = join(getPromaHome(), 'software-debug-sessions', session.snapshot.id); mkdirSync(screenshotDir, { recursive: true })
     session.snapshot.screenshot = join(screenshotDir, `v${session.snapshot.version}-${Date.now()}.png`)
     await session.page.screenshot({ path: session.snapshot.screenshot })

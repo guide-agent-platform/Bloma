@@ -67,12 +67,13 @@ export function persistAssistantMessages(sessionId: string, sdkMessages: SDKMess
  */
 export function persistTerminalMessage(
   sessionId: string,
-  status: 'completed' | 'error',
+  status: 'completed' | 'incomplete' | 'error',
   detail?: { code?: string; message?: string },
 ): void {
   const text =
     status === 'completed'
       ? '[terminal] status=completed'
+      : status === 'incomplete' ? `[terminal] status=incomplete code=${detail?.code ?? 'WORK_INCOMPLETE'} message=${truncate(detail?.message ?? '')}`
       : `[terminal] status=error code=${detail?.code ?? 'AGENT_SDK_ERROR'} message=${truncate(detail?.message ?? '')}`
   appendAgentMessage(sessionId, {
     role: 'system',

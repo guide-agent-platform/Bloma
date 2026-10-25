@@ -103,7 +103,8 @@ it('cannot deliver if the final runtime accounting record becomes unreadable', a
   await enterDesktopLine(f.input, f.query, {}, f.deps)
   expect(findProject(f.project.project_id).status).toBe('active')
   expect(f.deps.complete).toHaveBeenLastCalledWith('s', f.project.project_id, 'incomplete')
-  expect(f.deps.persistAssistant).not.toHaveBeenCalled()
+  expect(f.deps.persistAssistant).toHaveBeenCalledWith('s', expect.stringContaining('HARNESS_BUDGET_UNREADABLE'))
+  expect(vi.mocked(f.deps.persistAssistant).mock.calls.every(([, text]) => !text.includes('本次目标已完成'))).toBe(true)
 })
 it('keeps correction outbox pending on admission failure, then resumes it into the same durable task', async () => {
   const f = setup('quick'), budget = leanBudget(f.project.project_id, 'desktop-implement')

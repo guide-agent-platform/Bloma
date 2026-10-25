@@ -101,7 +101,12 @@ export function createProductionBudget(projectId: string, scope: string, phase: 
       }
     }
   }
-  return { wrap, executionScope: `${key}-${phase}`, snapshot: () => ({ ...load(), limits, file }), recordRuntime: (milliseconds: number) => {
+  return { wrap, executionScope: `${key}-${phase}`, snapshot: () => ({ ...load(), limits, file }), admission: () => {
+    const state = load()
+    const reason = state.requests >= limits.requests || (state.phases[phase] ?? 0) >= limits.phaseRequests ? 'HARNESS_REQUEST_BUDGET_EXHAUSTED'
+      : limits.output - state.output < 512 ? 'HARNESS_OUTPUT_BUDGET_EXHAUSTED' : undefined
+    return { allowed: !reason, reason }
+  }, recordRuntime: (milliseconds: number) => {
     if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) throw new Error('HARNESS_RUNTIME_INVALID')
     const state = load(); state.runtimeMs = (state.runtimeMs ?? 0) + milliseconds; persist(state)
   }, heartbeatRuntime: () => {

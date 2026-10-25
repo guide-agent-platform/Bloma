@@ -239,7 +239,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           persistSystem,
           complete: (sessionId, _projectId, outcome) => {
             if (outcome === 'incomplete') receiptOutcome = 'failed'
-            persistTerminalMessage(sessionId, 'completed')
+            persistTerminalMessage(sessionId, outcome === 'incomplete' ? 'incomplete' : 'completed',
+              outcome === 'incomplete' ? { message: findProject(_projectId).desktop_blocked?.note } : undefined)
             // P2-01：未收口/取消不再冒充成功终态（subtype 供渲染端与下游区分）
             publishForRun(makeEvent(input, 'completed', { subtype: outcome === 'incomplete' ? 'incomplete' : 'success' }))
           },

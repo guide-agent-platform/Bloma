@@ -1,9 +1,18 @@
 import { findProject } from '../project/project-service'
-import { createProductionBudget, productionDeadlineMs, RUNTIME_HEARTBEAT_MS } from './production-budget'
+import { createProductionBudget, productionDeadlineMs, PRODUCTION_LIMITS, RUNTIME_HEARTBEAT_MS } from './production-budget'
 
 export function leanBudget(projectId: string, phase: string) {
   const project = findProject(projectId)
-  return createProductionBudget(projectId, `lean-v1/${project.lean_operation_id ?? 'initial'}`, phase, undefined, project.workflow_version === 'software-v1' ? 'lease' : 'legacy')
+  const software = project.workflow_version === 'software-v1'
+  // Software has one shared allowance. A second, smaller implementation-phase
+  // limit must not strand an otherwise admitted continuous task.
+  return createProductionBudget(projectId, `lean-v1/${project.lean_operation_id ?? 'initial'}`, phase,
+    software ? { ...PRODUCTION_LIMITS, phaseRequests: PRODUCTION_LIMITS.requests } : undefined, software ? 'lease' : 'legacy')
+}
+
+export function leanBudgetStopMessage(projectId: string, phase: string, reason: string): string {
+  const state = leanBudget(projectId, phase).snapshot()
+  return `${reason}：本任务累计请求 ${state.requests}/${state.limits.requests}，预留及已报告输出 ${state.output}/${state.limits.output} token。已有文件和开发数据已保留；继续不会清零用量。需调整预算或缩小剩余目标后再执行。`
 }
 
 /** Preparation, tools and host verification share active execution time. Human

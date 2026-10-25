@@ -9,7 +9,7 @@ import { readConfirmedUxBinding } from '../project/ux-binding'
 import { prdScopeFingerprint, requirementEvidenceHash } from '../project/requirement-contract'
 import { buildDesktopChildTools, buildDesktopEnvProbeTool } from './dispatcher-loop'
 import { productionAgentTools } from './production-agent'
-import { leanBudget, withLeanRuntime } from './lean-budget'
+import { leanBudget, leanBudgetStopMessage, withLeanRuntime } from './lean-budget'
 import { guardDispatcherCompletion } from './dispatcher-completion'
 import { provisionDesktopSkeletonV2 } from './skeleton-provision'
 import { runCoreVerification, type CoreVerificationResult } from './core-verification'
@@ -85,8 +85,11 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
       signal => runLeanProductionInner({ ...input, signal }, deps))
     await finish?.()
   } catch (error) {
-    if (!input.signal?.aborted) updateProject(input.projectId, { status: 'active', current_stage: 'generating_mvp', desktop_phase: 'desktop-implement' })
-    deps.publish(input, 'message_delta', { text: `本次执行未完成，现场与用量保留：${error instanceof Error ? error.message : String(error)}` })
+    const reason = error instanceof Error ? error.message : String(error)
+    if (!input.signal?.aborted && !/LEASE_ACTIVE|ALREADY_ACTIVE/.test(reason)) updateProject(input.projectId, { status: 'active', current_stage: 'generating_mvp', desktop_phase: 'desktop-implement',
+      desktop_blocked: { reason: 'verification-incomplete', note: reason, at: new Date().toISOString() } })
+    const text = `本次执行未完成，现场与用量保留：${reason}`
+    deps.persistAssistant(input.sessionId, text); deps.publish(input, 'message_delta', { text })
     deps.complete(input.sessionId, input.projectId, 'incomplete')
   }
 }
@@ -119,6 +122,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     updateProject(input.projectId, { status: 'active', current_stage: confirmation ? 'blocked_for_user_decision' : 'generating_mvp', desktop_phase: confirmation ? undefined : 'desktop-implement',
       desktop_blocked: { reason: 'verification-incomplete', note: reason, at: new Date().toISOString() } })
     checkpoint(confirmation ? 'waiting_user' : state, { error: reason })
+    deps.persistAssistant(input.sessionId, reason)
     emit('message_delta', { text: reason }); deps.complete(input.sessionId, input.projectId, 'incomplete')
   }
   if (!brief.user_confirmed_at || !brief.lean_brief) { blocked('目标尚未确认，本次没有开始制作。', true); return }
@@ -126,6 +130,15 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   try { ux = readConfirmedUxBinding(input.projectId, brief) } catch (error) { blocked(String(error), true); return }
   if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2(project.root_path, project.name, { includeScaffold: false })
   const budget = leanBudget(input.projectId, 'desktop-implement')
+  let initialBudgetStop: string | undefined
+  if (software) {
+    const admission = budget.admission()
+    if (!admission.allowed) {
+      const registered = brief.lean_brief.ui === 'required' ? guiSuitePath(input.projectId) : cliSuitePath(input.projectId)
+      if (!existsSync(registered)) { blocked(leanBudgetStopMessage(input.projectId, 'desktop-implement', admission.reason!)); return }
+      initialBudgetStop = admission.reason
+    }
+  }
   checkpoint('running', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined })
   const runSignal = signal
   const query: SDKQuery = budget.wrap(input.query)
@@ -149,7 +162,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     brief.lean_brief.ui === 'required' ? `界面任务登记register_gui_check：steps需id/kind/selector，expect用equals；仅留存任务加restart且重开后仍需expect。${software ? '宿主绑定已确认预期，不用复制expectations；只提交steps和acceptance_refs（expect步骤id→F编号数组）。' : 'expectations保留任务单预期，acceptance_refs把expect步骤关联F编号。'}宿主独立操作应用，登记不等于通过。` : '无界面任务登记register_cli_check：固定args与stdout/exit_code，宿主调用实际LAUNCH入口。一次性命令在LAUNCH写mode:"command"，服务默认保持运行。',
     software ? '宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。' : '产物根写LAUNCH.json：{"schema_version":1,"command":["python","app.py"],"window_title":"实际标题","ui":"webview"}，按实际入口填写。宿主将独立运行核心检查、安全扫描及正常启动；你结束执行不等于交付通过。',
   ].join('\n\n')
-  registerParentLoopContext(input.sessionId, { query, env: input.env, maxTokens: Math.min(input.maxTokens, 16384), maxTurns: 96,
+  // Shared physical-request, output, monetary and active-time budgets own the
+  // stop boundary; another 96-turn limit only interrupts useful work early.
+  const maxTurns = software ? Number.MAX_SAFE_INTEGER : 96
+  registerParentLoopContext(input.sessionId, { query, env: input.env, maxTokens: Math.min(input.maxTokens, 16384), maxTurns,
     delegationMaxTurns: 24, permissionMode: 'allow-all', temperature: .1, system, editFormat: 'diff', runtime: 'pi', runtimeScope: 'lean-build',
     executionScope: budget.executionScope, materials: sessionMaterials(input.projectId, input.sessionId), publish: emit,
     ...(collaboration ? { maxConcurrentDelegations: 2, allowChannelOverrides: false, delegationSummaryLimit: 3000,
@@ -167,9 +183,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       updateProject(input.projectId, { status: 'active', desktop_phase: 'desktop-implement', current_stage: 'generating_mvp', desktop_blocked: undefined })
       emit('stage_changed', { stage: 'desktop-implement' })
       let result: Awaited<ReturnType<typeof runAgentLoop>> | undefined, modelBudgetStop: string | undefined
-      try { result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'lean-build', system, task, query, env: input.env, tools,
+      if (initialBudgetStop) { modelBudgetStop = initialBudgetStop; initialBudgetStop = undefined }
+      else try { result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'lean-build', system, task, query, env: input.env, tools,
         projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, signal: runSignal,
-        maxTokens: Math.min(input.maxTokens, 16384), maxTurns: 96, permissionMode: 'allow-all', workMode: 'implementation', executionScope: budget.executionScope,
+        maxTokens: Math.min(input.maxTokens, 16384), maxTurns, permissionMode: 'allow-all', workMode: 'implementation', executionScope: budget.executionScope,
         materials: sessionMaterials(input.projectId, input.sessionId), images: initial ? input.images : undefined,
         initialMessagePersisted: initial ? input.initialMessagePersisted : false,
         shouldPause: () => scopePending,
@@ -288,7 +305,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       }
     }
   } catch (error) {
-    blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。' : `当前执行受阻：${error instanceof Error ? error.message : String(error)}`, false, runSignal.aborted ? 'interrupted' : 'blocked')
+    const reason = error instanceof Error ? error.message : String(error)
+    blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。'
+      : /^HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED$/.test(reason) ? leanBudgetStopMessage(input.projectId, 'desktop-implement', reason)
+      : `当前执行受阻：${reason}`, false, runSignal.aborted ? 'interrupted' : 'blocked')
   } finally {
     runSignal.removeEventListener('abort', cancelChildren)
     disposeParentDelegationState(input.sessionId)

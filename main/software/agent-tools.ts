@@ -52,7 +52,8 @@ function environmentTool(projectId: string): AgentLoopTool {
           preparation: '需要缺失/不同版本时使用prepare_software_environment；它准备本项目运行时，不改系统环境。已有版本可用时不必下载。', tools: Object.fromEntries(probes.map((result, i) => [['node', 'npm', 'python'][i], result.status === 'fulfilled'
           ? { available: result.value.code === 0, output: result.value.stdout.trim(), error: result.value.stderr.trim() }
           : { available: false, error: String(result.reason) }])),
-          gui_observers: ['Electron正常入口+DOM操作+重开', 'Python/pywebview正常入口+DOM操作+重开', '本机浏览器服务+DOM操作+重开'],
+          gui_observers: ['Electron正常入口+持续DOM操作+重开', '本机浏览器服务+持续DOM操作+重开', 'Python/pywebview仅正式register_gui_check/verify_app检查，inspect_app不支持'],
+          development_state: 'inspect_app暂停后保留本任务开发数据和浏览器存储，下一次操作自动重开；正式验收另用全新隔离数据。',
           cli_observer: '正常入口的固定参数/实际stdout/退出码；Node/Python等不要求Python包装器',
           execution_boundary: '受管理的项目执行环境，不是OS沙箱；上游渠道密钥不传入命令环境' }
         version = current
@@ -69,6 +70,6 @@ export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
   '真实主路径就绪并登记GUI/CLI规则后直接verify_app，按具体失败修复。列表记录用selector加has_text按内容定位，不依赖排序位置。verify_app通过后简短交接即可，不要再为同一版本反复重启、自测或补写无关文件。',
   '最多2个并行子任务；同渠道同模型、单层、共用总请求/输出/费用/取消，不为子任务新增额度。工程命令与派发不另外叠加固定次数门槛，以共享运行预算和实际进度约束。子任务结束只是交接，不是产品通过；保留有效文件和结果，别让新执行者从头重做。',
   '数据使用APP_DATA_DIR，Electron也支持user-data-dir隔离；业务持久化与测试数据分开。增量修改保留已有关键行为；数据schema变化先读read_production_context(topic="data-update")登记真实迁移与读回入口。普通项目依赖/构建自行完成；系统修改、外发发布、额外付费及破坏性真实数据操作超出普通构建授权，遇到工具拒绝不要绕过。',
-  '成品应有一键启动、清晰的空态/错误/进行中反馈与可恢复的数据保存。本机浏览器入口由Bloma打开LAUNCH.url，服务端无需再spawn系统浏览器。需要API配置就在成品设置界面完成，不让用户改源码或在聊天贴密钥；不借用平台Agent渠道密钥。查看实际界面截图并修复具体外观问题，不能只看代码推断界面。',
+  '成品应有一键启动、清晰的空态/错误/进行中反馈与可恢复的数据保存。本机浏览器入口由Bloma打开LAUNCH.url，服务端无需再spawn系统浏览器。API在成品设置界面配置，不让用户改源码或在聊天贴密钥，不借用平台渠道密钥。未配置时明确提示；本地摘句和mock分别只能证明检索或协议，不能充当AI讲解与推导通过。查看实际界面截图并修复具体外观问题，不能只看代码推断界面。',
   '在项目根登记LAUNCH.json schema_version:2。Electron示例command:["node_modules/electron/dist/electron.exe","."],ui:"electron",window_title:"实际窗口标题"；浏览器示例command:["npm","run","start"],ui:"browser",url:"http://127.0.0.1:实际端口"；命令工具command:["node","app.cjs"],mode:"command"。按实际入口填写，打包后应改为实际包入口验证；未打包不声称独立安装包。',
 ].join('\n\n')

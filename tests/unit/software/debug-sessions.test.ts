@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { createProject } from '../../../main/project/project-service'
+import { createProject, updateProject } from '../../../main/project/project-service'
+import { debugWorkspace } from '../../../main/software/debug-workspace'
 import { buildSoftwareInspectTool } from '../../../main/software/inspect-tool'
 import { createSoftwareCollaborationPolicy } from '../../../main/software/collaboration-policy'
 import { closeDebugSessions, readDebugSession } from '../../../main/software/debug-sessions'
@@ -19,7 +20,7 @@ afterEach(async () => { await closeDebugSessions(project.project_id, 's'); await
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 }) }, 30000)
 const ctx = (signal = new AbortController().signal): ToolContext => ({ projectId: project.project_id, sessionId: 's', requestId: 'r', signal, state: createToolState() })
 async function freePort() { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const a = server.address(); if (!a || typeof a === 'string') throw Error('port'); await new Promise<void>(done => server.close(() => done())); return a.port }
-const html = `<!doctype html><title>Debug fixture</title><h1>Debug fixture</h1><button id="inc">Increment</button><button id="crash">Error</button><button id="slow" onclick="fetch('/slow?token=PRIVATE_QUERY').catch(()=>{})">Slow request</button><div id="count"></div><div id="version"></div><script>
+const html = `<!doctype html><title>Debug fixture</title><h1>Debug fixture</h1><input id="draft"><script>draft.value=localStorage.getItem('draft')||'';draft.oninput=()=>localStorage.setItem('draft',draft.value)</script><button id="inc">Increment</button><button id="crash">Error</button><button id="slow" onclick="fetch('/slow?token=PRIVATE_QUERY').catch(()=>{})">Slow request</button><div id="count"></div><div id="version"></div><script>
 const client=window.api||{count:()=>fetch('/count').then(r=>r.text()),inc:()=>fetch('/count',{method:'POST'}),version:()=>fetch('/version').then(r=>r.text())};async function refresh(){document.querySelector('#count').textContent=await client.count();document.querySelector('#version').textContent=await client.version()}document.querySelector('#inc').onclick=async()=>{await client.inc();await refresh()};document.querySelector('#crash').onclick=()=>{console.error('Authorization: Bearer PRIVATE_BEARER');console.log('api_key=PRIVATE_KEY token=PRIVATE_TOKEN');fetch('/fail?token=QUERY_SECRET').catch(()=>{});setTimeout(()=>{throw Error('real-renderer-bug')},0)};refresh()</script><input id="file" type="file"><pre id="file-text"></pre><script>document.querySelector('#file').onchange=async e=>document.querySelector('#file-text').textContent=await e.target.files[0].text()</script>`
 const serverSource = (version: string) => `const fs=require('fs'),path=require('path'),file=path.join(process.env.APP_DATA_DIR,'count');require('http').createServer((q,s)=>{if(q.url==='/count'){if(q.method==='POST')fs.writeFileSync(file,String(Number(fs.existsSync(file)?fs.readFileSync(file):0)+1));s.end(fs.existsSync(file)?fs.readFileSync(file):'0')}else if(q.url==='/version')s.end('${version}');else if(q.url.startsWith('/fail')){setTimeout(()=>{s.writeHead(500);s.end('deliberate error')},125)}else if(q.url.startsWith('/slow'))setTimeout(()=>s.end('slow actual response'),1100);else{s.setHeader('Content-Type','text/html');s.end(fs.readFileSync('index.html'))}}).listen(Number(process.argv[2]),'127.0.0.1')`
 const mainSource = (version: string) => `const{app,BrowserWindow,ipcMain}=require('electron'),fs=require('fs'),path=require('path'),file=path.join(process.env.APP_DATA_DIR,'count');ipcMain.handle('count',()=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):'0');ipcMain.handle('inc',()=>fs.writeFileSync(file,String(Number(fs.existsSync(file)?fs.readFileSync(file):0)+1)));ipcMain.handle('version',()=>'${version}');app.whenReady().then(()=>new BrowserWindow({webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false}}).loadFile('index.html'));app.on('window-all-closed',()=>app.quit())`
@@ -68,9 +69,19 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   expect((await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('stale', '#version', 'v1')] }, context)).isError).toBe(true)
   const reloaded = await tool.execute({ mode: 'reload', debug_session_id: id, steps: [check('new-backend', '#version', 'v2'), check('data', '#count', '1')] }, context)
   expect(reloaded.isError, reloaded.output).not.toBe(true); expect(JSON.parse(reloaded.output)).toMatchObject({ version: 4, stale: false })
+  if (ui === 'browser') expect((await tool.execute({ steps: [{ id: 'draft', kind: 'fill', selector: '#draft', value: 'retained browser storage' }] }, context)).isError).not.toBe(true)
   abort.abort(); await closeDebugSessions(project.project_id, 's')
   expect(readDebugSession(project.project_id, 's', id).state).toBe('closed')
   if (ui === 'browser') await expect(fetch(url, { signal: AbortSignal.timeout(1000) })).rejects.toThrow()
+  // Even an explicit stale id from the durable transcript reopens safely. The
+  // process is new; business data, input bytes and browser state are retained.
+  const resumed = await tool.execute({ mode: 'act', debug_session_id: id, steps: [check('resume-count', '#count', '1'), check('resume-version', '#version', 'v2'),
+    ...(ui === 'browser' ? [{ id: 'draft-retained', kind: 'expect', property: 'value', selector: '#draft', equals: 'retained browser storage' }] : []),
+    { id: 'input-again', kind: 'upload', selector: '#file', path: 'input/sample.txt' }, check('frozen-again', '#file-text', 'frozen persistent fixture')] }, ctx())
+  expect(resumed.isError, resumed.output).not.toBe(true)
+  expect(JSON.parse(resumed.output)).toMatchObject({ resumed_from: id, version: 5, stale: false })
+  expect(JSON.parse(resumed.output).debug_session_id).not.toBe(id)
+  expect(JSON.parse(resumed.output).data_dir).toBe(JSON.parse(reloaded.output).data_dir)
 }, 150000)
 it('attaches only an owned ready browser service and never kills the borrowed service on debug close', async () => {
   const p = await freePort(), url = `http://127.0.0.1:${p}`, root = project.root_path, context = ctx()
@@ -101,3 +112,16 @@ it('attaches only an owned ready browser service and never kills the borrowed se
   writeFileSync(join(root, 'server.cjs'), serverSource('v2'))
   expect((await tool.execute({ mode: 'open' }, context)).output).toContain('DEBUG_PROCESS_SOURCE_CHANGED')
 }, 90000)
+it('isolates retained development data by operation and session, and rejects a redirected data directory without touching its target', () => {
+  const first = debugWorkspace(project.project_id, 's')
+  mkdirSync(join(first, 'data')); writeFileSync(join(first, 'data/count'), 'kept old operation')
+  expect(debugWorkspace(project.project_id, 'another-session')).not.toBe(first)
+  updateProject(project.project_id, { lean_operation_id: 'new-operation' })
+  const next = debugWorkspace(project.project_id, 's')
+  expect(next).not.toBe(first); expect(existsSync(join(next, 'data/count'))).toBe(false)
+  const target = join(home, 'unrelated-owned-fixture'); mkdirSync(target); writeFileSync(join(target, 'marker'), 'must stay')
+  symlinkSync(target, join(next, 'data'), process.platform === 'win32' ? 'junction' : 'dir')
+  expect(() => debugWorkspace(project.project_id, 's')).toThrow('DEBUG_WORKSPACE_LINK_UNSUPPORTED')
+  expect(readFileSync(join(target, 'marker'), 'utf8')).toBe('must stay')
+  expect(readFileSync(join(first, 'data/count'), 'utf8')).toBe('kept old operation')
+})

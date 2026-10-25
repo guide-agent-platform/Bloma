@@ -48,6 +48,14 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
   }
   if (!('selector' in step)) throw new Error(`GUI_ACTION_UNSUPPORTED_FOR_THIS_RUNTIME:${step.kind}`)
   const locator = step.has_text === undefined ? page.locator(step.selector) : page.locator(step.selector).filter({ hasText: step.has_text })
+  if (step.kind !== 'expect' || step.property !== 'count') {
+    const matches = await locator.count()
+    if (matches > 1) throw Object.assign(Error(`GUI_LOCATOR_AMBIGUOUS:${step.id}: 匹配${matches}个控件，请用has_text或更具体的selector定位；数量检查使用property=count`), {
+      actual: { matched: matches, candidates: await locator.evaluateAll(elements => elements.slice(0, 4).map(element => ({
+        id: element.id || undefined, text: (element.textContent ?? '').trim().slice(0, 180),
+      }))) }, selector: step.selector, has_text: step.has_text,
+    })
+  }
   if (step.kind === 'fill') { await locator.fill(step.value); return await locator.inputValue() }
   if (step.kind === 'click') { await locator.click(); return 'clicked' }
   if (step.kind === 'press') { await locator.press(step.key); return 'key pressed' }
@@ -84,7 +92,8 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
   do {
     try {
       actual = step.property === 'count' ? String(await locator.count()) : step.property === 'value' ? await locator.inputValue({ timeout: 300 }) : await locator.innerText({ timeout: 300 })
-      if (step.equals !== undefined ? String(actual) === step.equals : step.contains !== undefined ? String(actual).includes(step.contains) : String(actual).trim().length > 0) return actual
+      if (step.equals !== undefined ? String(actual) === step.equals : step.contains !== undefined ? String(actual).includes(step.contains)
+        : step.property === 'count' ? Number(actual) > 0 : String(actual).trim().length > 0) return actual
     } catch { /* a genuine async UI may not have its output yet */ }
     await new Promise(resolve => setTimeout(resolve, 75))
   } while (Date.now() < deadline)
