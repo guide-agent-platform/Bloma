@@ -1,0 +1,55 @@
+{
+  "status": "host_checks_passed",
+  "project_id": "18d7ecac-7e2e-4292-bbc6-9f07116b4b29",
+  "session_id": "476148d9-d90d-4d5f-8a01-874f3a336fda",
+  "started_at": "2026-10-25T12:20:32.951Z",
+  "finished_at": "2026-10-25T12:23:41.456Z",
+  "release_id": "da914df57a92461f9ea87a9fe374da1ea45366a326a2fc7fab7272d5758805f8",
+  "core_status": "passed",
+  "host_gui_steps": 19,
+  "physical_requests": 13,
+  "tool_calls": 14,
+  "tool_errors": 0,
+  "money": [
+    {
+      "model": "deepseek-flash",
+      "host": "api.deepseek.com",
+      "cap_rmb": 3,
+      "accounted_upper_rmb": 0.180077,
+      "remaining_rmb": 2.819923,
+      "reported_peak_rmb": 0.180077
+    }
+  ],
+  "old_accounting_unchanged": true,
+  "independent_qa": {
+    "status": "passed",
+    "at": "2026-10-25T12:26:11.52Z",
+    "project_id": "18d7ecac-7e2e-4292-bbc6-9f07116b4b29",
+    "checks": [
+      "create_two_and_autosave",
+      "edit_a_does_not_change_b",
+      "title_and_body_search_no_match_and_clear",
+      "real_browser_and_backend_restart_keeps_ids_and_content",
+      "client_external_blocked_zero_external_requests",
+      "source_and_registered_rules_unchanged",
+      "all_monetary_ledgers_unchanged"
+    ],
+    "remote_requests": [],
+    "page_errors": [],
+    "launches": [
+      {
+        "pid": 152200,
+        "url": "http://127.0.0.1:4173/"
+      },
+      {
+        "pid": 153484,
+        "url": "http://127.0.0.1:4173/"
+      }
+    ],
+    "provider_requests_added": 0,
+    "finished_at": "2026-10-25T12:26:25.051Z",
+    "boundary": "Independent test of the delivered real product through normal launch and DOM; no Computer Use, source/rule edits or model calls. Client external routing blocked, not an OS sandbox or clean-machine proof."
+  },
+  "raw_report_sha256": "A6C38F633BC65B4A0315CCAFFE165526CB116DAC96F488631529BE3B401C1223",
+  "raw_events_sha256": "3F6011DDBE3C79E9AFB72F6FFC80E4D7E4667266E1178EDAF7E1A8C0784E30D1"
+}
