@@ -53,7 +53,7 @@ PRD中明确not_applicable的场景无需设计界面状态或引用其AC编号�
 const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，不要解释或代码围栏。'
 const LEAN_HTML_PROTOCOL = `${HTML_OUTPUT_PROTOCOL}。不输出design或验收映射JSON。若用户要求改变必需能力或业务含义，改为输出 {"action":"revise_requirements","reason":"需改变什么"}，不要把范围变更伪装成外观调整。`
 const LEAN_SKETCH_PROMPT = '为用户设计真实产品的静态界面，展示正常使用的内容与主操作，布局与视觉服务产品目标。只用完整单文件HTML、内联CSS和离线资源，禁止脚本、事件属性和可执行URL。默认状态须自洽：搜索词、匹配数量与列表对应，保存提示与编辑状态一致。按需要用锚点、details或CSS展示少量可点击页面和空态，不假装已经保存真实数据。界面适应窗口，不用固定最小宽度挤坏编辑区。不要把需求清单、验收编号或平台说明画进产品；不声称业务已运行。'
-const LEAN_SKETCH_SIZE_GUIDANCE = '先精绘一个主要工作区，其余功能交代清晰的导航和操作入口，不展开每个页面的全部表单、历史行和错误示例。复用简洁CSS，控制文档体量，必须在本轮输出预算内完整闭合HTML；默认画面不展示尚未触发的校验错误或确认提示。'
+const LEAN_SKETCH_SIZE_GUIDANCE = '先精绘一个主要工作区，其余功能交代清晰的导航和操作入口，不展开每个页面的全部表单、历史行和错误示例。多个工作区可用CSS切换或折叠，默认只展开当前工作区，不用锚点滚动把所有模块堆成长页面。复用简洁CSS，控制文档体量，必须在本轮输出预算内完整闭合HTML；默认画面不展示尚未触发的校验错误或确认提示。'
 
 export interface UxSketchGeneration {
   run_id: string
@@ -95,6 +95,7 @@ function buildSketchPrompt(options: {
   previousDesign?: UxDesign
 }): string {
   if (options.backplane?.lean_brief) return [renderLeanBrief(options.backplane),
+    `示例时间基准：${new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date())}。样本日期、逾期标记和统计须符合此时间及已确认规则。`,
     options.previousHtml ? `当前界面（静态修订底稿）：\n${options.previousHtml}` : '',
     options.feedback ? `用户修改意见：${options.feedback}` : '', '按目标输出一份可视界面。'].filter(Boolean).join('\n\n')
   const lines = options.requirements.map((item) => {

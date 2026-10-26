@@ -74,6 +74,8 @@ describe('generateUxSketch', () => {
     mockCall.mockImplementation(async options => {
       expect(options.retryWithFreshContext).toBe(true)
       expect(options.systemPrompt).toContain('精绘一个主要工作区')
+      expect(options.systemPrompt).toContain('默认只展开当前工作区')
+      expect(options.prompt).toContain('示例时间基准：')
       expect(options.parse('<!DOCTYPE html><html><body>unfinished')).toBeUndefined()
       const feedback = typeof options.retryFeedback === 'function' ? options.retryFeedback() : options.retryFeedback
       expect(feedback).toContain('HTML在文档闭合前结束')
