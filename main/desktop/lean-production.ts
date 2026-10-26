@@ -35,10 +35,10 @@ import { stopSoftwareSession } from '../software/process-manager'
 import { closeDebugSessions, retainedDebugVersion } from '../software/debug-sessions'
 import { prepareSoftwareRelease, promoteSoftwareRelease, verifyReleaseSource } from '../software/release-store'
 import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
-import { verifySoftwareCandidate } from '../software/verification'
+import { verifySoftwareCandidate, recentSoftwareVerification } from '../software/verification'
 import { importedProjectContext } from '../software/import-project'
 import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type SoftwareRunStatus } from '../software/run-state'
-import { monetaryStopMessage } from '../platform/llm/monetary-budget'
+import { monetaryStopMessage, monetaryInputBlocked } from '../platform/llm/monetary-budget'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -108,6 +108,8 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   }
   const brief = readPrdBackplane(input.projectId), scope = prdScopeFingerprint(brief)
   const software = isSoftwareProject(input.projectId)
+  const continuation=/^(?:继续|恢复|验收|重新验收|运行验收|按已确认目标制作|开始桌面交付流程)[。！!\s]*$/.test(input.content.trim())
+  const originalSource=software?softwareVerificationFingerprint(project.root_path):undefined
   const runId = randomUUID()
   const checkpoint = (status: SoftwareRunStatus, patch: { error?: string; candidateId?: string; source?: string; check?: { path: string; sha256: string } } = {}) => {
     if (software) saveSoftwareRunState({ projectId: input.projectId, sessionId: input.sessionId, runId, status, ...patch })
@@ -146,7 +148,15 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     if (!admission.allowed) {
       const registered = brief.lean_brief.ui === 'required' ? guiSuitePath(input.projectId) : cliSuitePath(input.projectId)
       if (!existsSync(registered)) { blocked(leanBudgetStopMessage(input.projectId, 'desktop-implement', admission.reason!)); return }
+      if(!continuation&&!(await recentSoftwareVerification(input.projectId,input.requestId,signal))){blocked('本轮新请求尚未由模型处理，现有测试只覆盖此前确认的目标，不能据此宣称新请求已完成。进度和预算已保留。');return}
       initialBudgetStop = admission.reason
+    }
+    if(!initialBudgetStop&&monetaryInputBlocked(input.env.ANTHROPIC_BASE_URL,input.env.ANTHROPIC_MODEL)){
+      const registered=brief.lean_brief.ui==='required'?guiSuitePath(input.projectId):cliSuitePath(input.projectId)
+      if(!existsSync(registered)){blocked('当前金额保护连保守输入预留都无法放行，尚未发出模型请求。现有验收规则缺失，程序和账本已保留；不能跳过检查交付。');return}
+      if(!continuation&&!(await recentSoftwareVerification(input.projectId,input.requestId,signal))){blocked('当前金额保护未放行模型，本轮新请求尚未处理；不能用旧版测试替代新增或修改目标的验收。已有程序和账本已保留。');return}
+      initialBudgetStop='MONETARY_BUDGET_EXHAUSTED'
+      emit('message_delta',{text:'当前金额保护无法放行新的模型请求；已有冻结测试，我先停止模型调用，执行免费的宿主验收。只有实际通过才交付。'})
     }
   }
   checkpoint('running', { source: software ? softwareVerificationFingerprint(project.root_path) : undefined })
@@ -215,6 +225,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         const admissionStopped = /^(?:HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED|REQUEST_BUDGET_EXHAUSTED|MONETARY_(?:BUDGET|OPERATION)_EXHAUSTED)$/.test(admissionCode)
         const registered = brief.lean_brief.ui === 'required' ? guiSuitePath(input.projectId) : cliSuitePath(input.projectId)
         if (!software || runSignal.aborted || !admissionStopped || !existsSync(registered)) throw detailedError
+        if(!continuation&&originalSource===softwareVerificationFingerprint(project.root_path)&&!(await recentSoftwareVerification(input.projectId,input.requestId,runSignal)))throw detailedError
         modelBudgetStop = reason
         emit('message_delta', { text: `${monetaryStopMessage(detailedError) ?? '模型请求额度已到，当前进度已保留。'}已有验收规则，我会停止模型调用，继续运行宿主检查；只有实际通过才交付。` })
       }

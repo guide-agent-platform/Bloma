@@ -105,6 +105,30 @@ export function fitMonetaryRequest(url: string, body: string, policyPath = proce
   return JSON.stringify({ ...request, max_tokens: limit })
 }
 
+/** When even the policy's full input reserve cannot fit, no output choice can
+ * make the next request admissible. Let the host finish existing checks without
+ * first calling the model. In-flight contention is not permanent exhaustion. */
+export function monetaryInputBlocked(baseUrl:string|undefined,model:string|undefined,policyPath=process.env.BLOMA_MONETARY_POLICY):boolean{
+  if(!policyPath||!baseUrl||!model)return false
+  const bytes=readFileSync(policyPath),policy=JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,'')) as Policy
+  if(policy.version!==1||!Array.isArray(policy.models))fail('MONETARY_POLICY_INVALID')
+  const host=new URL(baseUrl).host,matches=policy.models.filter(rate=>rate.host===host&&rate.model===model)
+  if(matches.length!==1)fail('MONETARY_MODEL_NOT_ALLOWED')
+  const rate=matches[0]
+  if(!integer(rate.context_tokens)||!rate.context_tokens||!Number.isFinite(rate.cap_rmb)||rate.cap_rmb<=0
+    ||[rate.input_rmb_per_million,rate.output_rmb_per_million,rate.cache_rmb_per_million].some(v=>!Number.isFinite(v)||v<0)
+    ||rate.cache_rmb_per_million>rate.input_rmb_per_million)fail('MONETARY_POLICY_INVALID')
+  let spent=0
+  if(existsSync(policyPath+'.state.json')){
+    const state=JSON.parse(readFileSync(policyPath+'.state.json','utf8')) as State
+    if(state.version!==1||state.policy_hash!==createHash('sha256').update(bytes).digest('hex')||!Array.isArray(state.entries)
+      ||state.entries.some(row=>!integer(row.charged_micro_rmb)||!integer(row.reserved_micro_rmb)||!policy.models.some(rate=>rate.host===row.host&&rate.model===row.model)))fail('MONETARY_STATE_INVALID')
+    if(state.entries.some(row=>row.host===host&&row.model===model&&row.status==='reserved'))return false
+    spent=accountedSpent(state,host,model)
+  }
+  return spent+micro(rate.context_tokens,rate.input_rmb_per_million)>Math.floor(rate.cap_rmb*1e6)
+}
+
 /** Optional shared, cross-home spending ceiling. No prompts, keys, or request bodies are persisted.
  * Reserve a full context at peak rates before EACH physical request. Missing usage and crashes
  * retain the reservation; they never become free calls. State/policy corruption fails closed.

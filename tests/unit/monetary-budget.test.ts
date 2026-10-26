@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget, MonetaryBudgetError, monetaryStopMessage, fitMonetaryRequest } from '../../main/platform/llm/monetary-budget'
+import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget, MonetaryBudgetError, monetaryStopMessage, fitMonetaryRequest, monetaryInputBlocked } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
 import { activateMonetaryPolicy, activeMonetaryPolicyPath } from '../../main/platform/llm/monetary-epoch'
@@ -23,6 +23,14 @@ const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'u
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  it('detects an impossible input reserve without touching the ledger, while pending contention is not a permanent stop',()=>{
+    const path=fixture(1);expect(monetaryInputBlocked(url,'M1',path)).toBe(true)
+    const possible=fixture(3),pending=reserveModelRequest(url,body,possible)!
+    const before=readFileSync(possible+'.state.json','utf8');expect(monetaryInputBlocked(url,'M1',possible)).toBe(false)
+    expect(readFileSync(possible+'.state.json','utf8')).toBe(before)
+    pending.settle(undefined,false);expect(monetaryInputBlocked(url,'M1',possible)).toBe(true)
+    expect(monetaryInputBlocked(url,'M1','')).toBe(false)
+  })
   function nearBoundary() {
     const path = fixture(), policy = JSON.parse(readFileSync(path, 'utf8'))
     policy.models[0].context_tokens = 1048576; writeFileSync(path, JSON.stringify(policy))
