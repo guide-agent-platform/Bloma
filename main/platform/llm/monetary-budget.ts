@@ -75,7 +75,7 @@ export function readMonetaryBudget(policyPath: string) {
 /** Read-only output fitting. Input liability, historical charges and the policy
  * stay intact. The atomic reservation still decides admission after this quote;
  * concurrent senders cannot spend a stale quote as if it were a reservation.
- * At most halve an output ceiling, and never violate explicit thinking budgets. */
+ * Retain a useful minimum response and never violate explicit thinking budgets. */
 export function fitMonetaryRequest(url: string, body: string, policyPath = process.env.BLOMA_MONETARY_POLICY): string {
   if (!policyPath || !existsSync(`${policyPath}.state.json`)) return body
   const bytes = readFileSync(policyPath)
@@ -100,7 +100,7 @@ export function fitMonetaryRequest(url: string, body: string, policyPath = proce
   // Floating point rounding must never turn a quote into a one-micro overspend.
   while (limit > 0 && micro(limit, rate.output_rmb_per_million) > available) limit--
   const thinking = request.thinking?.type === 'enabled' && integer(request.thinking.budget_tokens) ? request.thinking.budget_tokens + 1 : 0
-  const minimum = Math.min(requested, Math.max(512, Math.ceil(requested / 2), thinking))
+  const minimum = Math.min(requested, Math.max(512, thinking))
   if (limit < minimum || limit >= requested) return body
   return JSON.stringify({ ...request, max_tokens: limit })
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PrdBackplane } from '../../../main/model/prd-backplane'
 import { productionContext, inlineProductionContext } from '../../../main/desktop/production-context'
+import { parseLaunchDeclaration } from '../../../main/desktop/launch-smoke'
 import { bindAcceptance, requirementEvidenceHash } from '../../../main/project/requirement-contract'
 import { productionGuide } from '../../../main/desktop/production-guide'
 import { parseQuickProductionReview } from '../../../main/desktop/quick-production-review'
@@ -16,6 +17,14 @@ const fixture = () => bindAcceptance({ project_id: 'p', name: 'test', positionin
 } as unknown as PrdBackplane)
 
 describe('role-directed authoritative production context', () => {
+  it('publishes executable launch wire examples, not ambiguous requirement ui booleans', () => {
+    const protocol = (productionContext(fixture(), 'launch') as { protocol: string }).protocol
+    const examples = [...protocol.matchAll(/\{"schema_version":2[^}]+\}/g)].map(m => JSON.parse(m[0]))
+    expect(examples).toHaveLength(2)
+    for (const example of examples) expect(parseLaunchDeclaration(JSON.stringify(example)).ok).toBe(true)
+    expect(protocol).toContain('不能用true/false')
+    expect(protocol).toContain('APP_DATA_DIR')
+  })
   it('selects full feature obligations without losing shared rules, provenance or global constraints', () => {
     const prd = fixture(), original = structuredClone(prd)
     const view = productionContext(prd, 'features', ['F-002']) as Record<string, any>

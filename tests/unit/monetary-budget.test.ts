@@ -57,14 +57,23 @@ describe('shared monetary ceiling', () => {
     expect(() => reserveModelRequest(url, fitted, path)).toThrow('MONETARY_BUDGET_EXHAUSTED')
     expect(readFileSync(path + '.state.json', 'utf8')).toBe(unknown)
   })
-  it('does not reduce below half the requested output, explicit thinking budget, or the minimum useful response', () => {
+  it('can reduce below half while retaining explicit thinking budgets and a useful minimum response', () => {
     const path = nearBoundary()
     const thinking = JSON.stringify({ model: 'M1', max_tokens: 8192, thinking: { type: 'enabled', budget_tokens: 8000 } })
     expect(fitMonetaryRequest(url, thinking, path)).toBe(thinking)
     const original = JSON.stringify({ model: 'M1', max_tokens: 16384 })
-    expect(fitMonetaryRequest(url, original, path)).toBe(original)
-    expect(() => reserveModelRequest(url, original, path)).toThrow('MONETARY_BUDGET_EXHAUSTED')
+    const fitted=fitMonetaryRequest(url, original, path)
+    expect(JSON.parse(fitted).max_tokens).toBe(7681)
+    reserveModelRequest(url, fitted, path)!.settle({input_tokens:100,output_tokens:20},true)
     expect(fitMonetaryRequest(url, body, '')).toBe(body)
+  })
+  it('refuses fitting below the useful output floor without expanding the ceiling',()=>{
+    const original=JSON.stringify({model:'M1',max_tokens:16384})
+    const small=fixture(2.101239), policy=JSON.parse(readFileSync(small,'utf8'))
+    policy.models[0].context_tokens=1048576;writeFileSync(small,JSON.stringify(policy))
+    reserveModelRequest(url,JSON.stringify({model:'M1',max_tokens:1}),small)!.settle({input_tokens:0,output_tokens:0},true)
+    expect(fitMonetaryRequest(url,original,small)).toBe(original)
+    expect(()=>reserveModelRequest(url,original,small)).toThrow('MONETARY_BUDGET_EXHAUSTED')
   })
   it('sends and guards the fitted physical SSE body and settles only the usage actually reported', async () => {
     const path = nearBoundary(), seen: string[] = []

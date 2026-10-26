@@ -12,7 +12,7 @@ import { guiSuitePath, parseGuiSuite } from '../desktop/gui-acceptance'
 import { frozenGuiFixtureVersion } from '../desktop/gui-fixtures'
 import { cliSuitePath } from '../desktop/lean-cli-check'
 import { runCoreVerification, type CoreVerificationResult } from '../desktop/core-verification'
-import { runLaunchSmoke, readLaunchDeclaration, type LaunchSmokeResult } from '../desktop/launch-smoke'
+import { runLaunchSmoke, requireLaunchDeclaration, type LaunchSmokeResult } from '../desktop/launch-smoke'
 import { runSecurityScan, type SecurityScanResult } from '../verification/security-scan'
 import { requirementCapabilities } from '../model/requirement-capabilities'
 import { mainRootDir } from '../platform/paths'
@@ -31,12 +31,13 @@ function receiptPath(projectId: string) {
   return join(getPromaHome(), 'software-verification', `${projectId}.json`)
 }
 async function inputs(projectId: string, requestId: string, signal?: AbortSignal) {
-  const project = findProject(projectId), brief = readPrdBackplane(projectId), declared = readLaunchDeclaration(project.root_path)
-  if (project.workflow_version !== 'software-v1' || !brief.user_confirmed_at || !declared?.ok) throw Error('SOFTWARE_VERIFY_CONFIRMED_ENTRY_REQUIRED')
+  const project = findProject(projectId), brief = readPrdBackplane(projectId)
+  if (project.workflow_version !== 'software-v1' || !brief.user_confirmed_at) throw Error('SOFTWARE_VERIFY_CONFIRMED_ENTRY_REQUIRED: 必须先确认当前项目需求')
+  const launch = requireLaunchDeclaration(project.root_path, 'SOFTWARE_VERIFY_CONFIRMED_ENTRY_REQUIRED')
   const ruleVersion = [guiSuitePath(projectId), cliSuitePath(projectId)].map(file => existsSync(file) ? digest(readFileSync(file)) : null)
   const gui=existsSync(guiSuitePath(projectId))?parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId),'utf8'))):undefined
   const fixtureVersion = gui ? [...frozenGuiFixtureVersion(projectId,gui),frozenNativeGuiVersion(projectId,gui.native_tests,project.root_path)] : []
-  const environment = softwareEnvironment(projectId), resolved = resolveSoftwareCommand(project.root_path, declared.launch.command, environment)
+  const environment = softwareEnvironment(projectId), resolved = resolveSoftwareCommand(project.root_path, launch.command, environment)
   const executable = resolved.command[0], runtime: unknown[] = []
   let reusable = isAbsolute(executable) && existsSync(executable) && !/python(?:3)?(?:\.exe)?$/i.test(basename(executable))
   if (isAbsolute(executable) && existsSync(executable)) runtime.push(await fileDigest(executable, signal))

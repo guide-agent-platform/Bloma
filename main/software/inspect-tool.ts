@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { findProject } from '../project/project-service'
-import { readLaunchDeclaration } from '../desktop/launch-smoke'
+import { requireLaunchDeclaration } from '../desktop/launch-smoke'
 import { parseGuiSuite, type GuiAcceptanceSuite } from '../desktop/gui-acceptance'
 import { observeSoftwareGui } from './gui-observer'
 import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
@@ -75,9 +75,8 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
           const steps = input.steps ? sealed?.steps : undefined
           let snapshot
           if (mode === 'open') {
-            const root = findProject(projectId).root_path, declared = readLaunchDeclaration(root)
-            if (!declared?.ok) throw Error('DEBUG_LAUNCH_REQUIRED')
-            snapshot = await openDebugSession({ projectId, sessionId: ctx.sessionId, root, launch: declared.launch, signal: ctx.signal, processId: input.process_id as string | undefined })
+            const root = findProject(projectId).root_path, launch = requireLaunchDeclaration(root, 'DEBUG_LAUNCH_REQUIRED')
+            snapshot = await openDebugSession({ projectId, sessionId: ctx.sessionId, root, launch, signal: ctx.signal, processId: input.process_id as string | undefined })
             openingDebugId = snapshot.id
             if (additions) installDebugFixtures(projectId, ctx.sessionId, snapshot.id, additions)
             snapshot = await actDebugSession({ ...args, id: snapshot.id, script: input.script as string | undefined, timeoutMs: input.timeout_ms as number | undefined,
@@ -107,8 +106,8 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
             isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed)
               || snapshot.observations.some(row => row.version === snapshot.version && /^renderer\.(?:error|startup_error)$/.test(row.kind)) }
         }
-        const root = findProject(projectId).root_path, launch = readLaunchDeclaration(root)
-        if (!launch?.ok || !['electron', 'browser'].includes(launch.launch.ui ?? '')) throw Error('INSPECT_RUNTIME_UNSUPPORTED: 请登记实际Electron/浏览器入口；其它入口由对应宿主观察器检查')
+        const root = findProject(projectId).root_path, launch = requireLaunchDeclaration(root, 'DEBUG_LAUNCH_REQUIRED')
+        if (!['electron', 'browser'].includes(launch.ui ?? '')) throw Error('INSPECT_RUNTIME_UNSUPPORTED: 请登记实际Electron/浏览器入口；其它入口由对应宿主观察器检查')
         const fingerprint = verificationFingerprint(root)
         if (!fingerprint) throw Error('INSPECT_SOURCE_UNREADABLE')
         const suite = sealGuiFixtures(projectId, root, parseGuiSuite({ version: 1, scope_hash: fingerprint, covers: ['F-001'], fixtures: input.fixtures, steps: input.steps ?? [{ id: 'screen', kind: 'expect', selector: 'body', nonempty: true }] }, { allowActionsOnly: true }))
@@ -116,7 +115,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
         materializeGuiFixtures(projectId, suite, join(temporary, 'data'))
         const screenshotDir = join(root, '00_VERIFY/screenshots', `inspect-${randomUUID()}`)
         mkdirSync(screenshotDir, { recursive: true })
-        const result = await observeSoftwareGui({ projectId, root, launch: launch.launch, suite, temporary, signal: ctx.signal, screenshotDir })
+        const result = await observeSoftwareGui({ projectId, root, launch, suite, temporary, signal: ctx.signal, screenshotDir })
         const files = readdirSync(screenshotDir).filter(file => file.endsWith('.png')).sort()
         const name = files.find(file => file.endsWith('-failed.png')) ?? files.at(-1), file = name ? join(screenshotDir, name) : undefined
         const bytes = result.status !== 'unverified' && file ? readFileSync(file) : undefined

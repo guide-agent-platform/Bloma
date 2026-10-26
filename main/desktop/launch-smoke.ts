@@ -33,6 +33,9 @@ import { validateSoftwareCommand, resolveSoftwareCommand, softwareEnvironment, b
 /** 入口声明文件（项目根相对）。 */
 export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
 
+/** Concrete wire types shared by discovery and error recovery; no guessed entry is written. */
+export const SOFTWARE_LAUNCH_GUIDANCE = '在项目根写LAUNCH.json。schema_version为2；command必须为参数数组，不能是shell命令字符串；ui只能为"browser"、"electron"或"webview"，不能用true/false。本机浏览器服务示例：{"schema_version":2,"command":["node","server.js"],"ui":"browser","url":"http://127.0.0.1:4318"}；Electron示例：{"schema_version":2,"command":["electron","main.cjs"],"ui":"electron","window_title":"实际窗口标题"}。文件名、端口和标题须按实际工程修改。一次性无界面命令用mode:"command"并省略ui；常驻服务使用mode:"resident"或省略mode。业务数据读写APP_DATA_DIR。'
+
 /** 冒烟截图落点（刀3 产物白名单目录，png 直显）。 */
 export const SMOKE_SCREENSHOT_RELATIVE_PATH = '00_VERIFY/screenshots/LAUNCH.png'
 
@@ -65,7 +68,7 @@ export function parseLaunchDeclaration(raw: string): LaunchDeclarationParse {
   }
   const obj = parsed as Record<string, unknown>
   if (obj.schema_version !== 1 && obj.schema_version !== 2) {
-    return { ok: false, error: `LAUNCH.json schema_version 须为数字 1（收到 ${JSON.stringify(obj.schema_version)}）` }
+    return { ok: false, error: `LAUNCH.json schema_version 须为数字 1 或 2（收到 ${JSON.stringify(obj.schema_version)}）` }
   }
   const command = obj.command
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== 'string' || part.length === 0)) {
@@ -115,6 +118,12 @@ export function readLaunchDeclaration(rootPath: string): LaunchDeclarationParse 
     return null
   }
   return parseLaunchDeclaration(raw)
+}
+
+export function requireLaunchDeclaration(rootPath: string, code = 'SOFTWARE_LAUNCH_REQUIRED'): LaunchDeclaration {
+  const declared = readLaunchDeclaration(rootPath)
+  if (!declared?.ok) throw Error(`${code}: ${declared ? declared.error : '项目根缺少可读的LAUNCH.json'}。${SOFTWARE_LAUNCH_GUIDANCE}`)
+  return declared.launch
 }
 
 /**

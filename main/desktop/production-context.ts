@@ -13,12 +13,14 @@ import { GUI_FIXTURE_SCHEMA } from './gui-fixtures'
 import { SOFTWARE_DATA_UPDATE_GUIDANCE } from '../software/data-update'
 import { SOFTWARE_DELIVERY_GUIDANCE } from '../software/artifact-qualification'
 import { softwareResumeContext } from '../software/run-state'
+import { SOFTWARE_LAUNCH_GUIDANCE } from './launch-smoke'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
   const known = new Set(backplane.requirements.map(item => item.id))
   if (featureIds.some(id => !known.has(id))) throw new Error('PRODUCTION_UNKNOWN_FEATURE')
   const selected = new Set(featureIds.length ? featureIds : known)
+  if (topic === 'launch') return { protocol: SOFTWARE_LAUNCH_GUIDANCE }
   if (topic === 'prd') return { prd_document: backplane.prd_document ?? '', note: '正文与结构化需求冲突时报告，不能自行扩大或削减范围。' }
   if (topic === 'verification') return { protocol: backplane.lean_brief
     ? '用register_gui_check或register_cli_check登记固定输入与任务单预期，宿主操作实际入口。无需另写自报PASS脚本；CORE_CHECK.json只在特殊能力需要时登记llm或speech入口。数据目录使用APP_DATA_DIR。'
@@ -49,20 +51,20 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
 
 export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
-    description: '只读制作交接：overview看范围，features按编号读功能，prd读正文；verification-gui/llm/speech看验证协议；resume看中断现场与账本引用，data-update/delivery按需看更新与交付约定。避免重复通读。',
+    description: '只读制作交接：overview看范围，features按编号读功能，prd读正文；launch看LAUNCH.json字段类型与示例，verification-gui/llm/speech看验证协议；resume看中断现场与账本引用，data-update/delivery看更新与交付约定。避免重复通读。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume'] },
+      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
         if (input.topic === 'data-update' && isSoftwareProject(projectId)) return { output: SOFTWARE_DATA_UPDATE_GUIDANCE }
-        if (input.topic === 'delivery' && isSoftwareProject(projectId)) return { output: SOFTWARE_DELIVERY_GUIDANCE }
+        if (input.topic === 'delivery' && isSoftwareProject(projectId)) return { output: SOFTWARE_LAUNCH_GUIDANCE + '\n' + SOFTWARE_DELIVERY_GUIDANCE }
         if (input.topic === 'resume' && isSoftwareProject(projectId)) return { output: JSON.stringify(softwareResumeContext(projectId)) }
         if (['verification', 'verification-gui'].includes(String(input.topic)) && isSoftwareProject(projectId)) {
           const brief = readPrdBackplane(projectId)
-          return { output: JSON.stringify({ protocol: '界面测试可直接verify_app({script:"tests/acceptance.mjs"})，不必展开动作表；使用模块参数提供的test/expect/assert。旧steps+acceptance_refs仍兼容，kind不是action，精确预期填equals。开发观察不等于验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',
+          return { output: JSON.stringify({ launch: SOFTWARE_LAUNCH_GUIDANCE, protocol: '界面测试可直接verify_app({script:"tests/acceptance.mjs"})，不必展开动作表；使用模块参数提供的test/expect/assert。旧steps+acceptance_refs仍兼容，kind不是action，精确预期填equals。开发观察不等于验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',
             native_tests: {call:'verify_app({script:"tests/acceptance.mjs"})',
               example:'export default async({test,page,expect,assert,dataDir,phase})=>{ await test("F-001 主路径",async()=>{await page.locator("#input").fill("已确认输入");await page.locator("#save").click();await expect(page.locator("#result")).toHaveText("已确认预期")}) }',
               rules:'使用参数中的test/expect/assert，宿主记录真实案例与断言；每个案例名含一个F编号。可用inspect_app(script)调试同一文件。phase===reopened会自动触发真实重开。测试逻辑和输入预期冻结，可修定位；业务代码独立修复。'},

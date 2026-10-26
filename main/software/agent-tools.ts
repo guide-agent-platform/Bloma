@@ -68,5 +68,5 @@ export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
   '尽早实测主路径。界面验收可直接verify_app(script:"tests/acceptance.mjs")：模块导出async({test,page,expect,assert,dataDir,phase})，test使用node:test API，每个业务测试名含一个F编号；重开分支用phase==="reopened"。无需展开动作表，旧GUI/CLI登记仍兼容。按真实失败修复，定位可改但不能改输入、断言过关；通过后简短交接。协议细节按需read_production_context查询。',
   '一次只改相关部分，保留用户数据和已有行为。测试数据放APP_DATA_DIR，数据格式变动要有迁移读回验证。inspect_app的源码检查点只是开发观察，可read比较差异，按明确文件选择restore；恢复也必须复验。',
   '默认一个负责人，独立且值得并行的工作才委派，写路径互不重叠，最终集成由你负责。普通依赖和构建自主完成；系统修改、外发发布、额外付费、破坏性真实数据操作需另有授权，不能绕过拒绝。',
-  '项目根LAUNCH.json写schema_version:2与真实command、ui、url或mode；使用正常入口验证，未打包不声称安装包。界面截图需实际查看；仅已知支持视觉的渠道附图，不另派付费视觉审查。成品API在设置页配置，不能借平台密钥或用mock冒充真实AI效果。',
+  '项目根LAUNCH.json写schema_version:2，command为参数数组，ui为browser/electron/webview（非布尔值），按入口写url或mode；示例用read_production_context(launch)查询。使用正常入口验证，未打包不声称安装包。界面截图需实际查看；仅已知支持视觉的渠道附图，不另派付费视觉审查。成品API在设置页配置，不能借平台密钥或用mock冒充真实AI效果。',
 ].join('\n\n')

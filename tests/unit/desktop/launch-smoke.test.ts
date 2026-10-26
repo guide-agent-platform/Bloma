@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { parseLaunchDeclaration, parseProbeJson, runLaunchSmoke, LAUNCH_RELATIVE_PATH, type LaunchProbeCriteria, type ProbeRunInput } from '../../../main/desktop/launch-smoke'
+import { parseLaunchDeclaration, parseProbeJson, runLaunchSmoke, requireLaunchDeclaration, LAUNCH_RELATIVE_PATH, type LaunchProbeCriteria, type ProbeRunInput } from '../../../main/desktop/launch-smoke'
 import type { ChildProcess } from 'node:child_process'
 
 class FakeChild extends EventEmitter {
@@ -28,6 +28,16 @@ function makeRoot(declaration?: string): string {
 }
 
 describe('parseLaunchDeclaration', () => {
+  it('returns the actual invalid field and a repairable example without changing the declaration', () => {
+    const invalid = '{"schema_version":2,"ui":true,"command":"npm start","url":"http://127.0.0.1:4318"}'
+    const root = makeRoot(invalid)
+    expect(() => requireLaunchDeclaration(root, 'DEBUG_LAUNCH_REQUIRED')).toThrow('command 须为非空字符串数组')
+    expect(() => requireLaunchDeclaration(root, 'DEBUG_LAUNCH_REQUIRED')).toThrow('不能用true/false')
+    expect(readFileSync(join(root, LAUNCH_RELATIVE_PATH), 'utf8')).toBe(invalid)
+    const missing = makeRoot()
+    expect(() => requireLaunchDeclaration(missing)).toThrow('缺少可读的LAUNCH.json')
+    expect(existsSync(join(missing, LAUNCH_RELATIVE_PATH))).toBe(false)
+  })
   it('合法声明：command 数组 + 可选 window_title', () => {
     const parsed = parseLaunchDeclaration('{"schema_version":1,"command":["python","app.py"],"window_title":"计算器"}')
     expect(parsed).toEqual({ ok: true, launch: { command: ['python', 'app.py'], window_title: '计算器' } })
