@@ -1,12 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, stat, symlink, writeFile } from 'node:fs/promises'
-import { constants } from 'node:fs'
+import * as nodeFs from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { readLaunchDeclaration, type LaunchDeclaration } from '../desktop/launch-smoke'
 import { resolveSoftwareCommand, softwareEnvironment } from './command-runtime'
+
+// Runtime archives are physical files. Electron's virtual fs otherwise expands
+// dependency *.asar files into directories while creating release snapshots.
+const physicalFs: typeof nodeFs = process.versions.electron ? createRequire(import.meta.url)('original-fs') : nodeFs
+const { createReadStream, constants } = physicalFs
+const { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, stat, symlink, writeFile } = physicalFs.promises
 
 interface Entry { path: string; size: number; sha256: string }
 export interface RuntimeInventory { digest: string; bytes: number; files: Entry[] }
