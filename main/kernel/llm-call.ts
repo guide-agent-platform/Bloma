@@ -44,6 +44,8 @@ export interface LlmJsonCallOptions<T> {
   attempts?: number
   /** 重试轮的 user 内容（带反馈重试提示）；缺省沿用首轮 prompt */
   retryFeedback?: string | (() => string)
+  /** Regenerate a bounded artifact without carrying a failed document into the next input. */
+  retryWithFreshContext?: boolean
   /** 推理档位（reasoning-profile 2026-08-27）：判定/校验类任务启用；缺省不传 = 现状 off */
   thinkingLevel?: ThinkingLevel
   /** 渠道 providerType（omit 黑名单判断用；不传 = 不做 omit，off 档下与现状一致） */
@@ -78,7 +80,7 @@ export async function callLlmForJson<T>(options: LlmJsonCallOptions<T>): Promise
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       // 截断重试走全新重生成（history 仅 system、prompt 用首轮原文）；格式错误把坏输出回灌
       const history: ConversationTurn[] =
-        attempt === 0 || truncated
+        attempt === 0 || truncated || options.retryWithFreshContext
           ? [{ role: 'system', content: options.systemPrompt }]
           : [
               { role: 'system', content: options.systemPrompt },

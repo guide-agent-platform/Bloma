@@ -53,6 +53,7 @@ PRD中明确not_applicable的场景无需设计界面状态或引用其AC编号�
 const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，不要解释或代码围栏。'
 const LEAN_HTML_PROTOCOL = `${HTML_OUTPUT_PROTOCOL}。不输出design或验收映射JSON。若用户要求改变必需能力或业务含义，改为输出 {"action":"revise_requirements","reason":"需改变什么"}，不要把范围变更伪装成外观调整。`
 const LEAN_SKETCH_PROMPT = '为用户设计真实产品的静态界面，展示正常使用的内容与主操作，布局与视觉服务产品目标。只用完整单文件HTML、内联CSS和离线资源，禁止脚本、事件属性和可执行URL。默认状态须自洽：搜索词、匹配数量与列表对应，保存提示与编辑状态一致。按需要用锚点、details或CSS展示少量可点击页面和空态，不假装已经保存真实数据。界面适应窗口，不用固定最小宽度挤坏编辑区。不要把需求清单、验收编号或平台说明画进产品；不声称业务已运行。'
+const LEAN_SKETCH_SIZE_GUIDANCE = '先精绘一个主要工作区，其余功能交代清晰的导航和操作入口，不展开每个页面的全部表单、历史行和错误示例。复用简洁CSS，控制文档体量，必须在本轮输出预算内完整闭合HTML；默认画面不展示尚未触发的校验错误或确认提示。'
 
 export interface UxSketchGeneration {
   run_id: string
@@ -210,6 +211,7 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
   const structured = Boolean(options.backplane && !lean)
   const resolvedPrompt = loadPromptWithSource('sketch-system', lean ? LEAN_SKETCH_PROMPT : UX_SKETCH_SYSTEM_PROMPT)
   const systemPrompt = resolvedPrompt.content +
+    (lean ? `\n${LEAN_SKETCH_SIZE_GUIDANCE}` : '') +
     '\n示例数据必须自洽：列表数量、筛选范围、合计与示例行对应；不能确定真实数据路径时写「程序的数据目录」，不得编造用户绝对路径。' +
     `\n\n${lean ? LEAN_HTML_PROTOCOL : structured ? DESIGN_OUTPUT_PROTOCOL : HTML_OUTPUT_PROTOCOL}`
   const generation: UxSketchGeneration = { run_id: randomUUID(), source: 'llm', failures: [] }
@@ -246,13 +248,14 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
     maxTokens: options.maxTokens,
     temperature: categoryTemperature('sketch'),
     attempts: options.attempts ?? UX_SKETCH_ATTEMPTS,
+    retryWithFreshContext: lean,
     get retryFeedback() { return structured
       ? `上次设计校验未通过：${lastIssues.join('；')}。请修正JSON中的design及必需的HTML标记，核对验收关联索引与页面/交互标记。${candidateHtml
         ? lastIssues.some(issue => issue.startsWith('HTML 未呈现'))
           ? `已有候选HTML缺少页面或交互标记，本次必须同时输出完整html，在对应真实控件或语义容器上补齐缺少的data-page-id/data-interaction-id；不得省略html或只改design。`
           : `已有完整安全候选HTML（sha256=${hash(candidateHtml)}），本次只输出action与design，不要重发html，宿主将原样复用已保存视图。若设计必须新增HTML中不存在的控件标记，才输出完整html。`
         : '没有可复用的安全HTML，必须同时输出完整html。'}原任务：\n${prompt}`
-      : `${UX_SKETCH_RETRY_FEEDBACK}\n原任务：\n${prompt}` },
+      : `${UX_SKETCH_RETRY_FEEDBACK}${lean ? `\n上次问题：${lastIssues.join('；')}。${LEAN_SKETCH_SIZE_GUIDANCE}请重新生成更精炼的完整文档，不续写残片。` : ''}\n原任务：\n${prompt}` },
     signal: options.signal,
     timeoutMs: UX_SKETCH_TIMEOUT_MS,
     onAttemptFailure: failure => {
@@ -266,6 +269,9 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
       let freshCandidate: string | undefined
       const parsed = parseUxOutput(raw, options.backplane, issues => { lastIssues = issues }, candidateHtml,
         html => { candidateHtml = html; freshCandidate = html })
+      if (lean && !parsed && /^(?:```html\s*)?(?:<!doctype html>|<html[\s>])/i.test(raw.trim()) && !/<\/html\s*>/i.test(raw)) {
+        lastIssues = ['HTML在文档闭合前结束，可能达到输出上限；需缩减界面体量后重新生成']
+      }
       diagnostic({ event: 'output_checked', attempt: parseAttempt - 1, raw_output: raw.slice(0, 65536),
         raw_output_truncated: raw.length > 65536, output_sha256: hash(raw), validation_issues: lastIssues,
         accepted_for_preview: Boolean(parsed && !parsed.requires_prd_revision), requested_prd_revision: Boolean(parsed?.requires_prd_revision),

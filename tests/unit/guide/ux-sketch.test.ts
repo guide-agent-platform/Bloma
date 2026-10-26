@@ -70,6 +70,20 @@ describe('parseSketchHtml（解析契约）', () => {
 })
 
 describe('generateUxSketch', () => {
+  it('regenerates a truncated lean sketch compactly without replaying partial HTML', async () => {
+    mockCall.mockImplementation(async options => {
+      expect(options.retryWithFreshContext).toBe(true)
+      expect(options.systemPrompt).toContain('精绘一个主要工作区')
+      expect(options.parse('<!DOCTYPE html><html><body>unfinished')).toBeUndefined()
+      const feedback = typeof options.retryFeedback === 'function' ? options.retryFeedback() : options.retryFeedback
+      expect(feedback).toContain('HTML在文档闭合前结束')
+      expect(feedback).toContain('不续写残片')
+      expect(feedback).toContain('F-001')
+      return { html: '<!DOCTYPE html><html><body>ready</body></html>', source: 'llm' } as never
+    })
+    const backplane = { positioning: '器材站', requirements: baseInput.requirements, acceptance: {}, constraints: [], out_of_scope: [], assumptions: [], lean_brief: { version: 1, ui: 'required', delivery: 'desktop', distribution: 'local' } }
+    await generateUxSketch({ ...baseInput, backplane: backplane as never })
+  })
   it('LLM 正常输出：剥代码围栏，source=llm', async () => {
     mockCall.mockResolvedValue({ html: '<!DOCTYPE html><html><body>草图</body></html>', source: 'llm' } as never)
     const result = await generateUxSketch(baseInput)

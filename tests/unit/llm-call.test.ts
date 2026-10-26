@@ -76,6 +76,15 @@ describe('callLlmForJson', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('artifact regeneration keeps actionable feedback without feeding the failed document back', async () => {
+    const { query, calls } = scriptedQuery(['<html>unfinished document', '{"ok":2}'])
+    const result = await callLlmForJson({ ...BASE, query, parse: parseJson, retryFeedback: 'Make the document smaller and complete', retryWithFreshContext: true })
+    expect(result).toEqual({ ok: 2 })
+    expect(calls[1].options.history).toEqual([{ role: 'system', content: 'SYS' }])
+    expect(calls[1].prompt).toBe('Make the document smaller and complete')
+    expect(calls[1].options.maxTokens).toBe(BASE.maxTokens)
+  })
+
   it('parse 抛错按本轮失败处理，不中断重试链', async () => {
     const { query } = scriptedQuery(['{"ok":1}', '{"ok":3}'])
     let call = 0
