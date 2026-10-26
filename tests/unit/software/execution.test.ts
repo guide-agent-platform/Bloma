@@ -1,12 +1,12 @@
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, realpathSync } from 'node:fs'
+import { join, isAbsolute } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { spawn } from 'node:child_process'
 import { mainRootDir } from '../../../main/platform/paths'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createProject } from '../../../main/project/project-service'
-import { executeSoftwareCommand, projectDirectory, softwareEnvironment, validateSoftwareCommand } from '../../../main/software/command-runtime'
+import { executeSoftwareCommand, projectDirectory, resolveSoftwareCommand, softwareEnvironment, validateSoftwareCommand } from '../../../main/software/command-runtime'
 import { startSoftwareProcess, softwareProcess, stopSoftwareSession } from '../../../main/software/process-manager'
 
 let home: string, previous: string | undefined, project: ReturnType<typeof createProject>
@@ -16,6 +16,15 @@ afterEach(async () => { await stopSoftwareSession(project.project_id, 's'); if (
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 async function port() { const server = createServer(); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address();
   if (!address || typeof address === 'string') throw Error('fixture'); await new Promise<void>(resolve => server.close(() => resolve())); return address.port }
+it('resolves bare Electron to a real executable, prefers the project runtime and removes Node mode',()=>{
+  const environment={...softwareEnvironment(project.project_id),ELECTRON_RUN_AS_NODE:'1'}
+  const bundled=resolveSoftwareCommand(project.root_path,['electron','main.cjs'],environment)
+  expect(isAbsolute(bundled.command[0])).toBe(true);expect(existsSync(bundled.command[0])).toBe(true)
+  expect(bundled.env.ELECTRON_RUN_AS_NODE).toBeUndefined();expect(bundled.command[1]).toBe('main.cjs')
+  const name=process.platform==='win32'?'electron.exe':process.platform==='darwin'?'Electron.app/Contents/MacOS/Electron':'electron'
+  const local=join(project.root_path,'node_modules/electron/dist',name);mkdirSync(join(local,'..'),{recursive:true});writeFileSync(local,'fixture executable')
+  expect(resolveSoftwareCommand(project.root_path,['electron','main.cjs'],environment).command[0]).toBe(realpathSync(local))
+})
 it('runs Node with literal arguments and real exit/output, without Python wrappers', async () => {
   const result = await executeSoftwareCommand({ projectId: project.project_id, root: project.root_path, command: ['node', '-e', 'require("fs").writeFileSync("actual file.txt",process.argv[1]);console.log("实际输出");process.exit(7)', 'literal & $(no command)'] })
   expect(result.code).toBe(7); expect(result.stdout).toContain('实际输出')

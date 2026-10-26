@@ -18,6 +18,16 @@ export async function connectApp() {
         await browser.close();
         throw Error('BROWSER_SCRIPT_PAGE_NOT_UNIQUE');
     }
-    pages[0].setDefaultTimeout(5000);
-    return { browser, page: pages[0], context: pages[0].context() };
+    const page = pages[0];
+    // CDP attaches an existing context, so Playwright cannot receive baseURL in
+    // newContext(). Resolve relative navigation against the actual owned app;
+    // retain the same Page, browser storage, assertions and absolute URL behavior.
+    const base = new URL(page.url());
+    if (['http:', 'https:'].includes(base.protocol) && ['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)) {
+        const navigate = page.goto.bind(page);
+        page.goto = (url, options) => navigate(typeof url === 'string' && !/^[a-z][a-z0-9+.-]*:/i.test(url)
+            ? new URL(url, base).href : url, options);
+    }
+    page.setDefaultTimeout(5000);
+    return { browser, page, context: page.context() };
 }

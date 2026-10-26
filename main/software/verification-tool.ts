@@ -6,6 +6,8 @@ import { closeDebugSessions } from './debug-sessions'
 import { stopSoftwareSession, redactSoftwareOutput } from './process-manager'
 import { verifySoftwareCandidate } from './verification'
 import { registerNativeGuiTests } from './native-gui-registration'
+import { findProject } from '../project/project-service'
+import { requireLaunchDeclaration } from '../desktop/launch-smoke'
 
 export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<typeof createSoftwareCollaborationPolicy>, previewChanged?: (url?: string) => void): AgentLoopTool {
   return { name: 'verify_app', description: '直接验收当前软件：可传script指向项目测试目录内的原生测试模块，导出async({test,page,expect,assert,dataDir,phase})，test为node:test API，测试名标注单个F编号；宿主自动冻结源码，独立执行并核对覆盖，无需动作表。reopened分支自动触发关闭重开。也兼容旧GUI/CLI规则。检查行为、安全及正常启动；按真实失败修复。相同版本/环境完整通过结果5分钟复用。它不改目标、不自行标记交付。',
@@ -16,7 +18,7 @@ export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<ty
         policy.assertCommand(ctx)
         if (ctx.projectId !== projectId || input.force !== undefined && typeof input.force !== 'boolean') throw Error('SOFTWARE_VERIFY_INPUT_INVALID')
         if(input.script===undefined&&input.restart!==undefined)throw Error('SOFTWARE_VERIFY_INPUT_INVALID: restart与script一起提供')
-        if(input.script!==undefined){if(typeof input.script!=='string'||input.restart!==undefined&&typeof input.restart!=='boolean')throw Error('GUI_NATIVE_INPUT_INVALID');registerNativeGuiTests(projectId,input.script,input.restart===true)}
+        if(input.script!==undefined){if(typeof input.script!=='string'||input.restart!==undefined&&typeof input.restart!=='boolean')throw Error('GUI_NATIVE_INPUT_INVALID');requireLaunchDeclaration(findProject(projectId).root_path,'SOFTWARE_VERIFY_CONFIRMED_ENTRY_REQUIRED');registerNativeGuiTests(projectId,input.script,input.restart===true)}
         await closeDebugSessions(projectId, ctx.sessionId); await stopSoftwareSession(projectId, ctx.sessionId); previewChanged?.()
         const result = await verifySoftwareCandidate(projectId, ctx.requestId, ctx.signal, input.force === true)
         const failed = result.core?.host_gui?.steps.find(step => !step.passed)

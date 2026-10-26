@@ -18,8 +18,8 @@ import { createToolState } from '../../../main/agent/loop/agent-loop';
 import { saveSoftwareRegressionBaseline } from '../../../main/software/regression-baseline';
 let home: string, previous: string | undefined, project: ReturnType<typeof createProject>;
 const script = `export default async({test,page,expect,assert,phase})=>{
- if(phase==='reopened'){await test('F-001 real reopen',async()=>{await expect(page.locator('#list')).toHaveText('Alice')});return;}
- await test('F-001 create Alice',async()=>{await page.locator('#name').focus();await page.keyboard.type('Alice');await page.locator('#save').click();await expect(page.locator('#list')).toHaveText('Alice')});
+ if(phase==='reopened'){await test('F-001 real reopen',async()=>{await page.goto('/');await expect(page.locator('#list')).toHaveText('Alice')});return;}
+ await test('F-001 create Alice',async()=>{await page.goto('/');await page.locator('#name').focus();await page.keyboard.type('Alice');await page.locator('#save').click();await expect(page.locator('#list')).toHaveText('Alice')});
  await test('F-002 reject blank',async()=>{await page.locator('#name').fill('');await page.locator('#save').click();await expect(page.locator('#status')).toHaveText('required');assert.equal(await page.locator('#list').innerText(),'Alice')});
 }`;
 beforeEach(async () => {
@@ -52,7 +52,19 @@ afterEach(async () => { await closeAllDebugSessions(); if (previous === undefine
     delete process.env.PROMA_HOME;
 else
     process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }, 30000);
-it('verify_app directly freezes and actually runs node:test UI checks, including a real restart, without an action table', async () => {
+it('does not freeze a native draft before its application launch declaration is valid', async () => {
+    const launchFile=join(project.root_path,'LAUNCH.json'),original=readFileSync(launchFile,'utf8')
+    writeFileSync(launchFile,JSON.stringify({schema_version:2,command:'npm start',ui:true}))
+    const tool=buildSoftwareVerifyTool(project.project_id,createSoftwareCollaborationPolicy(project.project_id,project.root_path,'s'))
+    const result=await tool.execute({script:'tests/acceptance.mjs'},{projectId:project.project_id,sessionId:'s',requestId:'r',signal:new AbortController().signal,state:createToolState()})
+    expect(result.isError).toBe(true)
+    expect(result.output).toContain('command 须为非空字符串数组')
+    expect(existsSync(guiSuitePath(project.project_id))).toBe(false)
+    writeFileSync(launchFile,original)
+    writeFileSync(join(project.root_path,'tests/acceptance.mjs'),script.replace('create Alice','create Alice from repaired draft'))
+    expect(()=>registerNativeGuiTests(project.project_id,'tests/acceptance.mjs')).not.toThrow()
+})
+it('verify_app directly freezes and actually runs node:test UI checks, including relative navigation and a real restart, without an action table', async () => {
     const tool = buildSoftwareVerifyTool(project.project_id, createSoftwareCollaborationPolicy(project.project_id, project.root_path, 's'));
     const result = await tool.execute({ script: 'tests/acceptance.mjs', restart: true }, { projectId: project.project_id, sessionId: 's', requestId: 'r', signal: AbortSignal.timeout(90000), state: createToolState() });
     expect(result.isError, result.output).not.toBe(true);
@@ -75,7 +87,8 @@ it.skipIf(process.platform!=='win32'||!existsSync(resolve('node_modules/electron
  writeFileSync(join(root,'package.json'),JSON.stringify({name:'native-fixture',main:'main.cjs'}))
  writeFileSync(join(root,'main.cjs'),`const{app,BrowserWindow}=require('electron');app.whenReady().then(()=>new BrowserWindow({width:1000,height:700}).loadFile('index.html'));app.on('window-all-closed',()=>app.quit())`)
  writeFileSync(join(root,'index.html'),'<title>Names native</title>'+readFileSync(join(root,'index.html'),'utf8'))
- writeFileSync(join(root,'LAUNCH.json'),JSON.stringify({schema_version:2,ui:'electron',command:[resolve('node_modules/electron/dist/electron.exe'),'.'],window_title:'Names native'}))
+ writeFileSync(join(root,'LAUNCH.json'),JSON.stringify({schema_version:2,ui:'electron',command:['electron','.'],window_title:'Names native'}))
+ writeFileSync(join(root,'tests/acceptance.mjs'),script.replaceAll("await page.goto('/');",''))
  registerNativeGuiTests(project.project_id,'tests/acceptance.mjs')
  const checked=await verifySoftwareCandidate(project.project_id,'electron-native',AbortSignal.timeout(120000))
  expect(checked.status,JSON.stringify({summary:checked.summary,gui:checked.core?.host_gui})).toBe('passed');expect(checked.core?.host_gui?.method).toBe('node:test');expect(checked.launch?.passed).toBe(true)

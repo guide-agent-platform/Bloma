@@ -38,7 +38,7 @@ export async function runtimeInventory(root: string, signal?: AbortSignal, links
       if (IGNORED.has(entry.name)) continue
       const path = `${prefix}${entry.name}`, full = join(directory, entry.name), info = await lstat(full)
       if (info.isSymbolicLink()) {
-        if (!links[path] || await realpath(full) !== await realpath(links[path])) throw Error(`RELEASE_LINK_UNSUPPORTED: ${path}`)
+        if (!links[path] || await realpath(full) !== await realpath(links[path])) throw Error(`RELEASE_LINK_UNSUPPORTED: ${path} (root: ${root})`)
         await visit(full, `${path}/`, mutable); continue
       }
       if (info.isDirectory()) { await visit(full, `${path}/`, mutable || hostLayout && !prefix && MUTABLE.has(entry.name)); continue }

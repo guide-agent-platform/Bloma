@@ -71,6 +71,14 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
     if (!executable) throw new Error('COMMAND_NODE_UNAVAILABLE')
     command[0] = executable
     if (process.versions.electron && executable === process.execPath) env.ELECTRON_RUN_AS_NODE = '1'
+  } else if (name === 'electron' && !command[0].includes('/') && !command[0].includes('\\')) {
+    const executableName=process.platform==='win32'?'electron.exe':process.platform==='darwin'?'Electron.app/Contents/MacOS/Electron':'electron'
+    const candidates=[join(root,'node_modules/electron/dist',executableName)]
+    try { candidates.push(join(dirname(createRequire(import.meta.url).resolve('electron/package.json')),'dist',executableName)) } catch {}
+    const executable=candidates.find(existsSync)
+    if(!executable)throw Error('COMMAND_ELECTRON_UNAVAILABLE: 项目或Bloma安装中缺少可执行Electron运行时')
+    command[0]=realpathSync(executable)
+    delete env.ELECTRON_RUN_AS_NODE
   } else if (['npm', 'npx'].includes(name)) {
     let script: string | undefined
     try { script = join(dirname(createRequire(import.meta.url).resolve('npm/package.json')), 'bin', name === 'npm' ? 'npm-cli.js' : 'npx-cli.js') } catch {}
