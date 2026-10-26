@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-26",
+  "generation": "built-in image_gen",
+  "asset_conversion": "PNG to WebP quality 95; no resize, crop, redraw or composition change",
+  "items": [
+    {
+      "key": "requirements",
+      "stage": "需求",
+      "status": "candidate",
+      "original": "outputs/ui-stage-comics-20261026-v2/requirements.png",
+      "asset": "resources/studio/stage-comics-v2/requirements.webp",
+      "width": 2172,
+      "height": 724,
+      "sha256_original": "83af82f816a578de7be43d21f273c81738430ce2a83609870590e90cd856fe03",
+      "sha256_asset": "a81f36aaac458e645b52daa70c5c8d6b9a611688e9f645723c3f35fb7ce501c1",
+      "bytes": 517726
+    },
+    {
+      "key": "design",
+      "stage": "界面",
+      "status": "candidate",
+      "original": "outputs/ui-stage-comics-20261026-v2/design.png",
+      "asset": "resources/studio/stage-comics-v2/design.webp",
+      "width": 2172,
+      "height": 724,
+      "sha256_original": "6b1093fd503284a4b1d5155e4f5f98493f473d2f9d54e1c1b89dadebeb1380ae",
+      "sha256_asset": "4e73bbdf98272915d4a821e3313f247d63bd2ae21d5f0f2cb9cd93a748d6b14e",
+      "bytes": 437884
+    },
+    {
+      "key": "build",
+      "stage": "制作",
+      "status": "candidate",
+      "original": "outputs/ui-stage-comics-20261026-v2/build.png",
+      "asset": "resources/studio/stage-comics-v2/build.webp",
+      "width": 2172,
+      "height": 724,
+      "sha256_original": "291b7294044580e5bdc96b3c223969849fd9999ce6555f6df87d1d2236efb1cb",
+      "sha256_asset": "93b53744e32248bcb9ce1ba63a471150878d2683567fc7e3c6c5076558620bb3",
+      "bytes": 450236
+    },
+    {
+      "key": "verify",
+      "stage": "验证",
+      "status": "user-approved style and story",
+      "original": "outputs/ui-stage-comics-20261026-v2/verify.png",
+      "asset": "resources/studio/stage-comics-v2/verify.webp",
+      "width": 2172,
+      "height": 724,
+      "sha256_original": "063a53002de63a0673adde10ec238c519e97a2875b90bf18026a5f8127b70676",
+      "sha256_asset": "b11cfbe7dc1e575d72f8a7d5b47fe29b2dbd049d305689d16c91580e7242fa9e",
+      "bytes": 437968
+    },
+    {
+      "key": "deliver",
+      "stage": "交付",
+      "status": "candidate",
+      "original": "outputs/ui-stage-comics-20261026-v2/deliver.png",
+      "asset": "resources/studio/stage-comics-v2/deliver.webp",
+      "width": 2172,
+      "height": 724,
+      "sha256_original": "83324805cd2c79f7a7e120f0358bbefdc30123cca8d2d23fb4becb3a7acbd01d",
+      "sha256_asset": "7ae74f3dffd7b758e72347928ff12672ae0795935d98b52a7b5b734a6e971ff2",
+      "bytes": 486618
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-26",
+  "mode": "built-in image_gen",
+  "scope": "three-panel comic candidate assets; no renderer integration",
+  "style_reference": "C:\\Users\\17359\\.codex\\generated_images\\01a1772a-29df-7c60-a7b8-21468033fd60\\exec-8d61a034-6934-40fd-baea-0eded9544112.png",
+  "items": [
+    {
+      "key": "requirements",
+      "title": "需求",
+      "file": "exec-06386667-b60c-4fce-b74f-868b618aa0ea.png",
+      "prompt": "Use case: illustration-story. Create ONE humorous THREE-PANEL HORIZONTAL COMIC STRIP, 3 adjacent square panels, overall about 3:1, matching the APPROVED reference's composition, delicate violet-gray pencil/ink outlines, pale lavender/sage/ivory washes, paper texture, gutters and subtle Touhou doujin manga acting. Same original adult Bloma woman, mature face, lavender bob, purple eyes, ivory beret with green bow/leaves, ivory blouse and botanical lavender dress. Preserve identity, not chibi. This comic is REQUIREMENTS: a tiny request turns into a comically long list, then she chooses a manageable scope. Real visual story, not three static illustrations. PANEL 1 close view at a bright studio pinboard: she confidently holds ONE small note with one simple lightbulb doodle, gentle smile, balloon exactly '就一点点。'. PANEL 2 much wider full-body view: the little note has unrolled into an absurdly LONG accordion paper list flowing down past her knees and piling on the floor; she holds its top with surprised eyebrows while the paper comically covers part of her face. Simple large checkbox marks on the list, no illegible paragraphs. Balloon '……这么多？'. PANEL 3 medium view: with calm deadpan relief she clips three chosen notes into a neat small lavender folio; the enormous remaining roll is neatly tied with sage string beside her. On the two groups only, readable tiny labels '本次' on the small chosen stack and '以后' on the big roll. Balloon '先做这些。'. Make the size contrast and her acting carry the humor. Vary camera scale, posture and framing clearly across the panels. Sparse background, simple physically correct paper and hands. No computers, laptops, magnifying glasses, bug chase, title or watermark.",
+      "status": "candidate"
+    },
+    {
+      "key": "design",
+      "title": "界面",
+      "file": "exec-6791665e-07a5-497c-8c4c-af0bb4da2cb0.png",
+      "prompt": "Use case: illustration-story. ONE humorous THREE-PANEL HORIZONTAL MANGA STRIP, three adjacent square panels, overall about 3:1. Match reference image's approved delicate violet-gray pencil/ink lines, warm paper, pale lavender/sage/ivory washes, gentle adult-character acting and Touhou doujin manga style. Same adult Bloma woman: lavender bob, purple eyes, ivory beret with sage ribbon/leaves/flowers, ivory blouse, green chest bow, botanical lavender dress, normal adult proportions. This story is INTERFACE DESIGN in an artist's bright studio with a large upright paper layout board on an easel, not a computer. A visual joke about alignment. PANEL 1 CLOSE-UP: her ruler, pencil and hand beside a crooked row of three simple empty layout rectangles on a large paper sheet; her intent eye visible at edge. Speech exactly '对齐一下。'. PANEL 2 WIDE FULL-BODY: she is standing and leaning comically sideways, both arms extended with an extra-long straightedge across the tall easel, trying very hard to straighten the interface layout. Her body is tilted, dress and ribbons respond naturally, beret slips distinctly to one side. Show actual physical effort and a couple subtle motion lines. Speech '再一点…'. PANEL 3 MEDIUM: the paper layout rectangles are now beautifully straight and aligned. She stands proudly beside the easel, still holding the ruler, with a calm little satisfied smile; her OWN beret is now very visibly crooked by about 25 degrees. Small off-frame mirror beside easel reveals the crooked hat as a gentle visual punchline, not a new character. Speech exactly '这下齐了。'. Make the contrast between the perfectly aligned layout and her skewed hat readable without explanatory captions. Vary framing and expression. Sparse studio details, no laptop, keyboard, checklist, insect, gift package, title or watermark. Simple correct ruler/easel/hand geometry. Prioritize a clear setup-action-payoff comic over pretty repeated poses.",
+      "status": "candidate"
+    },
+    {
+      "key": "build",
+      "title": "制作",
+      "file": "exec-b0871239-8584-4296-9b2d-bf9ba9671c7b.png",
+      "prompt": "Use case: illustration-story. ONE humorous THREE-PANEL HORIZONTAL COMIC STRIP, 3 adjacent square panels, overall about 3:1. Match the approved reference's fine violet-gray pencil/ink outlines, warm paper, pale lavender/sage/ivory colors, gentle Touhou doujin manga style and same original adult Bloma woman. Mature face, lavender bob, purple eyes, ivory beret with sage bow/leaves, ivory blouse, green chest ribbon, botanical lavender dress, normal adult proportions. This is IMPLEMENTATION, a playful visual pun on making software RUN. The scene is a small creative assembly workshop with a tabletop and open floor. PANEL 1 close-up: Bloma carefully snaps the LAST blue rectangular button into a small physical-looking paper model of an application window, like assembling a simple toy. The model is just a large clean rectangular app frame with title bar and three large interface blocks; not a laptop or monitor, no keyboard, simple geometry. Her focused face is at the edge. Speech exactly '最后一块。'. PANEL 2 low medium view on the floor: the completed little application-window model has unexpectedly sprouted TWO tiny simple legs and takes its first step. Bloma crouches beside it, surprised raised eyebrows and open hand, looking at the moving model. Speech '动了？'. PANEL 3 wide view: the little app window is now merrily running toward the edge of the panel with small dust/motion marks. Bloma stands still with the assembly instruction sheet in one hand, other hand on hip, watching it with an amused deadpan face instead of chasing it. Speech exactly '还真会跑。'. The joke is 'the software runs' becoming literally a running little software window. Clearly show discovery and payoff, no repeated seated poses, varied camera scale and acting. Keep objects sparse and elegant, no insect, magnifying glass, huge paper list, ruler, computer, laptop, extra humans, title or watermark. Do not turn Bloma into a chibi child; the little app is a simple whimsical paper prop with legs, no face or tiny text.",
+      "status": "candidate"
+    },
+    {
+      "key": "verify",
+      "title": "验证",
+      "file": "exec-8d61a034-6934-40fd-baea-0eded9544112.png",
+      "prompt": null,
+      "status": "user-approved style and story",
+      "note": "Adopted from the previously approved bug-hunt comic; not regenerated in this batch."
+    },
+    {
+      "key": "deliver",
+      "title": "交付",
+      "file": "exec-1d3b22a4-aa1e-47f2-8ee3-76633eea761c.png",
+      "prompt": "Use case: illustration-story. ONE humorous THREE-PANEL HORIZONTAL COMIC STRIP, three adjacent square panels, overall about 3:1. Match the approved reference's delicate violet-gray pencil/ink contours, pale lavender/sage/ivory washes, warm paper, gutters and subtle Touhou doujin manga style. Same original adult Bloma woman, mature face and normal adult proportions: lavender bob, purple eyes, ivory beret with sage bow/leaves, ivory blouse, green chest ribbon, botanical lavender dress. This is DELIVERY, a gentle visual joke about over-packaging, with a genuinely different setting: packing corner then a sunny garden path and a front doorstep. PANEL 1 CLOSE-UP in a packing corner: she carefully seals a comically LARGE cardboard parcel with a small sage ribbon and a simple leaf sticker, looking quietly proud. Box is oversized compared with the neat little finished-work portfolio it is meant to hold. Speech exactly '打包好了。'. PANEL 2 WIDE FULL-BODY outdoors: she waddles along a bright leafy garden path carrying the enormous plain box in both arms; the parcel hides most of her torso and face so only her beret, a bit of her eyes and her legs are visible. Gentle motion marks, small effort expression. Speech '有点重…'. PANEL 3 MEDIUM at a front doorstep: the huge box is open behind her with much empty crumpled wrapping paper visible; she presents a tiny neat lavender finished-work folio toward the viewer with both hands, giving a sheepish deadpan smile. The giant empty packaging beside the little folio is the visual punchline. Speech exactly '请查收。'. Keep the folio simple, flat, with a small leaf emblem, not another box. Vary close/wide/medium framing and gestures, keep the action and oversized packaging contrast clear at small size. No extra humans, computers, insects, ruler, title, watermark or explanatory captions. Preserve adult identity and light relaxed comic tone, not chibi.",
+      "status": "candidate"
+    }
+  ]
+}
