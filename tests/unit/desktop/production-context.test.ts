@@ -17,6 +17,10 @@ const fixture = () => bindAcceptance({ project_id: 'p', name: 'test', positionin
 } as unknown as PrdBackplane)
 
 describe('role-directed authoritative production context', () => {
+  it('includes the confirmed delivery shape before the agent chooses an implementation',()=>{
+    const prd=fixture();prd.lean_brief={version:1,ui:'required',delivery:'desktop',distribution:'local'} as PrdBackplane['lean_brief']
+    expect(productionContext(prd,'overview')).toMatchObject({delivery:'desktop',distribution:'local',ui:'required'})
+  })
   it('publishes executable launch wire examples, not ambiguous requirement ui booleans', () => {
     const protocol = (productionContext(fixture(), 'launch') as { protocol: string }).protocol
     const examples = [...protocol.matchAll(/\{"schema_version":2[^}]+\}/g)].map(m => JSON.parse(m[0]))

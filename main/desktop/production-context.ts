@@ -29,6 +29,7 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
   if (topic === 'verification-speech') return { protocol: SPEECH_VERIFICATION_BRIEF }
   if (topic === 'overview') return {
     positioning: backplane.positioning, features: backplane.requirements.map(({ id, description, priority }) => ({ id, description, priority })),
+    ...(backplane.lean_brief ? { delivery: backplane.lean_brief.delivery, distribution: backplane.lean_brief.distribution, ui: backplane.lean_brief.ui } : {}),
     constraints: backplane.constraints, out_of_scope: backplane.out_of_scope, assumptions: backplane.assumptions,
     ux_files: ['00_UX/confirmed.json', '00_UX/confirmed.html'],
     note: '按职责读取 features；界面职责读取确认UX，环境事实使用 inspect_project_resources。完整PRD和验证协议可按topic读取。',

@@ -1,0 +1,205 @@
+{
+  "date": "2026-10-26",
+  "baseline": "0f24300",
+  "case": "器材小站：器材、借用人、借还、组合筛选、统计、JSON备份恢复、重启留存",
+  "project_id": "28233ef3-9faa-4e77-b5f6-3a4ab5424634",
+  "request_sha256": "8b5134470198209aca2c9b7cbf14501580f3c638b7118374e5fe598956ba5821",
+  "independent_plan_sha256": "753e4e5200b16750998bbb12f008aa4f626592132f1a50bd10a18be20451cd8e",
+  "phases": [
+    {
+      "phase": "brief",
+      "status": "awaiting_review",
+      "at": "2026-10-26T06:50:28.158Z",
+      "finished_at": "2026-10-26T06:50:34.296Z",
+      "physical_requests": 2,
+      "cumulative_case_upper_rmb": 0.00947
+    },
+    {
+      "phase": "scope",
+      "status": "failed",
+      "at": "2026-10-26T06:51:03.486Z",
+      "finished_at": "2026-10-26T06:51:57.798Z",
+      "physical_requests": 2,
+      "cumulative_case_upper_rmb": 0.1449
+    },
+    {
+      "phase": "retry-sketch",
+      "status": "awaiting_review",
+      "at": "2026-10-26T06:55:34.284Z",
+      "finished_at": "2026-10-26T06:56:25.103Z",
+      "physical_requests": 2,
+      "cumulative_case_upper_rmb": 0.265742
+    },
+    {
+      "phase": "adjust",
+      "status": "awaiting_review",
+      "at": "2026-10-26T06:58:17.508Z",
+      "finished_at": "2026-10-26T06:59:02.693Z",
+      "physical_requests": 2,
+      "cumulative_case_upper_rmb": 0.406762
+    },
+    {
+      "phase": "build",
+      "status": "incomplete",
+      "at": "2026-10-26T06:59:52.026Z",
+      "finished_at": "2026-10-26T07:05:41.191Z",
+      "physical_requests": 31,
+      "cumulative_case_upper_rmb": 0.872144
+    },
+    {
+      "phase": "continue",
+      "status": "incomplete",
+      "at": "2026-10-26T07:22:28.706Z",
+      "finished_at": "2026-10-26T07:22:45.611Z",
+      "physical_requests": 1,
+      "cumulative_case_upper_rmb": 0.992491
+    },
+    {
+      "phase": "continue-combined",
+      "status": "incomplete",
+      "at": "2026-10-26T07:27:52.539Z",
+      "finished_at": "2026-10-26T07:54:52.593Z",
+      "physical_requests": 178,
+      "cumulative_case_upper_rmb": 2.579877
+    },
+    {
+      "phase": "continue-reloaded",
+      "status": "incomplete",
+      "at": "2026-10-26T07:57:25.887Z",
+      "finished_at": "2026-10-26T08:02:58.247Z",
+      "physical_requests": 25,
+      "cumulative_case_upper_rmb": 2.840397
+    },
+    {
+      "phase": "finish-final",
+      "status": "completed",
+      "at": "2026-10-26T08:07:58.585Z",
+      "finished_at": "2026-10-26T08:12:29.076Z",
+      "physical_requests": 5,
+      "cumulative_case_upper_rmb": 2.945582
+    }
+  ],
+  "accounting": {
+    "new_funding_rmb": 3,
+    "cumulative_two_window_ceiling_rmb": 6,
+    "prior_window_carried_requests": 55,
+    "prior_window_carried_rmb": 0.960841,
+    "new_case_physical_requests": 248,
+    "new_case_reported_peak_upper_rmb": 2.945582,
+    "new_case_unknown_requests": 0,
+    "cumulative_two_window_accounted_upper_rmb": 3.906423,
+    "all_prior_policy_and_ledger_hashes_unchanged": true,
+    "earlier_original_window": {
+      "reported_upper_rmb": 0.747882,
+      "unknown_reserved_rmb": 2.162688,
+      "accounted_upper_rmb": 2.91057,
+      "untouched": true
+    },
+    "pricing_source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  },
+  "tool_results": {
+    "count": 241,
+    "errors": 32,
+    "by_tool": {
+      "list_files": 1,
+      "read_production_context": 7,
+      "read_file": 24,
+      "inspect_software_environment": 1,
+      "write_file": 24,
+      "edit_file": 20,
+      "start_service": 6,
+      "inspect_app": 8,
+      "verify_app": 14,
+      "run_command": 126,
+      "stop_process": 3,
+      "find": 1,
+      "view_image": 1,
+      "register_gui_check": 1,
+      "grep": 3,
+      "read_process": 1
+    }
+  },
+  "original_model_release": {
+    "id": "e9175d7e554d55e045ea1a6d0fca981a35b4023b6469577f8069ff102b504ba5",
+    "project_completed": true,
+    "formal_status": "passed",
+    "native_cases": 15,
+    "native_evidence": {
+      "interactions": 186,
+      "assertions": 121
+    },
+    "independent_native_status": "failed",
+    "failure": "Visible statistics contained retained static zero, e.g. 00件; model tests only asserted .val child"
+  },
+  "intervention": {
+    "at": "2026-10-26T08:22:41.681Z",
+    "actor": "Codex test operator",
+    "reason": "Independent native QA found visible 00/80 etc: setStat inserted .val before a retained static zero. Frozen model tests asserted only .val and missed the whole visible text.",
+    "changed_file": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\software-fresh-20261026\\home\\agent-workspaces\\default-software-builder\\generated-projects\\28233ef3-9faa-4e77-b5f6-3a4ab5424634\\public\\index.html",
+    "before_sha256": "8bc6e55f53c422b7e6c8c32fc9da12815ce5c4b1c3eafa3c4194a97de3b8a766",
+    "after_sha256": "8b97cd8350210f2af96ebc74c6f3bb3d0ecd425f3e54db21063985b6ef276739",
+    "changed_nodes": 4,
+    "native_rules_changed": false,
+    "business_inputs_or_expectations_changed": false,
+    "original_release": "e9175d7e554d55e045ea1a6d0fca981a35b4023b6469577f8069ff102b504ba5",
+    "evidence": "independent-test-native-final-r2.json"
+  },
+  "corrected_release": {
+    "id": "cdf5cce785e9cb9b58055e03cb661b9b0bb735092dc8702b7803dae41dcbf8c1",
+    "completed_by_actual_host_finalizer": true,
+    "model_queries": 0,
+    "formal_status": "passed",
+    "native_cases": 15,
+    "physical_asar": {
+      "file": true,
+      "size": 109371,
+      "sha256": "ecd526468d13b0d4d9d9f430e0834f25dbcdcfd910b6e38f59e6c66192bd41c4",
+      "source_sha256": "ecd526468d13b0d4d9d9f430e0834f25dbcdcfd910b6e38f59e6c66192bd41c4"
+    },
+    "independent_native_status": "passed",
+    "independent_groups": 17,
+    "independent_checks": [
+      "F-006 empty statistics",
+      "F-001 blank and nonpositive fractional empty total rejected atomically",
+      "F-001 F-002 create and edit independent equipment and borrowers",
+      "F-003 invalid quantities stock overflow reversed dates leave no record or stock mutation",
+      "F-003 F-006 successful loans and inventory conservation 8=3+5 overdue 1",
+      "F-001 F-002 lower total and referenced deletes rejected without data mutation",
+      "F-005 combined filters no hits clear and overdue label",
+      "F-004 return once retains history and restores correct inventory",
+      "F-001 returned history still protects equipment deletion",
+      "F-007 cancel actual backup import preserves newer data",
+      "F-007 actual download confirmed replace and repeat import idempotent with original IDs",
+      "F-007 reject broken-json atomically with actual backup comparison",
+      "F-007 reject missing-fields atomically with actual backup comparison",
+      "F-007 reject dangling-equipment atomically with actual backup comparison",
+      "F-007 reject dangling-borrower atomically with actual backup comparison",
+      "F-007 reject overstock atomically with actual backup comparison",
+      "F-008 actual backend and persistent browser close reopen preserves complete IDs fields statuses and relationships"
+    ],
+    "launches": [
+      {
+        "pid": 140508,
+        "url": "http://127.0.0.1:63483/",
+        "method": "real Electron using declared executable and entry; independent owned profile and data"
+      },
+      {
+        "pid": 158900,
+        "url": "http://127.0.0.1:54635/",
+        "method": "real Electron using declared executable and entry; independent owned profile and data"
+      }
+    ],
+    "source_and_rules_unchanged_during_independent_qa": true,
+    "page_errors": [],
+    "external_requests": []
+  },
+  "boundaries": [
+    "Real provider and public production services; no Computer Use, no child agents",
+    "Harness patched and runner reloaded during the case; not an unassisted first-pass success",
+    "Model authored all business code and native tests; operator later corrected four HTML statistic nodes",
+    "Whole native UI QA after correction uses real Electron and physical process restart; no fixtures or storage reinjection",
+    "Local desktop use verified; no portable installer or clean-machine claim",
+    "Large repeated platform-code searches and parent graph link relocation occurred; original junction restored; command execution is not an OS sandbox"
+  ],
+  "evidence_root": "run-artifacts/software-fresh-20261026"
+}
