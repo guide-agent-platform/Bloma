@@ -6,6 +6,7 @@ import { canUpgradeAtom, currentProjectAtom, networkOnlineAtom, projectModeAtom 
 import { hasUsableChannelsAtom } from './atoms-sprint2'
 
 export interface WorkspaceHeaderProps {
+  compact?: boolean
   showConnection?: boolean
   onAllProjects?: () => void
   onOpenSettings?: () => void
@@ -13,15 +14,15 @@ export interface WorkspaceHeaderProps {
   onHome?: () => void
 }
 
-export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings, onUpgrade, onHome, showConnection = true }) => {
+export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings, onUpgrade, onHome, showConnection = true, compact = false }) => {
   const project = useAtomValue(currentProjectAtom)
   const mode = useAtomValue(projectModeAtom)
   const isOnline = useAtomValue(networkOnlineAtom)
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
-  return <header data-ai-id="workspace-header" className="theatre-header">
-    <StudioBrand />
-    <StudioNavigation active="workspace" onHome={onHome} onProjects={onAllProjects} />
+  return <header data-ai-id="workspace-header" className="theatre-header" data-compact={compact}>
+    {compact ? <button type="button" className="workspace-home" aria-label="主页面" onClick={onHome} disabled={!onHome}><StudioBrand /></button> : <StudioBrand />}
+    {!compact && <StudioNavigation active="workspace" onHome={onHome} onProjects={onAllProjects} />}
     <button type="button" className="theatre-project" data-ai-id="all-projects-button" aria-label="所有项目" onClick={onAllProjects} disabled={!onAllProjects} title="查看所有项目"><h1>{project?.name ?? '未命名项目'}</h1><ChevronDown /></button>
     <span className="theatre-header-spacer" />
     <span className="theatre-mode"><span>{mode === 'longterm' ? '长期型' : '快速型'}</span></span>

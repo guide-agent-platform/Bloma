@@ -8,19 +8,19 @@ const MAX_WIDTH = 600
 const PREVIEW_MIN_WIDTH = 340
 const DIVIDER_WIDTH = 18
 
-function readPreferredWidth(): number {
+function readPreferredWidth(fallback = DEFAULT_WIDTH): number {
   try {
     const value = Number(localStorage.getItem(CONVERSATION_WIDTH_KEY))
     if (Number.isFinite(value) && value >= MIN_WIDTH && value <= MAX_WIDTH) return value
   } catch { /* Storage can be unavailable; resizing still works for this visit. */ }
-  return DEFAULT_WIDTH
+  return fallback
 }
 
 /** A display preference, independent of project/session data. Narrow windows retain the preferred width. */
-export function useConversationWidth() {
+export function useConversationWidth(side: 'left' | 'right' = 'left') {
   const containerRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; width: number } | null>(null)
-  const [preferred, setPreferred] = useState(readPreferredWidth)
+  const [preferred, setPreferred] = useState(() => readPreferredWidth(side === 'right' ? 300 : DEFAULT_WIDTH))
   const [available, setAvailable] = useState(0)
   const [resizing, setResizing] = useState(false)
   const maximum = available > 0 ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, available - PREVIEW_MIN_WIDTH - DIVIDER_WIDTH)) : MAX_WIDTH
@@ -74,14 +74,14 @@ export function useConversationWidth() {
         event.currentTarget.setPointerCapture?.(event.pointerId)
       },
       onPointerMove: (event: PointerEvent<HTMLButtonElement>) => {
-        if (drag.current) change(drag.current.width + event.clientX - drag.current.x)
+        if (drag.current) change(drag.current.width + (side === 'right' ? -1 : 1) * (event.clientX - drag.current.x))
       },
       onPointerUp: finish,
       onPointerCancel: finish,
       onLostPointerCapture: finish,
-      onDoubleClick: () => { change(DEFAULT_WIDTH); persist() },
+      onDoubleClick: () => { change(side === 'right' ? 300 : DEFAULT_WIDTH); persist() },
       onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
-        const value = event.key === 'ArrowLeft' ? width - 20 : event.key === 'ArrowRight' ? width + 20
+        const value = event.key === 'ArrowLeft' ? width + (side === 'right' ? 20 : -20) : event.key === 'ArrowRight' ? width + (side === 'right' ? -20 : 20)
           : event.key === 'Home' ? MIN_WIDTH : event.key === 'End' ? maximum : undefined
         if (value === undefined) return
         event.preventDefault()

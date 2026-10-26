@@ -2,7 +2,11 @@
 type DomCollectContextResult = { fallback_mode: boolean; element_selector?: string; text_content?: string; bounding_rect?: { x: number; y: number; width: number; height: number } }
 import React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { WorkspaceHeader, WorkspaceConnection } from './WorkspaceHeader'
+import { WorkspaceProgress } from './WorkspaceProgress'
+import { deriveWorkspaceProgress } from '../lib/workspace-progress'
+import { buildProgressLines, pickLiveLine } from './ProgressCard'
+import { agentStreamStateFamily } from '../agent-atoms'
+import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
 import { ScopeConfirmationPanel } from './ScopeConfirmationPanel'
 import type { LeanScopeView } from '../../shared/types'
@@ -16,14 +20,12 @@ import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
 import { HistoryAttachments } from './HistoryAttachments'
 import { DesktopStageBar } from './DesktopStageBar'
-import { StudioFumoNote } from './StudioCompanion'
-import { SketchCharacterReminder } from './SketchCharacterReminder'
 import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom, activeAgentSessionIdAtom, agentMessagesFamily, hasActiveStreamAtom } from './atoms'
 import { desktopArtifactsAtom, requirementConfirmFamily, nullRequirementConfirmFallback, prdConfirmFamily, nullPrdConfirmFallback, enrichmentClarificationFamily, nullEnrichmentClarificationFallback } from '../agent-atoms'
 import { workspaceScene } from '../lib/workspace-scene'
 import { useConversationWidth } from '../hooks/use-conversation-width'
 import '../styles/theatre.css'
-import { FileText, Layers, History, Users, LayoutTemplate, Check, Hammer, Play, Activity, Maximize2, Minimize2, X } from './icons'
+import { FileText, Layers, History, Users, Play, Activity, Maximize2, Minimize2, X } from './icons'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, PastedImageRef } from './atoms'
@@ -84,7 +86,7 @@ export interface WorkspaceShellProps {
 }
 
 /**
- * 通透画室：项目/阶段/资料在窄边栏，独立画布为主，简短交流在下方。
+ * 工作画室：顶部阶段与资料，左侧完整画布，最右侧持续交流。
  * 历史与技术记录按需打开；资料覆盖画布边缘，不把草图再挤成窄栏。
  */
 export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
@@ -98,7 +100,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [localPanel, setLocalPanel] = React.useState<'versions' | 'materials' | 'records' | null>(null)
   const [focused, setFocused] = React.useState(false)
   const [mobileView, setMobileView] = React.useState<'conversation' | 'preview'>('conversation')
-  const conversation = useConversationWidth()
+  const conversation = useConversationWidth('right')
   const previewTarget = React.useRef<HTMLElement>(null)
   const busy = useAtomValue(hasActiveStreamAtom)
   const scopePending = props.decisionKind === 'lean_scope' && Boolean(props.cardOptions?.length && props.onCardOptionSelect)
@@ -107,10 +109,16 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const prdDialog = useAtomValue(activeSession ? prdConfirmFamily(activeSession) : nullPrdConfirmFallback)
   const clarificationDialog = useAtomValue(activeSession ? enrichmentClarificationFamily(activeSession) : nullEnrichmentClarificationFallback)
   const canConfirmSketch = Boolean(props.previewUrl && !props.deliveryPanel && props.onConfirmSketch && (stage === 'sketch_ready' || props.cardOptions?.some(option => option.id === 'ux_confirm_go')))
-  const sketchCue = `${project?.project_id ?? ''}:${props.previewUrl ?? ''}`
+
   React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
   const scene = scopePending ? { chapter: 1, title: '确认需求', description: '核对这次范围，确认后继续' }
     : workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
+  const stream = useAtomValue(agentStreamStateFamily(activeSession ?? '__workspace-empty__'))
+  const last = stream.events[stream.events.length - 1]
+  const decision = scopePending || requirementDialog || prdDialog || clarificationDialog ? 'requirements' : canConfirmSketch ? 'design' : undefined
+  const progress = deriveWorkspaceProgress({ project, stage, phase: phase ?? project?.desktop_phase ?? null, busy, decision, hasSketch: Boolean(props.previewUrl), error: last?.type === 'error' ? stream.last_error : undefined })
+  const live = pickLiveLine(buildProgressLines(stream.events, []))
+  const liveDetail = busy && live ? `${live.label}${live.detail ? ` · ${live.detail}` : ''}` : undefined
   const openTool = (name: 'documents' | 'collaboration' | 'versions' | 'materials' | 'records') => {
     setDocuments(name === 'documents' ? !documents : false)
     setCollaboration(name === 'collaboration' ? !collaboration : false)
@@ -118,26 +126,17 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
     if (name === 'versions') setTimelineExpanded(true)
   }
   return (
-    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused} data-has-preview={Boolean(props.deliveryPanel || props.previewUrl)} data-view={mobileView} data-resizing-conversation={conversation.resizing} style={{ '--studio-conversation-width': `${conversation.width}px` } as React.CSSProperties}>
-      <aside className="studio-sidebar" aria-label="项目导航">
-      {/* 顶栏 */}
-      <WorkspaceHeader
-        showConnection={false}
-        onAllProjects={props.onAllProjects}
-        onOpenSettings={props.onOpenSettings}
-        onUpgrade={props.onUpgrade}
-        onHome={props.onHome}
-      />
-      <nav className="studio-steps" aria-label="软件制作进度">
-        {['想法', '需求', '界面', '制作', '试用与交付'].map((label, index) => {
-          const Icon = index < scene.chapter ? Check : [FileText, FileText, LayoutTemplate, Hammer, Play][index]
-          return <button key={label} type="button" aria-current={scene.chapter === index ? 'step' : undefined} disabled={index > scene.chapter} title={index <= scene.chapter ? `回看${label}` : `${label}尚未开始`} onClick={() => openTool(index < 2 ? 'documents' : index === 2 ? 'versions' : 'records')}><Icon size={16} />{label}</button>
-        })}
-      </nav>
-      <p className="studio-sidebar-label">项目资料</p>
-      <nav className="studio-library" aria-label="项目资料"><button type="button" data-ai-id="docs-button" aria-pressed={documents} onClick={() => openTool('documents')}><FileText />文档</button><button type="button" data-ai-id="materials-button" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers />材料</button><button type="button" data-ai-id="versions-button" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History />版本</button><button type="button" data-ai-id="collaboration-button" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users />协作</button></nav>
-      <div className="studio-sidebar-foot"><StudioFumoNote /><WorkspaceConnection /></div>
-      </aside>
+    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused} data-has-preview={Boolean(props.deliveryPanel || props.previewUrl || scopePending)} data-view={mobileView} data-resizing-conversation={conversation.resizing} style={{ '--studio-conversation-width': `${conversation.width}px` } as React.CSSProperties}>
+      <div className="workspace-topbar">
+        <WorkspaceHeader compact showConnection={false} onAllProjects={props.onAllProjects} onOpenSettings={props.onOpenSettings} onUpgrade={props.onUpgrade} onHome={props.onHome} />
+        <WorkspaceProgress steps={progress} liveDetail={liveDetail} onRecords={() => openTool('records')} />
+        <nav className="workspace-project-tools" aria-label="项目资料">
+          <button type="button" className="theatre-tool" data-ai-id="docs-button" aria-label="文档" aria-pressed={documents} onClick={() => openTool('documents')}><FileText size={15} /></button>
+          <button type="button" className="theatre-tool" data-ai-id="materials-button" aria-label="材料" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers size={15} /></button>
+          <button type="button" className="theatre-tool" data-ai-id="versions-button" aria-label="版本" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History size={15} /></button>
+          <button type="button" className="theatre-tool" data-ai-id="collaboration-button" aria-label="协作" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users size={15} /></button>
+        </nav>
+      </div>
       <div className="studio-body" ref={conversation.containerRef}>
       <nav className="studio-view-switch" aria-label="工作区视图"><button type="button" aria-pressed={mobileView === 'conversation'} onClick={() => setMobileView('conversation')}>对话</button><button type="button" aria-pressed={mobileView === 'preview'} onClick={() => setMobileView('preview')}>草图与程序</button></nav>
       <main className="theatre-stage" ref={previewTarget}>
@@ -172,8 +171,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       </main>
       <button type="button" role="separator" aria-label="调整会话栏宽度" aria-orientation="vertical" className="studio-conversation-resizer" title="拖动调整会话栏；方向键微调，双击恢复默认" {...conversation.separatorProps} />
       <section className="theatre-conversation" aria-label="向导与下一步">
-        {canConfirmSketch && !focused && !documents && !collaboration && !localPanel && !busy && !props.confirming && !requirementDialog && !prdDialog && !clarificationDialog && <SketchCharacterReminder key={sketchCue} cue={sketchCue} previewRef={previewTarget} />}
+
         <ChatPanel presentation="theatre"
+          actionSlot={<footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{canConfirmSketch && <button type="button" data-ai-id="confirm-sketch-button" className="studio-primary" disabled={props.confirming} onClick={props.onConfirmSketch}>{props.confirming ? '正在开始制作…' : '开始制作'}<Play size={13} /></button>}{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>}
           cardOptions={scopePending ? undefined : props.cardOptions}
           decisionTitle={props.decisionTitle}
           decisionBody={props.decisionBody}
@@ -189,7 +189,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         />
         {props.notice && <p className="studio-notice" role="status">{props.notice}</p>}
       </section>
-      <footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{canConfirmSketch && <button type="button" data-ai-id="confirm-sketch-button" className="studio-primary" disabled={props.confirming} onClick={props.onConfirmSketch}>{props.confirming ? '正在开始制作…' : '开始制作'}<Play size={13} /></button>}{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>
+
       </div>
     </div>
   )

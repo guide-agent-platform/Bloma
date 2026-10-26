@@ -34,8 +34,8 @@ export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
 
   const messages: Record<WaitLevel, { title: string; safety?: string }> = {
     normal: { title: `我正在帮你${actionLabel}。` },
-    long: { title: `我正在帮你${actionLabel}。`, safety: '这个过程只发生在安全环境里，不会影响你的电脑文件。' },
-    timeout: { title: `这次花的时间比预期更长，我还在处理中。`, safety: '你随时可以看看当前进行到哪一步。' },
+    long: { title: `我正在帮你${actionLabel}。`, safety: '可以查看最近进展，也可以继续补充想法。' },
+    timeout: { title: `等待时间较长，可以查看最近进展。`, safety: '你随时可以看看当前进行到哪一步。' },
   }
 
   const { title, safety } = messages[level]

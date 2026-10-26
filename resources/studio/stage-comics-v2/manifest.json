@@ -63,5 +63,42 @@
       "sha256_asset": "7ae74f3dffd7b758e72347928ff12672ae0795935d98b52a7b5b734a6e971ff2",
       "bytes": 486618
     }
+  ],
+  "runtime_previews": [
+    {
+      "stage": "requirements",
+      "asset": "resources/studio/stage-comics-v2/requirements.thumb.webp",
+      "width": 1086,
+      "height": 362,
+      "sha256": "83283a11b718310fd50f23ea9a2fe6070273bd210735afa774ba59846617f747"
+    },
+    {
+      "stage": "design",
+      "asset": "resources/studio/stage-comics-v2/design.thumb.webp",
+      "width": 1086,
+      "height": 362,
+      "sha256": "733b352ff1ef920cfa0958b1ee580256be3563787341f65b64a55cf5e3feb850"
+    },
+    {
+      "stage": "build",
+      "asset": "resources/studio/stage-comics-v2/build.thumb.webp",
+      "width": 1086,
+      "height": 362,
+      "sha256": "49b5b3c5bd592412ab016aa42062e26c84507308d35e60688e78639c307feefe"
+    },
+    {
+      "stage": "verify",
+      "asset": "resources/studio/stage-comics-v2/verify.thumb.webp",
+      "width": 1086,
+      "height": 362,
+      "sha256": "0008b798b74c6da8993b90c113f8429dfc610a845c1948b3cc812d74cfcbb85c"
+    },
+    {
+      "stage": "deliver",
+      "asset": "resources/studio/stage-comics-v2/deliver.thumb.webp",
+      "width": 1086,
+      "height": 362,
+      "sha256": "b8a153bd62df3be830b552af8f2ad4788a45b90f0e52dece80a0fed28b9782ab"
+    }
   ]
 }

@@ -279,7 +279,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, l
   const header = hasTemplate
     ? // I1 措辞审查：allDone 说「本轮制作已结束」而非「已完成」——阶段结束≠功能可用，
       // 验收结论以交付说明（delivery 卡）为准
-      `${progress.allDone ? '本轮制作已结束' : `第 ${progress.current} / ${progress.total} 步`} · 已完成 ${progress.percent}%`
+      `${progress.allDone ? '本轮制作已结束' : `第 ${progress.current} / ${progress.total} 步`} · 已结束 ${progress.done} 步`
     : lines.length > 0 || doneSteps > 0
       ? `${stageLabel} · 已完成 ${doneSteps} 步`
       : '正在准备 / 理解你的需求…'

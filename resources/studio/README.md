@@ -8,6 +8,8 @@
 | `guide-wave.webp` | 单次点击后的轻微歪头、抬手回应 |
 | `guide-blush.webp` | 连续点击后的脸红与举拳头姿态 |
 | `guide-fumo.webp` | 侧栏可轻戳回弹的布偶；聊天头像与空状态保持静态 |
+| `guide-conversation-v1.webp` | 右侧最新助手发言的半身指引素材；原图保留，通过 CSS 朝向左侧作品 |
+| `stage-comics-v2/*.thumb.webp` | 顶部阶段条使用的五阶段三格漫画缩略图，详情见子目录清单 |
 
 ## 最终提示词要点
 

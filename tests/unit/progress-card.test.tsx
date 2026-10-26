@@ -180,7 +180,7 @@ describe('ProgressCard', () => {
       { key: 't', kind: 'tool', label: '写入文件', detail: 'app.js', status: 'running' },
     ]
     render(<ProgressCard stageLabel="制作应用" steps={steps} lines={live} doneSteps={0} onClose={vi.fn()} />)
-    expect(screen.getByText('第 1 / 3 步 · 已完成 0%')).toBeTruthy()
+    expect(screen.getByText('第 1 / 3 步 · 已结束 0 步')).toBeTruthy()
     expect(screen.getByText('进行中')).toBeTruthy()
     expect(screen.getByText('检查关键功能')).toBeTruthy()
     expect(screen.getByText(/正在：写入文件 · app\.js/)).toBeTruthy()
@@ -189,7 +189,7 @@ describe('ProgressCard', () => {
   it('judge_review 显示已完成步与进行中步并存', () => {
     const steps = mapStageToRunSteps('judge_review')!
     render(<ProgressCard stageLabel="审查生成的版本" steps={steps} lines={[]} doneSteps={2} onClose={vi.fn()} />)
-    expect(screen.getByText('第 3 / 3 步 · 已完成 67%')).toBeTruthy()
+    expect(screen.getByText('第 3 / 3 步 · 已结束 2 步')).toBeTruthy()
     // 已完成步骤出现两次"完成"：第 1、2 步行右侧
     expect(screen.getAllByText('完成').length).toBeGreaterThanOrEqual(2)
   })
