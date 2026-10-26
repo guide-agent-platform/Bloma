@@ -11,8 +11,8 @@ export function guiVerificationReadiness(projectId: string) {
     if (!brief.user_confirmed_at || project.ux_confirmation?.prd_fingerprint !== scope) {
       return { state: 'scope_unconfirmed', verification: 'not_run', note: '当前目标或界面方向尚未确认，不能据开发观察交付。' }
     }
-    if (!existsSync(guiSuitePath(projectId))) return { state: 'rules_missing', verification: 'not_run', next_tool: 'register_gui_check',
-      note: '主路径能运行时就登记本次业务规则，再verify_app按真实失败修复；不必等所有外观打磨完。' }
+    if (!existsSync(guiSuitePath(projectId))) return { state: 'rules_missing', verification: 'not_run', next_tool: 'verify_app',
+      note: '可直接verify_app(script:"tests/acceptance.mjs")冻结并执行原生应用测试；也可登记旧动作规则。无需把脚本翻译成动作表。' }
     const suite = parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8')))
     if (suite.scope_hash !== scope || suite.design_hash !== project.ux_confirmation.design_hash) {
       return { state: 'rules_stale', verification: 'not_run', next_tool: 'read_production_context', note: '现有规则与当前确认版本不一致，先核对verification-gui协议，不得降低预期。' }

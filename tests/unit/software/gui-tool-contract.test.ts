@@ -51,7 +51,7 @@ function repairRecordedSteps() {
     ({ id: step.id, kind: step.action, selector: step.selector, ...(step.action === 'expect' ? { equals: step.text } : {}) })) }
 }
 it('corrected real-history input registers without copying expectations; source intent, coverage and frozen assertions remain enforced', async () => {
-  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_missing', next_tool: 'register_gui_check', verification: 'not_run' })
+  expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_missing', next_tool: 'verify_app', verification: 'not_run' })
   const tool = buildLeanGuiTool(project.project_id), corrected = repairRecordedSteps()
   expect(tool.input_schema.required).not.toContain('expectations')
   expect(validateToolInput(tool.name, corrected, tool.input_schema)).toBeUndefined()

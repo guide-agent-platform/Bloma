@@ -1,0 +1,154 @@
+{
+  "baseline": "938e4ed",
+  "host_first_commit": "55e9ba9",
+  "project_id": "063292c4-8693-48ba-b9d9-5662f9cca830",
+  "status": "completed",
+  "release_id": "1eed3645f105b7cffc5b66e7dbe56ed7173df6b0c5cf09b3488b9676ca8e3781",
+  "core_status": "passed",
+  "requirements": [
+    {
+      "id": "F-001",
+      "requirement_hash": "772a5dfaf779101bb56716b2864cd273bfd903b2f189814ab33d8fcaad77e38f",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-002",
+      "requirement_hash": "c29deaf6ea65dc706b6aa8456e2611854e181196da2a026069300c9e571129d7",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-003",
+      "requirement_hash": "a95fa653e9124db390d802c0d06ee20140568c8fc475ed1138fbe0620bf3200a",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-004",
+      "requirement_hash": "6d09864d24423d85ff17596a66e640940ff71a5a2f39e55ea6987e5fc4b06435",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-005",
+      "requirement_hash": "8c91e08e338ef731c06834181fc2ccbe79d721759da41118a06bbaf4c978b41f",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-006",
+      "requirement_hash": "adc58c036f04615c63ae5caa8b0c3db5158ffd25b0a52d8d39cee86d4dfd8881",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-007",
+      "requirement_hash": "307608bf59ee75c558ad7048ac5954c3c90d52b3a84805f6b6f7a712e9827648",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-008",
+      "requirement_hash": "e62f9c6b41d5094f64eab4849d0dac5baed5036c51eeb4e0233cd91e6dbc9e92",
+      "implementation": "implemented",
+      "verification": "passed"
+    }
+  ],
+  "gui_method": "node:test",
+  "native_cases": [
+    {
+      "id": "native-1",
+      "passed": true,
+      "actual": {
+        "test": "F-001 courses"
+      }
+    },
+    {
+      "id": "native-2",
+      "passed": true,
+      "actual": {
+        "test": "F-002 tasks"
+      }
+    },
+    {
+      "id": "native-3",
+      "passed": true,
+      "actual": {
+        "test": "F-003 filters"
+      }
+    },
+    {
+      "id": "native-4",
+      "passed": true,
+      "actual": {
+        "test": "F-005 statistics"
+      }
+    },
+    {
+      "id": "native-5",
+      "passed": true,
+      "actual": {
+        "test": "F-001 rename"
+      }
+    },
+    {
+      "id": "native-6",
+      "passed": true,
+      "actual": {
+        "test": "F-004 study records"
+      }
+    },
+    {
+      "id": "native-7",
+      "passed": true,
+      "actual": {
+        "test": "F-001 linked deletion"
+      }
+    },
+    {
+      "id": "native-8",
+      "passed": true,
+      "actual": {
+        "test": "F-006 export"
+      }
+    },
+    {
+      "id": "native-9",
+      "passed": true,
+      "actual": {
+        "test": "F-002 deletion"
+      }
+    },
+    {
+      "id": "native-10",
+      "passed": true,
+      "actual": {
+        "test": "F-006 restore"
+      }
+    },
+    {
+      "id": "native-11",
+      "passed": true,
+      "actual": {
+        "test": "F-007 reject bad backups"
+      }
+    },
+    {
+      "id": "native-12",
+      "passed": true,
+      "actual": {
+        "test": "F-008 real browser and server reopen"
+      }
+    }
+  ],
+  "model_queries": 0,
+  "provider_calls": 0,
+  "business_unchanged": true,
+  "ledger_unchanged": true,
+  "window_requests": 55,
+  "window_priced_upper_rmb": 0.960841,
+  "older_accounting_unchanged": true,
+  "verification_boundary": "operator-authored native cases derived from frozen independent plan; production host verification and delivery, not fresh autonomous model generation",
+  "raw_report_sha256": "75F08F0612BEF52A4C7B60465D1B175BCAF18AE360FA4EF028AD96E034FC7FE7"
+}

@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import { violatesCommandBlacklist } from './contract-schema'
 import { buildDriverEnv, resolveDriverVenvCommand } from './process-driver'
 import { loopbackUrl } from '../software/process-manager'
-import { validateSoftwareCommand, resolveSoftwareCommand, softwareEnvironment } from '../software/command-runtime'
+import { validateSoftwareCommand, resolveSoftwareCommand, softwareEnvironment, bindSoftwareProfile } from '../software/command-runtime'
 
 /** 入口声明文件（项目根相对）。 */
 export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
@@ -191,9 +191,10 @@ interface SpawnedChild {
   stderr: string
 }
 
-function defaultSpawn(command: string[], cwd: string, env?: Record<string, string>): ChildProcess {
-  // windowsHide 隐藏控制台宿主；GUI 窗口（tkinter 等）不受影响照常弹出
-  return nodeSpawn(command[0]!, command.slice(1), { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+function defaultSpawn(command: string[], cwd: string, env?: Record<string, string>, visibleDesktop=false): ChildProcess {
+  // Electron's first native window honors STARTUPINFO. Hide helpers, not the
+  // product window whose visibility the startup check is meant to observe.
+  return nodeSpawn(command[0]!, command.slice(1), { cwd, env, windowsHide: !visibleDesktop, stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
 async function defaultCaptureWindow(titleHint: string | undefined): Promise<Buffer | null> {
@@ -701,7 +702,8 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
         signal.throwIfAborted()
         const declaration = readLaunchDeclaration(rootPath)
         const resolved = declaration?.ok && declaration.launch.schema_version === 2 ? resolveSoftwareCommand(rootPath, command, env) : { command, env }
-        child = (deps.spawnImpl ?? defaultSpawn)(resolved.command, cwd, resolved.env)
+        if(declaration?.ok&&declaration.launch.schema_version===2)resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
+        child = deps.spawnImpl?deps.spawnImpl(resolved.command,cwd,resolved.env):defaultSpawn(resolved.command,cwd,resolved.env,Boolean(declaration?.ok&&declaration.launch.ui==='electron'))
         return child
       } })
     deps.signal?.throwIfAborted()

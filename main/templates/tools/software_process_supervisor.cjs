@@ -18,7 +18,7 @@ process.stdin.on('data', chunk => {
   received = true
   try {
     const config = JSON.parse(input.slice(0, end)); input = ''
-    child = spawn(config.command[0], config.command.slice(1), { cwd: config.cwd, env: config.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    child = spawn(config.command[0], config.command.slice(1), { cwd: config.cwd, env: config.env, windowsHide: config.windowsHide!==false, stdio: ['ignore', 'pipe', 'pipe'] })
     child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr)
     child.once('error', error => { process.stderr.write(error.message); process.exit(1) })
     child.once('exit', code => { process.exitCode = code ?? 1; process.stdin.destroy() })

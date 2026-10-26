@@ -19,6 +19,7 @@ import { mainRootDir } from '../platform/paths'
 import { softwareEnvironment, resolveSoftwareCommand } from './command-runtime'
 import { runtimeBindingVersion } from './runtime-bindings'
 import { fileDigest, prepareSoftwareRelease, readSoftwareCandidate, runtimeInventory, verifyReleaseSource, type SoftwareRelease } from './release-store'
+import { frozenNativeGuiVersion } from './native-gui-tests'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
   core?: CoreVerificationResult; security?: SecurityScanResult; launch?: LaunchSmokeResult | null; reused?: boolean; report_path?: string }
@@ -33,7 +34,8 @@ async function inputs(projectId: string, requestId: string, signal?: AbortSignal
   const project = findProject(projectId), brief = readPrdBackplane(projectId), declared = readLaunchDeclaration(project.root_path)
   if (project.workflow_version !== 'software-v1' || !brief.user_confirmed_at || !declared?.ok) throw Error('SOFTWARE_VERIFY_CONFIRMED_ENTRY_REQUIRED')
   const ruleVersion = [guiSuitePath(projectId), cliSuitePath(projectId)].map(file => existsSync(file) ? digest(readFileSync(file)) : null)
-  const fixtureVersion = existsSync(guiSuitePath(projectId)) ? frozenGuiFixtureVersion(projectId, parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8')))) : []
+  const gui=existsSync(guiSuitePath(projectId))?parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId),'utf8'))):undefined
+  const fixtureVersion = gui ? [...frozenGuiFixtureVersion(projectId,gui),frozenNativeGuiVersion(projectId,gui.native_tests,project.root_path)] : []
   const environment = softwareEnvironment(projectId), resolved = resolveSoftwareCommand(project.root_path, declared.launch.command, environment)
   const executable = resolved.command[0], runtime: unknown[] = []
   let reusable = isAbsolute(executable) && existsSync(executable) && !/python(?:3)?(?:\.exe)?$/i.test(basename(executable))
@@ -71,6 +73,20 @@ export async function recentSoftwareVerification(projectId: string, requestId: s
   } catch (error) { signal?.throwIfAborted(); return } // unreadable or incomplete evidence is never reused
 }
 const active = new Set<string>()
+/** Syntax/bootstrap errors and wholly assertion-free placeholders are not a
+ * business failure baseline. Bind this exception to the last intact receipt and
+ * exact rule bytes; a real failed assertion never authorizes changing tests. */
+export function canRepairUnexecutedNativePlan(projectId:string,suiteHash:string){
+  try{
+    const receipt=JSON.parse(readFileSync(receiptPath(projectId),'utf8')) as Receipt
+    if(receipt.state!=='complete'||receipt.result?.status!=='unverified'||digest(receipt.result)!==receipt.result_hash)return false
+    const gui=receipt.result.core?.host_gui
+    if(gui?.method!=='node:test'||gui.suite_hash!==suiteHash)return false
+    if(!gui.steps.length)return Boolean(gui.error?.startsWith('GUI_NATIVE_CASE_NOT_RUN')&&gui.native_evidence?.assertions===0
+      ||gui.error?.startsWith('GUI_NATIVE_REPORT_MISSING')&&!/\bF-\d+\b/.test(gui.error))
+    return gui.native_evidence?.assertions===0&&gui.error?.startsWith('GUI_NATIVE_ASSERTIONS_MISSING')===true
+  }catch{return false}
+}
 export async function verifySoftwareCandidate(projectId: string, requestId: string, signal?: AbortSignal, force = false): Promise<SoftwareVerification> {
   const file = receiptPath(projectId)
   if (active.has(file)) throw Error('SOFTWARE_VERIFY_ALREADY_RUNNING')
@@ -94,7 +110,7 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     const brief = readPrdBackplane(projectId), windowReady = brief.lean_brief?.ui !== 'required'
       || candidate.launch.ui === 'browser' && launch.http_ready === true
       || launch.criteria && !launch.criteria.degraded && launch.criteria.window_found && launch.criteria.responsive && launch.criteria.stable && launch.criteria.closed_gracefully
-    if (!launch.passed || !windowReady) { result.status = 'unverified'; result.summary = `正常启动未通过：${launch.detail}`; return result }
+    if (!launch.passed || !windowReady) { result.status = 'unverified'; result.summary = `正常启动未通过：${launch.detail}${launch.outputExcerpt?'\n'+launch.outputExcerpt.slice(-4000):''}`; return result }
     await verifyReleaseSource(candidate, signal)
     if ((await inputs(projectId, requestId, signal)).key !== version.key) throw Error('SOFTWARE_VERIFY_INPUT_CHANGED')
     result.status = localPending ? 'environment_blocked' : 'passed'; result.summary = localPending ? core.distribution!.detail : '当前候选的实际行为、安全静态检查与正常启动通过；结束制作即可由宿主收口。'

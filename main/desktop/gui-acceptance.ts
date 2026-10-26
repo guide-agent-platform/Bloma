@@ -11,6 +11,7 @@ import { verificationFingerprint } from './verification-fingerprint'
 import { GUI_ACTION_KINDS } from './gui-tool-contract'
 import { materializeGuiFixtures } from './gui-fixtures'
 import { isSoftwareProject } from './workflow-policy'
+import { validateNativeGuiTests, type NativeGuiTests } from '../software/native-gui-tests'
 
 type Action = ({ id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
   | { id: string; kind: 'select'; selector: string; value?: string; label?: string }
@@ -22,6 +23,7 @@ type Action = ({ id: string; kind: 'fill'; selector: string; value: string } | {
   | { id: string; kind: 'expect_file'; path: string; equals?: string; contains?: string; sha256?: string; nonempty?: true }
   | { id: string; kind: 'restart' | 'lock_data' | 'unlock_data' | 'storage_full' | 'storage_restore' | 'corrupt_data' | 'remove_data' }) & { has_text?: string }
 export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: string[]; steps: Action[]
+  native_tests?: NativeGuiTests
   /** Host-stamped provenance for automatically prepared controls and expectations. */
   design_hash?: string
   control_bindings?: Array<{ selector: string; description: string }>
@@ -30,6 +32,8 @@ export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: st
 }
 export interface GuiAcceptanceResult {
   version: 1; scope: 'host_native_gui_business'; status: 'passed' | 'failed' | 'unverified'
+  method?: 'action_steps' | 'node:test'
+  native_evidence?: {interactions:number;assertions:number}
   suite_hash: string; covers: string[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string
   scope_hash?: string; source_fingerprint?: string; source_unchanged?: boolean
 }
@@ -41,7 +45,8 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
   const suite = value as GuiAcceptanceSuite
   if (!suite || suite.version !== 1 || !/^[a-f0-9]{64}$/.test(suite.scope_hash) || !Array.isArray(suite.covers) || !suite.covers.length
     || suite.covers.some(id => typeof id !== 'string' || !/^F-\d+$/.test(id)) || new Set(suite.covers).size !== suite.covers.length
-    || !Array.isArray(suite.steps) || !suite.steps.length) throw new Error('GUI_SUITE_INVALID')
+    || !Array.isArray(suite.steps) || (!suite.steps.length && !suite.native_tests)) throw new Error('GUI_SUITE_INVALID')
+  if (suite.native_tests) { validateNativeGuiTests(suite.native_tests); if (suite.steps.length || suite.acceptance_refs || suite.fixtures) throw Error('GUI_NATIVE_MIXED_PROTOCOL') }
   if (suite.steps.length > 96) throw new Error(`GUI_STEP_LIMIT_EXCEEDED: ${suite.steps.length}>96`)
   if (suite.design_hash !== undefined && !/^[a-f0-9]{64}$/.test(suite.design_hash)) throw new Error('GUI_DESIGN_HASH_INVALID')
   const ids = new Set<string>()
@@ -91,7 +96,7 @@ export function parseGuiSuite(value: unknown, options: { allowActionsOnly?: bool
   if (storageFault) throw new Error('GUI_DATA_LOCK_UNBALANCED')
   const groups = splitSteps(suite)
   if (groups.length > 8) throw new Error(`GUI_RESTART_LIMIT_EXCEEDED: ${groups.length}>8`)
-  const emptySegment = groups.findIndex(group => !options.allowActionsOnly && (!group.length || !group.some(step => step.kind === 'expect' || step.kind === 'expect_file')))
+  const emptySegment = groups.findIndex(group => !suite.native_tests && !options.allowActionsOnly && (!group.length || !group.some(step => step.kind === 'expect' || step.kind === 'expect_file')))
   if (emptySegment >= 0) throw new Error(`GUI_SEGMENT_NEEDS_ASSERTION: 第${emptySegment + 1}段缺少expect；restart后也需实际断言，不要以restart结尾`)
   return suite
 }
@@ -115,6 +120,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
   try {
     if (statSync(path).size > 128 * 1024) throw new Error('GUI_SUITE_TOO_LARGE')
     const bytes = readFileSync(path), suite = parseGuiSuite(JSON.parse(bytes.toString('utf8')))
+    result.method=suite.native_tests?'node:test':'action_steps'
     result.suite_hash = createHash('sha256').update(bytes).digest('hex'); result.covers = suite.covers
     if (suite.scope_hash !== options.scopeHash) throw new Error('GUI_SCOPE_STALE')
     if (suite.design_hash && suite.design_hash !== options.designHash) throw new Error('GUI_DESIGN_STALE')
@@ -125,7 +131,11 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     result.scope_hash = options.scopeHash; result.source_fingerprint = before
     const root = realpathSync(options.root)
     const launch = readLaunchDeclaration(root)
-    if (launch?.ok && launch.launch.schema_version === 2 && ['electron', 'browser'].includes(launch.launch.ui ?? '')) {
+    if (suite.native_tests) {
+      if (!isSoftwareProject(options.projectId) || !launch?.ok || launch.launch.schema_version !== 2 || !['electron','browser'].includes(launch.launch.ui??'')) throw Error('GUI_NATIVE_RUNTIME_UNSUPPORTED')
+      const { runNativeGuiTests } = await import('../software/native-gui-observer')
+      Object.assign(result,await runNativeGuiTests({projectId:options.projectId,root,launch:launch.launch,suite,signal:options.signal}))
+    } else if (launch?.ok && launch.launch.schema_version === 2 && ['electron', 'browser'].includes(launch.launch.ui ?? '')) {
       temporary = mkdtempSync(join(tmpdir(), 'bloma-host-software-gui-'))
       materializeGuiFixtures(options.projectId, suite, join(temporary, 'data'))
       const { observeSoftwareGui } = await import('../software/gui-observer')

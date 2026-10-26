@@ -70,7 +70,7 @@ export async function launchSoftwareForUser(projectId: string, sourceRoot: strin
     await openBrowser(instance.url)
     return { started: true, pid: instance.pid, url: instance.url, detail: '已在浏览器打开，可以开始使用。' }
   }
-  const instance = await startSoftwareProcess({ projectId, root, sessionId: 'user-launch', command: launch.command, dataDir, independentUserApp: true })
+  const instance = await startSoftwareProcess({ projectId, root, sessionId: 'user-launch', command: launch.command, dataDir, independentUserApp: true, visibleDesktop:launch.ui==='electron' })
   startedId = instance.id
   writeTextFileAtomic(marker, JSON.stringify({ processId: instance.id }))
   await new Promise(resolve => setTimeout(resolve, 500))

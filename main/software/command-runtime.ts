@@ -97,15 +97,30 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
   return { command, env }
 }
 
-export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string } }) {
+/** Bind Chromium's profile at execution time, not in the immutable launch
+ * declaration. The same app uses isolated test profiles and durable user data. */
+export function bindSoftwareProfile(command:string[],environment:Record<string,string>):string[]{
+  if(!/^electron(?:\.exe)?$/i.test(basename(command[0]))||!environment.APP_DATA_DIR||command.some(arg=>arg==='--user-data-dir'||arg.startsWith('--user-data-dir=')))return command
+  const profile=join(environment.APP_DATA_DIR,'electron-profile');mkdirSync(profile,{recursive:true})
+  return[...command,`--user-data-dir=${profile}`]
+}
+
+export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string; targetId?:string; nativeTest?: { file: string; phase: string; trace: string } } }) {
   input.signal?.throwIfAborted()
   const cwd = projectDirectory(input.root, input.cwd)
   const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir))
+  resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
   if (input.browserBinding) {
     const endpoint = new URL(input.browserBinding.endpoint)
     if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') throw Error('BROWSER_SCRIPT_OWNED_ENDPOINT_REQUIRED')
     resolved.env.BLOMA_DEBUG_CDP = endpoint.href
     resolved.env.BLOMA_DEBUG_PAGE = input.browserBinding.page
+    if(input.browserBinding.targetId)resolved.env.BLOMA_DEBUG_TARGET=input.browserBinding.targetId
+    if (input.browserBinding.nativeTest) {
+      resolved.env.BLOMA_NATIVE_TEST_FILE = input.browserBinding.nativeTest.file
+      resolved.env.BLOMA_NATIVE_TEST_PHASE = input.browserBinding.nativeTest.phase
+      resolved.env.BLOMA_NATIVE_TEST_TRACE = input.browserBinding.nativeTest.trace
+    }
   }
   const timeoutMs = input.timeoutMs ?? 120000
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 300000) throw new Error('COMMAND_TIMEOUT_INVALID')

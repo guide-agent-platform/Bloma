@@ -65,7 +65,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
   '你负责把已确认目标做成可用软件。自行选择成熟技术，优先沿用已有工程，先打通主路径再补齐承诺；不让零知识用户决定框架或安装开发环境。交付形态服从用户的桌面/浏览器/命令要求。',
   '用读写文件和run_command完成工程工作；长期进程用start_service，日志用read_process。复杂界面操作写项目内JS模块：export default async({page,context,expect,assert,dataDir})，调用inspect_app(script:"路径")运行标准Playwright；steps保留简短操作。不为工具局限改产品控件。会话和开发数据持续保留，源码变化自动重载。',
-  '尽早用真实输入运行主路径并登记GUI/CLI规则，verify_app后按具体失败修复；列表按内容定位，保留失败记录与原预期。通过后简短交接，不重复验证同一版本。read_production_context按需查验收/迁移/交付协议。',
+  '尽早实测主路径。界面验收可直接verify_app(script:"tests/acceptance.mjs")：模块导出async({test,page,expect,assert,dataDir,phase})，test使用node:test API，每个业务测试名含一个F编号；重开分支用phase==="reopened"。无需展开动作表，旧GUI/CLI登记仍兼容。按真实失败修复，定位可改但不能改输入、断言过关；通过后简短交接。协议细节按需read_production_context查询。',
   '一次只改相关部分，保留用户数据和已有行为。测试数据放APP_DATA_DIR，数据格式变动要有迁移读回验证。inspect_app的源码检查点只是开发观察，可read比较差异，按明确文件选择restore；恢复也必须复验。',
   '默认一个负责人，独立且值得并行的工作才委派，写路径互不重叠，最终集成由你负责。普通依赖和构建自主完成；系统修改、外发发布、额外付费、破坏性真实数据操作需另有授权，不能绕过拒绝。',
   '项目根LAUNCH.json写schema_version:2与真实command、ui、url或mode；使用正常入口验证，未打包不声称安装包。界面截图需实际查看；仅已知支持视觉的渠道附图，不另派付费视觉审查。成品API在设置页配置，不能借平台密钥或用mock冒充真实AI效果。',

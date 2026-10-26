@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createServer } from 'node:net'
 import { getPromaHome } from '../../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../../storage/json-store'
-import { projectDirectory, resolveSoftwareCommand, softwareEnvironment } from './command-runtime'
+import { projectDirectory, resolveSoftwareCommand, softwareEnvironment, bindSoftwareProfile } from './command-runtime'
 import { mainRootDir } from '../platform/paths'
 import { softwareVerificationFingerprint } from '../desktop/verification-fingerprint'
 
@@ -71,7 +71,7 @@ export async function stopSoftwareProcess(projectId: string, id: string, session
   return softwareProcess(projectId, id, sessionId)
 }
 
-export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean; internal?: boolean }): Promise<SoftwareProcessSnapshot> {
+export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean; internal?: boolean; visibleDesktop?:boolean }): Promise<SoftwareProcessSnapshot> {
   input.signal?.throwIfAborted()
   const cwd = projectDirectory(input.root, input.cwd), url = input.url ? loopbackUrl(input.url) : undefined
   const commandKey = JSON.stringify([cwd, input.command, input.dataDir ?? null, Boolean(input.internal)])
@@ -92,16 +92,17 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
   })
   const environment = softwareEnvironment(input.projectId, input.dataDir)
   const resolved = resolveSoftwareCommand(input.root, input.command, environment)
+  resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
   const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, root: projectDirectory(input.root), source, data_dir: environment.APP_DATA_DIR, ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
   // Save ownership before spawn. A failure cannot leave an untracked child.
   const file = pathFor(snapshot.id)
   writeJsonFile(file, snapshot)
   const supervisor = input.independentUserApp ? resolved : resolveSoftwareCommand(input.root,
     ['node', join(mainRootDir(), 'templates/tools/software_process_supervisor.cjs')], softwareEnvironment(input.projectId, input.dataDir))
-  const child = spawn(supervisor.command[0], supervisor.command.slice(1), { cwd, env: supervisor.env, windowsHide: true,
+  const child = spawn(supervisor.command[0], supervisor.command.slice(1), { cwd, env: supervisor.env, windowsHide: input.independentUserApp?!input.visibleDesktop:true,
     detached: process.platform !== 'win32' || input.independentUserApp, stdio: [input.independentUserApp ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
   child.stdin?.on('error', () => { /* lifecycle error/exit handlers own terminal state */ })
-  if (!input.independentUserApp) child.stdin?.write(`${JSON.stringify({ ...resolved, cwd })}\n`)
+  if (!input.independentUserApp) child.stdin?.write(`${JSON.stringify({ ...resolved, cwd, windowsHide:!input.visibleDesktop })}\n`)
   const entry: OwnedProcess = { snapshot, commandKey, file, child, signal: input.signal, restart: signal => startSoftwareProcess({ ...input, signal }), abort: () => { void stopSoftwareProcess(input.projectId, snapshot.id).catch(() => undefined) } }
   processes.set(snapshot.id, entry)
   for (const [id, previous] of processes) if (processes.size > 128 && !['starting', 'running', 'stopping'].includes(previous.snapshot.state)) processes.delete(id)

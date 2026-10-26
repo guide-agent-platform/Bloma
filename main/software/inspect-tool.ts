@@ -22,6 +22,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
     input_schema: { type: 'object', properties: { mode: { type: 'string', enum: ['once', 'open', 'act', 'read', 'reload', 'close', 'restore'] },
       debug_session_id: { type: 'string' }, process_id: { type: 'string' }, since_seq: { type: 'integer', minimum: 0 },
       script: { type: 'string', minLength: 1, maxLength: 512 }, timeout_ms: { type: 'integer', minimum: 100, maximum: 300000 },
+      phase:{type:'string',enum:['initial','reopened'],description:'node:test开发检查可区分初次与重开；正式verify_app自动管理两次执行。'},
       checkpoint_id: { type: 'string' }, expected_source: { type: 'string' }, paths: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string' } },
       include_image: { type: 'boolean' }, fixtures: GUI_FIXTURE_SCHEMA, steps: guiStepsSchema(32, SOFTWARE_GUI_ACTION_KINDS) } },
     execute: async (input, ctx) => {
@@ -80,10 +81,11 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
             openingDebugId = snapshot.id
             if (additions) installDebugFixtures(projectId, ctx.sessionId, snapshot.id, additions)
             snapshot = await actDebugSession({ ...args, id: snapshot.id, script: input.script as string | undefined, timeoutMs: input.timeout_ms as number | undefined,
+              phase:input.phase as 'initial'|'reopened'|undefined,
               steps: input.script ? undefined : steps ?? [{ id: 'screen', kind: 'expect', selector: 'body', nonempty: true }] })
           } else if (mode === 'close') snapshot = await closeDebugSession(projectId, ctx.sessionId, args.id)
           else if (mode === 'read') snapshot = readDebugSession(projectId, ctx.sessionId, args.id, Number(input.since_seq ?? 0))
-          else { if (additions) installDebugFixtures(projectId, ctx.sessionId, args.id, additions); snapshot = await actDebugSession({ ...args, steps, script: input.script as string | undefined, timeoutMs: input.timeout_ms as number | undefined, reload: mode === 'reload' }) }
+          else { if (additions) installDebugFixtures(projectId, ctx.sessionId, args.id, additions); snapshot = await actDebugSession({ ...args, steps, script: input.script as string | undefined, phase:input.phase as 'initial'|'reopened'|undefined, timeoutMs: input.timeout_ms as number | undefined, reload: mode === 'reload' }) }
           if (mode === 'act' || mode === 'reload') snapshot = readDebugSession(projectId, ctx.sessionId, args.id, Number(cursor))
           if (mode === 'open' && snapshot.url) previewChanged?.(snapshot.url)
           if (mode === 'close') previewChanged?.(activeSoftwarePreview(projectId, ctx.sessionId))

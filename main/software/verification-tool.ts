@@ -5,14 +5,18 @@ import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { closeDebugSessions } from './debug-sessions'
 import { stopSoftwareSession, redactSoftwareOutput } from './process-manager'
 import { verifySoftwareCandidate } from './verification'
+import { registerNativeGuiTests } from './native-gui-registration'
 
 export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<typeof createSoftwareCollaborationPolicy>, previewChanged?: (url?: string) => void): AgentLoopTool {
-  return { name: 'verify_app', description: '直接验收当前软件：停止本会话调试服务，冻结候选，用已登记GUI/CLI规则实际检查行为、安全静态问题和正常启动。返回具体失败步骤/期望/实际；修复后再调用。相同执行、源码/依赖/规则/环境均未变时复用5分钟内完整通过结果，结束制作无需重复自测。它不自行改用户目标或把项目标记交付。',
-    input_schema: { type: 'object', additionalProperties: false, properties: { force: { type: 'boolean', description: '只在确需强制重新实测时为true。' } } },
+  return { name: 'verify_app', description: '直接验收当前软件：可传script指向项目测试目录内的原生测试模块，导出async({test,page,expect,assert,dataDir,phase})，test为node:test API，测试名标注单个F编号；宿主自动冻结源码，独立执行并核对覆盖，无需动作表。reopened分支自动触发关闭重开。也兼容旧GUI/CLI规则。检查行为、安全及正常启动；按真实失败修复。相同版本/环境完整通过结果5分钟复用。它不改目标、不自行标记交付。',
+    input_schema: { type: 'object', additionalProperties: false, properties: { force: { type: 'boolean', description: '只在确需强制重新实测时为true。' },
+      script:{type:'string',description:'项目内应用测试，自动冻结并实际验收，无需动作表。使用参数提供的test(node:test API)、expect/assert和page；业务测试名包含单个需求F编号。'},restart:{type:'boolean',description:'按initial/reopened两次执行，实际关闭并重开应用；reopened分支也会自动识别。'} } },
     execute: async (input, ctx) => {
       try {
         policy.assertCommand(ctx)
         if (ctx.projectId !== projectId || input.force !== undefined && typeof input.force !== 'boolean') throw Error('SOFTWARE_VERIFY_INPUT_INVALID')
+        if(input.script===undefined&&input.restart!==undefined)throw Error('SOFTWARE_VERIFY_INPUT_INVALID: restart与script一起提供')
+        if(input.script!==undefined){if(typeof input.script!=='string'||input.restart!==undefined&&typeof input.restart!=='boolean')throw Error('GUI_NATIVE_INPUT_INVALID');registerNativeGuiTests(projectId,input.script,input.restart===true)}
         await closeDebugSessions(projectId, ctx.sessionId); await stopSoftwareSession(projectId, ctx.sessionId); previewChanged?.()
         const result = await verifySoftwareCandidate(projectId, ctx.requestId, ctx.signal, input.force === true)
         const failed = result.core?.host_gui?.steps.find(step => !step.passed)

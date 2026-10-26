@@ -8,12 +8,14 @@ import { guiStepsSchema, GUI_CHECK_EXAMPLE, guiInputFailure, SOFTWARE_GUI_ACTION
 import { isSoftwareProject } from './workflow-policy'
 import { sealGuiFixtures, GUI_FIXTURE_SCHEMA } from './gui-fixtures'
 import { assertRetainedSoftwareBehavior } from '../software/regression-baseline'
+import { registerNativeGuiTests } from '../software/native-gui-registration'
 
 /** Bind user intent to a host-executed GUI suite. Registration is never PASS. */
 export function buildLeanGuiTool(projectId: string): AgentLoopTool {
   const software = isSoftwareProject(projectId)
   return { name: 'register_gui_check', description: `登记宿主真实GUI检查。steps需唯一id和kind，expect精确预期用equals；acceptance_refs为expect步骤id→F编号数组。${software ? '宿主自动绑定已确认任务单，无需复制expectations。' : 'expectations逐项复制任务单expected。'}示例：${JSON.stringify(GUI_CHECK_EXAMPLE)}。只登记不等于通过；同目标修复不能降低固定输入或预期。`,
-    input_schema: { type: 'object', required: software ? ['steps', 'acceptance_refs'] : ['steps', 'expectations', 'acceptance_refs'], properties: {
+    input_schema: { type: 'object', required: software ? [] : ['steps', 'expectations', 'acceptance_refs'], properties: {
+      ...(software?{script:{type:'string',description:'测试目录内模块，导出async({test,page,expect,assert,dataDir,phase})；test为提供的node:test API，无需导入。每个业务案例名含单个F编号，与steps二选一。'},restart:{type:'boolean',description:'需要关闭浏览器和服务后重开时为true；phase区分initial/reopened，reopened分支可自动识别。'}}:{}),
       steps: guiStepsSchema(96, software ? SOFTWARE_GUI_ACTION_KINDS : LEGACY_GUI_ACTION_KINDS),
       expectations: { type: 'object', additionalProperties: { type: 'string' }, description: software ? '可省略；如提供必须与宿主预期完全一致，不能改写用户意图。' : 'F编号→任务单expected原文，必须覆盖全部功能。' },
       acceptance_refs: { type: 'object', additionalProperties: { type: 'array', minItems: 1, items: { type: 'string', pattern: '^F-\\d+$' } }, description: '例如 {"answer":["F-001"]}；键必须是expect步骤id，全部功能都要被实际断言覆盖。' },
@@ -22,6 +24,12 @@ export function buildLeanGuiTool(projectId: string): AgentLoopTool {
       try {
         ctx.signal.throwIfAborted()
         if (ctx.projectId !== projectId) throw new Error('GUI_PROJECT_MISMATCH')
+        if(software&&input.script!==undefined){
+          if(typeof input.script!=='string'||input.steps!==undefined||input.acceptance_refs!==undefined||input.expectations!==undefined||input.fixtures!==undefined||input.restart!==undefined&&typeof input.restart!=='boolean')throw Error('GUI_NATIVE_INPUT_INVALID')
+          registerNativeGuiTests(projectId,input.script,input.restart===true)
+          return{output:'已冻结原生应用测试，尚未执行；调用verify_app按正常入口实测。',feedback:{schema_version:1,execution:'completed',verification:'not_applicable',source:'host',scope:'gui_registration'}}
+        }
+        if(!input.steps||!input.acceptance_refs)throw Error('GUI_EXPECT_OBSERVATIONS_REQUIRED: 提供script，或steps和acceptance_refs')
         const brief = readPrdBackplane(projectId), project = findProject(projectId), scope = prdScopeFingerprint(brief)
         if (!brief.user_confirmed_at || !brief.lean_brief || project.ux_confirmation?.prd_fingerprint !== scope) throw new Error('GUI_CONFIRMED_SCOPE_REQUIRED')
         const authoritative = Object.fromEntries(brief.requirements.map(row => [row.id, trustedAcceptance(brief, row)]))
@@ -37,7 +45,7 @@ export function buildLeanGuiTool(projectId: string): AgentLoopTool {
           !suite.steps.some(step => step.id === id && ['expect', 'expect_file'].includes(step.kind)) || !Array.isArray(features) || !features.length
           || features.some(fid => !suite.covers.includes(fid))) || suite.covers.some(fid => !Object.values(refs).some(ids => ids.includes(fid)))) throw new Error(`GUI_EXPECT_OBSERVATIONS_REQUIRED: acceptance_refs必须为expect步骤id→F编号数组，需覆盖${suite.covers.join(',')}，并至少实际fill或click一次`)
         const previous = existsSync(guiSuitePath(projectId)) ? parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8'))) : undefined
-        const contract = (value: typeof suite) => JSON.stringify({ refs: value.acceptance_refs, fixtures: value.fixtures, steps: value.steps.map(step => {
+        const contract = (value: typeof suite) => JSON.stringify({ native_tests:value.native_tests, refs: value.acceptance_refs, fixtures: value.fixtures, steps: value.steps.map(step => {
           const { selector: _selector, has_text: _text, ...meaning } = step as typeof step & { selector?: string }
           return meaning
         }) })
