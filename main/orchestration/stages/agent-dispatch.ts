@@ -24,12 +24,12 @@ import type { SDKQuery } from './orchestration-contracts'
 
 
 import { readPrdBackplane } from '../../project/document-engine'
-import { runUxConfirmGate } from '../../guide/ux-confirm'
+
 
 
 import { recordDecision } from '../../project/decision-log'
 import { captureConstraints, scanSessionConstraints } from '../../guide/constraint-extractor';
-import { WEB_TO_DESKTOP_OPTION_ID, isWebLineRetiredOption } from '../../guide/web-line-retired'
+import { isWebLineRetiredOption } from '../../guide/web-line-retired'
 import { isCircuitBreakSettled } from '../../project/recovery-service'
 import { findProject, updateProject } from '../../project/project-service';
 import { recordSessionActivity } from '../../platform/sessions/session-service'
@@ -280,9 +280,10 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 落入 resolveCardAnswer 澄清答案空间。
     if (input.metadata?.source === 'card_option'
       && isWebLineRetiredOption(input.metadata.selected_option_id)) {
-      await resolveWebLineRetiredCard(input, publishForRun, makeEvent, sdkQuery, env ?? {})
-      persistTerminalMessage(input.session_id, 'completed')
-      publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
+      const notice='这张旧版形态确认卡已退役，请打开当前任务单；历史项目可复制到新流程。'
+      persistAssistant(notice);publishForRun(makeEvent(input,'message_delta',{text:notice}))
+      persistTerminalMessage(input.session_id, 'incomplete')
+      publishForRun(makeEvent(input, 'completed', { subtype: 'incomplete' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
@@ -369,64 +370,3 @@ const WEB_LINE_RETIRED_STAGES = new Set<WorkflowStage>([
 ])
 const WEB_LINE_RETIRED_COPY =
   '这个项目由旧版网页生成线创建，该能力已在本版本下线。项目数据与产物完整保留，可继续查看或导出。如需以桌面软件形态实现类似需求，请新建项目。'
-
-/** web 线拆除刀1：非桌面品类形态引导卡回传处理（卡由 prd-confirm 发放）。 */
-async function resolveWebLineRetiredCard(
-  input: AgentSendMessageInput,
-  streamPublisher: (event: AgentEvent) => void,
-  makeEvent: (input: AgentSendMessageInput, type: AgentEvent['type'], payload: Record<string, unknown>) => AgentEvent,
-  sdkQuery: SDKQuery | undefined,
-  env: Record<string, string>,
-): Promise<void> {
-  const decision = input.metadata?.selected_option_id
-  if (decision === WEB_TO_DESKTOP_OPTION_ID) {
-    if (!sdkQuery) {
-      // 渠道不可用：如实告知，不进入桌面线（桌面调度员必需真实模型）
-      const copy = '当前没有可用的模型渠道，无法按桌面形态起跑。请在设置中配置渠道后，再点一次「按桌面软件继续」。'
-      appendAgentMessage(input.session_id, { role: 'assistant', content: [{ type: 'text', text: copy }], timestamp: Date.now() })
-      streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
-      return
-    }
-    recordDecision({
-      project_id: input.project_id,
-      session_id: input.session_id,
-      entry: {
-        type: 'modification_decision',
-        title: '用户选择按桌面形态继续',
-        why: '非桌面品类 PRD 确认后的形态引导卡：改 category=desktop_tool 并进入桌面调度员线',
-      },
-    })
-    updateProject(input.project_id, { template_type: 'desktop_tool' })
-    // UX 门对齐（2026-10-06，根因报告发现②修复）：形态卡改品类后与正常桌面品类同门——
-    // PRD 确认后一律过 UX 草图门（确认门矩阵 quick=PRD+UX / longterm=PRD+UX+MVP），
-    // 不再直调 enterDesktopLine（确认后由 ux-confirm 进桌面线），门矩阵不再有缝隙。
-    const backplane = readPrdBackplane(input.project_id)
-    await runUxConfirmGate({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: findProject(input.project_id)?.mode ?? 'longterm',
-      channel_id: input.channel_id,
-      query: sdkQuery,
-      env,
-      publish: (event) => streamPublisher(event),
-      round: 1,
-      positioning: backplane?.positioning ?? '',
-      requirements: backplane?.requirements ?? [],
-    })
-    return
-  }
-  // web_to_revise：回向导调整需求
-  recordDecision({
-    project_id: input.project_id,
-    session_id: input.session_id,
-    entry: {
-      type: 'modification_decision',
-      title: '用户选择回去调整需求',
-      why: '非桌面品类 PRD 确认后的形态引导卡：回到对话调整需求形态',
-    },
-  })
-  const copy = '好的，请直接描述想调整的地方（比如「做成桌面软件，支持离线使用」），我会按新的形态重新梳理需求。'
-  appendAgentMessage(input.session_id, { role: 'assistant', content: [{ type: 'text', text: copy }], timestamp: Date.now() })
-  streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
-}

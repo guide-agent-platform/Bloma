@@ -13,7 +13,7 @@ import { restorePromaHome } from '../../support/proma-home-guard'
 import type { DriverCommandRequest } from '../../../main/desktop/process-driver'
 import { buildInstallPackagesTool, venvPythonRelativePath } from '../../../main/desktop/install-packages-tool'
 import { buildChildScriptRunnerTool } from '../../../main/desktop/child-exec-tool'
-import { buildDesktopChildTools } from '../../../main/desktop/dispatcher-loop'
+import { buildDesktopChildTools } from '../../../main/desktop/production-runtime-tools'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { createProject, updateProject } from '../../../main/project/project-service'
 

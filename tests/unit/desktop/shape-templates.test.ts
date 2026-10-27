@@ -11,7 +11,7 @@ import {
   evaluateShapeGate,
   parseUxExperience,
   buildBackplaneFromParsed,
-} from '../../../main/guide/prd-engine-llm'
+} from '../../../main/guide/legacy-prd-parser'
 import { renderShapeDigest, renderUxDigest } from '../../../main/desktop/requirement-digest'
 import {
   SHAPE_TEMPLATES,

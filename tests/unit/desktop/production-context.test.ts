@@ -4,7 +4,7 @@ import { productionContext, inlineProductionContext } from '../../../main/deskto
 import { parseLaunchDeclaration } from '../../../main/desktop/launch-smoke'
 import { bindAcceptance, requirementEvidenceHash } from '../../../main/project/requirement-contract'
 import { productionGuide } from '../../../main/desktop/production-guide'
-import { parseQuickProductionReview } from '../../../main/desktop/quick-production-review'
+
 
 const fixture = () => bindAcceptance({ project_id: 'p', name: 'test', positioning: '离线待办',
   requirements: [{ id: 'F-001', description: '允许同名新增', behavior_assertions: ['空白不保存'] }, { id: 'F-002', description: '独立删除' }],
@@ -60,15 +60,5 @@ describe('role-directed authoritative production context', () => {
   it('derives resource guidance from the actual runtime rather than legacy default text', () => {
     const guide = productionGuide('executor', { script_runs: 64, install_calls: 8 })
     expect(guide).toContain('累计64次'); expect(guide).toContain('累计8次'); expect(guide).toContain('续接不清零')
-  })
-})
-
-describe('independent quick verifier report', () => {
-  const pass = { verdict: 'pass', checked_features: ['F-001', 'F-002'], evidence: ['宿主报告与实现接口一致'], findings: [] }
-  it('refuses incomplete coverage, unsupported feature IDs and evidence-free green claims', () => {
-    expect(parseQuickProductionReview(JSON.stringify(pass), ['F-001', 'F-002'])).toEqual(pass)
-    for (const value of [{ ...pass, checked_features: ['F-001'] }, { ...pass, checked_features: ['F-001', 'F-999'] }, { ...pass, evidence: [] }]) {
-      expect(parseQuickProductionReview(JSON.stringify(value), ['F-001', 'F-002'])).toBeUndefined()
-    }
   })
 })

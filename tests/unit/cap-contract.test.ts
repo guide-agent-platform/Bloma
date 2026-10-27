@@ -15,7 +15,7 @@ import {
   type PrdBackplane,
   type SketchRequirement,
 } from '../../main/model/prd-backplane'
-import { CAP_PROMPT_ADDENDUM, buildBackplaneFromParsed, parseAiCapabilities } from '../../main/guide/prd-engine-llm'
+import { CAP_PROMPT_ADDENDUM, buildBackplaneFromParsed, parseAiCapabilities } from '../../main/guide/legacy-prd-parser'
 
 afterEach(() => {
   vi.unstubAllEnvs()

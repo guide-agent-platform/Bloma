@@ -331,32 +331,8 @@ describe('drive_project_app webview 腿（批8 下半）', () => {
 })
 
 describe('拒收续接指令携带门禁拒因（批8 下半狗粮第三跑实锤）', () => {
-  it('security-fail 续接：拒因+教育详情（扫描发现清单）进模型输入；missingArtifacts 占位不再渲染成「缺失产物」', async () => {
-    const { buildContinuationDirective } = await import('../../../main/desktop/advance-rejection-loop')
-    const directive = buildContinuationDirective('desktop-verify', 'gate-deny', undefined, {
-      decision: 'reject',
-      reason: 'security-fail',
-      missingArtifacts: [{ gateId: 'driver-report', artifacts: ['00_VERIFY/driver-report.json'] }],
-      discardedObservations: [],
-      education: '宿主安全扫描未通过（2 个高危/严重问题）：\n- ui_behavior_check.py:235 Python eval 红线\n请修复后重新收口。',
-    })
-    expect(directive).toContain('拒因=security-fail')
-    expect(directive).toContain('门禁拒因详情')
-    expect(directive).toContain('ui_behavior_check.py:235')
-    expect(directive).not.toContain('缺失产物') // 占位不再误导
-  })
 
-  it('artifacts-missing 续接：缺失产物清单照常渲染（语义不变）', async () => {
-    const { buildContinuationDirective } = await import('../../../main/desktop/advance-rejection-loop')
-    const directive = buildContinuationDirective('desktop-implement', 'gate-deny', undefined, {
-      decision: 'reject',
-      reason: 'artifacts-missing',
-      missingArtifacts: [{ gateId: 'delivery-doc', artifacts: ['DELIVERY.md'] }],
-      discardedObservations: [],
-      education: '产物存在性检查未过：DELIVERY.md 不存在。',
-    })
-    expect(directive).toContain('缺失产物：DELIVERY.md')
-  })
+
 })
 
 describe('drive-app-webview 单元件', () => {

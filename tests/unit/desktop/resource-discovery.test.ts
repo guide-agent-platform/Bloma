@@ -8,9 +8,9 @@ import { createProject } from '../../../main/project/project-service'
 import { createToolState } from '../../../main/agent/loop/agent-loop'
 import type { SpeechModelManifest } from '../../../main/platform/speech/model-manifest'
 import { buildChildExecEnv } from '../../../main/desktop/child-exec-tool'
-import { buildDesktopChildTools, buildDispatcherTools } from '../../../main/desktop/dispatcher-loop'
-import { checkDispatcherToolGate } from '../../../main/desktop/dispatcher-gate'
-import { DESKTOP_PHASES } from '../../../main/desktop/dispatcher-phases'
+
+
+
 describe('read-only resources', () => {
   it('actual Python inspection reports missing resources without downloading or claiming business success', async () => {
     const project = createProject({ request_id: 'actual-resource-probe', mode: 'quick' })
@@ -45,9 +45,5 @@ describe('read-only resources', () => {
     expect(env).not.toHaveProperty('BLOMA_SECRET_CHANNEL_KEY')
     expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN')
   })
-  it('discovery is installed on parent and workers and allowed by the real phase gate', () => {
-    expect(buildDispatcherTools('resource-fixture').some(t => t.name === 'inspect_project_resources')).toBe(true)
-    expect(buildDesktopChildTools('resource-fixture', 'implement', 'diff').some(t => t.name === 'inspect_project_resources')).toBe(true)
-    expect(checkDispatcherToolGate(DESKTOP_PHASES['desktop-arch'], 'inspect_project_resources')).toBeNull()
-  })
+
 })

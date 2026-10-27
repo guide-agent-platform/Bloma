@@ -51,9 +51,10 @@ function selfTest(){
   console.log(JSON.stringify({self_test:'passed',checks:['type versus value imports','mixed imports','reexports','literal versus computed dynamic imports','require','asset references are not module edges','artifact output bounds']}))
 }
 if(args.includes('--self-test')){selfTest();process.exit(0)}
-const tracked=execFileSync('git',['ls-files','-z'],{cwd:root}).toString('utf8').split('\0').filter(Boolean).map(slash)
+const tracked=[...new Set(execFileSync('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:root}).toString('utf8').split('\0').filter(Boolean).map(slash))].filter(path=>existsSync(join(root,path))).sort()
 const sourcePaths=tracked.filter(path=>/\.(?:[cm]?js|tsx?)$/.test(path)&&/^(main|preload|renderer|shared|storage|tests|scripts)\//.test(path))
 const scope=JSON.parse(readFileSync(resolve(root,arg('--scope')??'docs/05_PROJECT_PLAN/workflow-retirement-scope-20261027.json'),'utf8'))
+for(const item of scope.retired_files??[])if(existsSync(join(root,item.path)))throw Error(`AUDIT_RETIRED_FILE_PRESENT: ${item.path}`)
 const inputHashes=new Map()
 const records=new Map(sourcePaths.map(path=>{
   const bytes=readFileSync(join(root,path));inputHashes.set(path,sha(bytes));return[path,parse(path,bytes.toString('utf8'))]
@@ -112,10 +113,10 @@ const templateAssets=(scope.asset_files??[]).map(path=>({path,sha256:sha(readFil
 const report={version:1,source_revision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),scope_version:scope.version,
   scanner_sha256:sha(readFileSync(join(root,'scripts/audit-workflow-retirement.mjs'))),scope_sha256:sha(readFileSync(resolve(root,arg('--scope')??'docs/05_PROJECT_PLAN/workflow-retirement-scope-20261027.json'))),
   source_input_digest:sha(JSON.stringify([...inputHashes])),
-  method:'tracked files + TypeScript AST static/type/reexport/literal dynamic/require imports; no app execution; no symbol-level dead-code proof',
+  method:'existing tracked and unignored working files + TypeScript AST static/type/reexport/literal dynamic/require imports; retired paths must remain absent; no app execution or symbol-level dead-code proof',
   limits:['module loading is not branch execution','symbol call index matches syntax names and does not resolve aliases or prove control flow','computed imports, embedded source and dynamic asset composition need manual inspection; string index excludes literals of 1024 or more characters','zero direct importers is not deletion approval','working source hashes are the authoritative scan inputs'],
   entrypoints,counts:{scanned_sources:sourcePaths.length,module_edges:graph.filter(edge=>edge.resolution==='module').length,asset_edges:graph.filter(edge=>edge.resolution==='asset').length,scoped_modules:modules.length,groups:Object.fromEntries(scope.groups.map(group=>[group.id,modules.filter(item=>item.group===group.id).length]))},
-  groups:scope.groups,modules,anchors,symbols,asset_references:references,template_assets:templateAssets,
+  groups:scope.groups,modules,anchors,symbols,asset_references:references,template_assets:templateAssets,retired_files:scope.retired_files??[],
   unresolved_relative_imports:graph.filter(edge=>!edge.to),computed_imports:[...records].flatMap(([path,record])=>record.dynamic.map(item=>({path,...item}))),
   zero_runtime_importers:modules.filter(item=>!item.runtime_importers.length).map(item=>({path:item.path,group:item.group,type_importers:item.type_importers.length,test_importers:item.test_importers.length,module_load_reachable:item.module_load_reachable}))}
 for(const[path,digest]of inputHashes)if(sha(readFileSync(join(root,path)))!==digest)throw Error(`AUDIT_SOURCE_CHANGED_DURING_SCAN: ${path}`)

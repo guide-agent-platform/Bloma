@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseInterfaceSpec } from '../../main/guide/prd-engine-llm'
+import { parseInterfaceSpec } from '../../main/guide/legacy-prd-parser'
 import { renderBackplaneAnchor, type PrdBackplane } from '../../main/model/prd-backplane'
 
 /**

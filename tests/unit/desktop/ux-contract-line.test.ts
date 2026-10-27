@@ -6,9 +6,9 @@
  *   长任务线程化/ui_kit）。
  */
 import { describe, expect, it } from 'vitest'
-import { parseUxExperience } from '../../../main/guide/prd-engine-llm'
+import { parseUxExperience } from '../../../main/guide/legacy-prd-parser'
 import { renderUxDigest } from '../../../main/desktop/requirement-digest'
-import { getDesktopPhase } from '../../../main/desktop/dispatcher-phases'
+
 
 describe('parseUxExperience（七态白名单解析）', () => {
   it('合法 states + feedback_rules 解析通过', () => {
@@ -79,36 +79,5 @@ describe('renderUxDigest（体验契约段注入）', () => {
   it('缺省/空 states → undefined（任务书通用七态纪律兜底，不注入）', () => {
     expect(renderUxDigest(undefined)).toBeUndefined()
     expect(renderUxDigest({ states: [], feedback_rules: [] })).toBeUndefined()
-  })
-})
-
-describe('任务书体验纪律数据锁（批3 2026-10-06；批8 下半 v2 化：tk 措辞→pywebview 口径）', () => {
-  it('longterm implement：状态反馈 App.show/禁弹窗/长任务线程推送/组件手册引用都在任务书', () => {
-    const implement = getDesktopPhase('desktop-implement')
-    const text = implement?.taskTemplate ?? ''
-    expect(text).toContain('体验纪律')
-    expect(text).toContain('App.show')
-    expect(text).toContain('evaluate_js')
-    expect(text).toContain('ui/PATTERNS.md')
-    expect(implement?.constraints.some((c) => c.includes('体验契约'))).toBe(true)
-  })
-
-  it('quick 任务书：体验纪律同权重（快速模式不豁免）', () => {
-    const implement = getDesktopPhase('desktop-implement')
-    const quick = implement?.quickTaskTemplate ?? ''
-    expect(quick).toContain('体验纪律')
-    expect(quick).toContain('App.show')
-    expect(quick).toContain('evaluate_js')
-    expect((implement?.quickConstraints ?? []).some((c) => c.includes('体验纪律不因快速模式豁免'))).toBe(true)
-  })
-
-  it('verify 任务书：状态触达场景（空态/成功/失败）+ 探索体验核对（弹窗含 alert 算缺陷）+ Logic 层断言对象', () => {
-    const verify = getDesktopPhase('desktop-verify')
-    const text = verify?.taskTemplate ?? ''
-    expect(text).toContain('状态触达')
-    expect(text).toContain('空态/初始、成功、失败')
-    expect(text).toContain('体验面')
-    expect(text).toContain('messagebox 弹窗或 JS alert')
-    expect(text).toContain('Logic 逻辑层')
   })
 })

@@ -13,6 +13,7 @@ import { handleGuideMessage } from '../../../main/guide/guide-agent-service'
 import { readPendingDecision } from '../../../main/guide/pending-decision'
 import { runAgent } from '../../../main/orchestration/stages/agent-dispatch'
 import * as channels from '../../../main/platform/llm/runtime-fallback'
+import { guideConfirmationPath,saveGuideConfirmation } from '../../../main/guide/confirmation-journal'
 
 let home:string,prior:string|undefined
 beforeEach(()=>{prior=process.env.PROMA_HOME;home=mkdtempSync(join(tmpdir(),'blretire-'));process.env.PROMA_HOME=home})
@@ -58,4 +59,13 @@ it('keeps lean-v1 short workflow available, while explicit migration creates a n
   const p=createProject({request_id:'lean',mode:'quick'},{workflowVersion:'lean-v1'});writeFileSync(join(p.root_path,'app.py'),'print(5)')
   expect(workflowRetirementReason(p)).toBeUndefined();expect(isLeanProject(p.project_id)).toBe(true)
   const copy=await migrateLegacyWorkflow(p.project_id);expect(copy.workflow_version).toBe('software-v1');expect(findProject(p.project_id).workflow_version).toBe('lean-v1')
+})
+it('does not consume or rewrite real historical confirmation envelopes, including damaged ones',async()=>{
+  const p=createProject({request_id:'history',mode:'longterm'})
+  saveGuideConfirmation({version:1,kind:'prd',id:'historic-card',project_id:p.project_id,session_id:'s',scope_hash:'a'.repeat(64),state:'pending',data:{historical:true}})
+  const file=guideConfirmationPath('prd',p.project_id),before=readFileSync(file)
+  expect(readPendingDecision(p.project_id,'s')).toBeUndefined()
+  await handleGuideMessage({request_id:'legacy-card',project_id:p.project_id,session_id:'s',mode:'longterm',current_stage:'clarifying',content:'确认',metadata:{source:'card_option',selected_option_id:'prd_confirm_confirm'}},vi.fn())
+  expect(readFileSync(file).equals(before)).toBe(true)
+  writeFileSync(file,'{damaged old receipt');expect(readPendingDecision(p.project_id,'s')).toBeUndefined();expect(readFileSync(file,'utf8')).toBe('{damaged old receipt')
 })

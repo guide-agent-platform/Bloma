@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildProjectDriverRunnerTool } from '../../../main/desktop/driver-runner-tool'
-import { checkDispatcherToolGate } from '../../../main/desktop/dispatcher-gate'
-import { DESKTOP_PHASES } from '../../../main/desktop/dispatcher-phases'
+
+
 
 const CONTRACT = {
   schema_version: 1,
@@ -132,36 +132,5 @@ describe('run_project_driver 工具', () => {
     expect(out.isError).toBe(true)
     expect(out.output).toContain('项目根不可解析')
     expect(out.output).toContain('blocked')
-  })
-})
-
-describe('run_project_driver 阶段白名单', () => {
-  it('desktop-implement 放行（extraTools 声明）', () => {
-    expect(checkDispatcherToolGate(DESKTOP_PHASES['desktop-implement'], 'run_project_driver')).toBeNull()
-  })
-
-  it('其余阶段拦截 + 教育文案列出可用面', () => {
-    for (const id of ['desktop-arch', 'desktop-scaffold'] as const) {
-      const result = checkDispatcherToolGate(DESKTOP_PHASES[id], 'run_project_driver')
-      expect(result?.deny, id).toBe(true)
-      expect(result?.message, id).toContain('本阶段可用')
-    }
-  })
-
-  it('implement 任务书不再承诺本阶段无法兑现的「逐条变绿」', () => {
-    const template = DESKTOP_PHASES['desktop-implement'].taskTemplate
-    expect(template).toContain('run_project_driver')
-    expect(template).toContain('静态自洽')
-    expect(template).not.toContain('驱动断言逐条变绿')
-  })
-
-  it('刀3 截图约定（批8 下半 v2 化）：scaffold/verify 任务书含窗口截图要求（capture_window 按标题；fail-open 不阻塞断言；截完即终止进程）', () => {
-    // 2026-10-03 删留执行收紧：只锁行为锚点（截图机制/fail-open/终止纪律/方言），
-    // 精确产物路径与「至少 N 个」数量口径不锁（文案调整不应红）
-    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('capture_window')  // 骨架内置 PrintWindow 自截，旧 ImageGrab 教法绝迹
-    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('不阻塞断言')
-    expect(checkDispatcherToolGate(DESKTOP_PHASES['desktop-verify'], 'run_project_driver')).toBeNull()
-    expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('收尾终止进程')
-    expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('PASS/FAIL/BLOCKED <场景名>')
   })
 })

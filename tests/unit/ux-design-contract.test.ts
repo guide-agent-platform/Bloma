@@ -15,10 +15,13 @@ import { runUxConfirmGate, startUxAdjustAwait, takeUxAdjustFeedback, runUxAdjust
 import type { SDKQuery } from '../../main/orchestration/orchestrator'
 
 vi.mock('../../main/desktop/desktop-route', () => ({ enterDesktopLine: vi.fn(async () => true), DESKTOP_LINE_TEMPLATE_TYPES: new Set(['desktop_tool', 'game']) }))
+// Isolate reusable full-schema UX validation/storage from workflow admission.
+// Real retirement policy is exercised without this mock in workflow-retirement.test.ts.
+vi.mock('../../main/desktop/workflow-retirement',()=>({workflowRetirementReason:()=>undefined}))
 vi.mock('../../main/delivery/preview-scheme', () => ({ mintProjectPreviewUrl: vi.fn((id, path) => `bloma-file://${id}/${path}`) }))
-vi.mock('../../main/guide/stages/prd-pipeline', () => ({ runPrdPipeline: vi.fn(async () => ({ started: true, prd_written: true })) }))
+
 import { enterDesktopLine } from '../../main/desktop/desktop-route'
-import { runPrdPipeline } from '../../main/guide/stages/prd-pipeline'
+
 import { mintProjectPreviewUrl } from '../../main/delivery/preview-scheme'
 import { createHash } from 'node:crypto'
 import * as routing from '../../main/platform/llm/runtime-fallback'
@@ -323,16 +326,6 @@ describe('UX 设计、确认与真实存储边界', () => {
     await expect(generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })).rejects.toThrow('UX_DESIGN_FAILED')
   })
 
-  it('业务范围反馈回PRD，不把新功能藏进草图', async () => {
-    const { pending } = setup()
-    await runUxConfirmGate(pending)
-    startUxAdjustAwait({ project_id: pending.project_id } as never)
-    const feedback = '加一个导出Excel的功能', taken = takeUxAdjustFeedback({ project_id: pending.project_id, content: feedback } as never)!
-    const query: SDKQuery = async function* () { yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '{"action":"revise_requirements","reason":"新增导出能力"}' }] } } }
-    await runUxAdjustRound({ project_id: pending.project_id } as never, { ...taken, pending: { ...taken.pending, query } })
-    expect(runPrdPipeline).toHaveBeenCalledTimes(1)
-    expect(enterDesktopLine).not.toHaveBeenCalled()
-  })
 
   it('失败的调整意见在重试时仍传入，不能被“重试”两个字替换', async () => {
     const { pending, calls } = setup()

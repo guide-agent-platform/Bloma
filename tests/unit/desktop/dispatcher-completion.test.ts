@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { guardDispatcherCompletion } from '../../../main/desktop/dispatcher-completion'
+import { guardDispatcherCompletion } from '../../../main/desktop/production-completion'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import type { DelegationRecord } from '../../../main/agent/delegation/agent-collaboration'
 

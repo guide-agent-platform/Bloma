@@ -229,6 +229,7 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_UPGRADE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectUpgradeInput>(payload, ['project_id', 'session_id'])
+      const retirement=workflowRetirementReason(findProject(input.project_id));if(retirement)throw Error(retirement)
       // 切换模式前先创建 upgrade 快照，保留升级前的可回滚状态
       const snapshot = await createSnapshot({
         request_id: input.request_id,
@@ -262,6 +263,7 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_FINALIZE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectFinalizeInput>(payload, ['project_id', 'session_id'])
+      const retirement=workflowRetirementReason(findProject(input.project_id));if(retirement)throw Error(retirement)
       if(isLongtermSoftware(input.project_id)){
         const state=readLongtermState(input.project_id),current=state?.milestones.find(item=>item.id===state.current_id)
         if(current?.status!=='delivered'||findProject(input.project_id).status==='archived')throw Error('LONGTERM_MILESTONE_CONFIRMATION_REQUIRED')

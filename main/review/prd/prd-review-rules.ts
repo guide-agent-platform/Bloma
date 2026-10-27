@@ -59,7 +59,7 @@ import { parseEarsAssertion } from '../../guide/ears-vocabulary';
 // =========================================================================
 
 import { PrdReviewDimension, PrdReviewIssue, PrdReviewOption, PrdReviewOutcome } from './prd-review-contracts'
-import { deriveVerdict } from './prd-review-gate'
+import { deriveVerdict } from './prd-review-verdict'
 
 /** 稳健解析：剥围栏 → 截取首尾大括号 → JSON；维度/严重度白名单校验；
  *  plain_question/options 一并解析（2026-08-30 选择题化）。 */

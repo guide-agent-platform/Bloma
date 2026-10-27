@@ -1,11 +1,11 @@
-/** Internal, opt-in experiment state. Stored outside the agent's product root. */
+/** Read-only historical experiment schema. No preparation or execution entry. */
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
-import { appendJsonLine, writeTextFileAtomic } from '../../storage/json-store'
-import { finishExperiment } from './dispatch-experiment-records'
+
+
 import type { DesktopExecutionLimits } from './execution-limits'
 
 export const EXPERIMENT_SWITCH = 'BLOMA_DISPATCH_EXPERIMENT'
@@ -135,58 +135,4 @@ export function validateExperiment(raw: unknown): DispatchExperiment {
     if (!Array.isArray(worker.task_ids) || worker.task_ids.some(id => !ids.has(id))) throw new Error('EXPERIMENT_INVALID_WORKER')
   }
   return value
-}
-export function writeExperiment(config: DispatchExperiment, home = getPromaHome()): void {
-  assertExperimentHome(home)
-  writeTextFileAtomic(experimentPath(config.project_id, home), JSON.stringify(validateExperiment(config), null, 2) + '\n')
-}
-export function readExperiment(projectId: string): DispatchExperiment | undefined {
-  if (process.env[EXPERIMENT_SWITCH] !== '1') return undefined
-  const path = experimentPath(projectId)
-  if (!existsSync(path)) return undefined
-  assertExperimentHome()
-  const config = validateExperiment(JSON.parse(readFileSync(path, 'utf8')))
-  if (config.project_id !== projectId) throw new Error('EXPERIMENT_PROJECT_MISMATCH')
-  if (config.state === 'running' && config.runtime_hash) {
-    const bundle = resolve('dist-main/main/index.js')
-    if (!existsSync(bundle) || createHash('sha256').update(readFileSync(bundle)).digest('hex') !== config.runtime_hash) throw new Error('EXPERIMENT_RUNTIME_CHANGED')
-  }
-  return config
-}
-export function recordExperiment(config: DispatchExperiment, event: string, payload: Record<string, unknown> = {}, home = getPromaHome()): void {
-  appendJsonLine(join(home, 'dispatch-experiments', 'events', `${config.run_id}.jsonl`), {
-    at: new Date().toISOString(), event, experiment_id: config.experiment_id, run_id: config.run_id,
-    project_id: config.project_id, mode: config.mode, policy: config.policy, snapshot_id: config.snapshot_id, ...payload,
-  })
-}
-export function recordExperimentBoundary(projectId: string, event: string, payload: Record<string, unknown> = {}): void {
-  const config = readExperiment(projectId)
-  if (config?.state === 'running') {
-    recordExperiment(config, event, payload)
-    if (event === 'mvp_ready' || event === 'delivered') finishExperiment(config, 'ready', event)
-    if (event === 'gate_exhausted') finishExperiment(config, 'failed', 'EXPERIMENT_GATE_EXHAUSTED')
-    if (event === 'delivery_version_changed') finishExperiment(config, 'failed', 'DELIVERY_INPUT_CHANGED_DURING_VERIFICATION')
-    if (event === 'quick_verifier_blocked') finishExperiment(config, 'failed', String(payload.reason ?? 'VERIFICATION_EVIDENCE_INSUFFICIENT'))
-    if (event === 'core_verification_blocked') {
-      const status = payload.verification_status === 'failed' ? 'FAILED' : payload.verification_status === 'environment_blocked' ? 'ENVIRONMENT_BLOCKED' : 'UNVERIFIED'
-      finishExperiment(config, 'failed', `CORE_VERIFICATION_${status}`)
-    }
-  }
-}
-export function holdExperimentBeforeImplement(project: { project_id: string; mode: string }, sessionId: string,
-  context: { requirements_digest: string; ux_html?: string; ux_design?: string }): boolean {
-  const config = readExperiment(project.project_id)
-  if (!config) return false
-  if (config.mode !== project.mode) throw new Error('EXPERIMENT_MODE_MISMATCH')
-  if (config.state === 'running') {
-    if (config.parent_session_id !== sessionId) throw new Error('EXPERIMENT_SESSION_MISMATCH')
-    return false
-  }
-  if (config.state === 'prepare') {
-    config.state = 'prepared'; config.parent_session_id = sessionId
-    config.prepared = { at: new Date().toISOString(), ...context }
-    writeExperiment(config)
-    recordExperiment(config, 'prepared', { parent_session_id: sessionId })
-  }
-  return true
 }

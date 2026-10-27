@@ -5,7 +5,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { importAttachment } from '../../main/platform/attachments/composer-store'
 import { acceptMessage, updateReceipt } from '../../main/platform/attachments/send-inbox'
 import { sessionMaterials } from '../../main/platform/attachments/material-context'
-import { generatePrdLlm } from '../../main/guide/prd-engine-llm'
+
 import { appendSessionMessage } from '../../main/platform/sessions/session-tree'
 import { createProject } from '../../main/project/project-service'
 import { startDelegation, registerParentLoopContext, waitForDelegations, disposeParentDelegationState } from '../../main/agent/delegation/agent-collaboration'
@@ -28,19 +28,7 @@ function prepare() {
   return { scope, info, sample, context: sessionMaterials(project.project_id, 'parent') }
 }
 describe('material propagation through PRD and real delegated loop', () => {
-  it('the structured PRD request contains both real files and validates source ranges before persisting', async () => {
-    const { scope, info } = prepare()
-    let prompt = ''
-    const query: SDKQuery = async function* (text) {
-      prompt = text
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ document: '# PRD\n导出 settlement_currency', positioning: '账户汇总', acceptance: { 'F-001': '导出保留币种' }, out_of_scope: [], assumptions: [], source_refs: { 'F-001': [{ attachment_id: info.attachment_id, sha256: info.sha256, start_line: 2, end_line: 3 }, { attachment_id: info.attachment_id, sha256: 'invented', start_line: 1, end_line: 2 }] } }) }] } }
-      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
-    }
-    const prd = await generatePrdLlm({ ...scope, requirements: [{ id: 'F-001', description: '账户汇总与导出' }], query, env: {}, maxTokens: 4096 })
-    expect(prompt).toContain('餐费,12.50,CNY'); expect(prompt).toContain('导出必须保留币种')
-    expect(prd?.requirements[0].source_refs).toEqual([{ attachment_id: info.attachment_id, sha256: info.sha256, start_line: 2, end_line: 3 }])
-    expect(prd?.prd_document).toContain(info.attachment_id)
-  })
+
   it('the actual child loop receives a scoped reading tool and returns the same id/hash/content', async () => {
     const { scope, sample, context } = prepare()
     const isolatedRoot = mkdtempSync(join(tmpdir(), 'bloma-material-worktree-'))

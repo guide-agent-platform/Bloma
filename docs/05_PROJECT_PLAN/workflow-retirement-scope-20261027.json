@@ -1,91 +1,770 @@
 {
-  "version": 5,
+  "version": 6,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
       "action": "keep",
       "reason": "Explicit historical read-only response and source-copy migration; never inherit PASS or reset old accounting.",
-      "paths": ["main/desktop/workflow-retirement.ts", "main/software/migrate-workflow.ts"]
+      "paths": [
+        "main/desktop/workflow-retirement.ts",
+        "main/software/migrate-workflow.ts"
+      ]
     },
     {
       "id": "production_shared_extracted",
       "action": "keep",
       "reason": "Shared tools, completion and host gates extracted from legacy orchestrators before retirement.",
-      "paths": ["main/desktop/production-runtime-tools.ts", "main/desktop/production-tool-assembly.ts", "main/desktop/production-completion.ts", "main/desktop/production-contracts.ts"]
+      "paths": [
+        "main/desktop/production-runtime-tools.ts",
+        "main/desktop/production-tool-assembly.ts",
+        "main/desktop/production-completion.ts",
+        "main/desktop/production-contracts.ts"
+      ]
     },
     {
       "id": "longterm_milestones_keep",
       "action": "keep",
       "reason": "Current software-v1 longterm state, exact-candidate confirmation and backlog UI; preserve during legacy retirement.",
-      "paths": ["main/software/longterm-state.ts", "main/software/longterm-control.ts", "main/software/longterm-message.ts", "renderer/components/LongtermProjectPanel.tsx", "renderer/lib/project-status.ts"]
+      "paths": [
+        "main/software/longterm-state.ts",
+        "main/software/longterm-control.ts",
+        "main/software/longterm-message.ts",
+        "renderer/components/LongtermProjectPanel.tsx",
+        "renderer/lib/project-status.ts"
+      ]
     },
     {
       "id": "modern_workflow_keep",
       "action": "keep",
       "reason": "Current software-v1 and lean-v1 entry points; never inferred legacy from directory names.",
-      "paths": ["main/desktop/lean-production.ts", "main/desktop/lean-budget.ts", "main/guide/lean-guide.ts", "main/guide/lean-brief.ts", "main/guide/lean-scope.ts", "main/guide/lean-suggestions.ts", "main/guide/pending-decision.ts", "main/software/agent-tools.ts", "main/software/verification.ts", "main/software/release-store.ts", "main/software/trial.ts", "main/software/independent-design.ts", "main/software/independent-verification.ts", "main/software/harness-evaluation.ts"]
+      "paths": [
+        "main/desktop/lean-production.ts",
+        "main/desktop/lean-budget.ts",
+        "main/guide/lean-guide.ts",
+        "main/guide/lean-brief.ts",
+        "main/guide/lean-scope.ts",
+        "main/guide/lean-suggestions.ts",
+        "main/guide/pending-decision.ts",
+        "main/software/agent-tools.ts",
+        "main/software/verification.ts",
+        "main/software/release-store.ts",
+        "main/software/trial.ts",
+        "main/software/independent-design.ts",
+        "main/software/independent-verification.ts",
+        "main/software/harness-evaluation.ts"
+      ]
     },
     {
-      "id": "mixed_bridges_split_first",
-      "action": "split_before_retirement",
-      "reason": "These files mix routing, shared types/helpers or lean-v1 fallback with legacy execution; whole-file deletion breaks current users.",
-      "paths": ["main/orchestration/stages/agent-dispatch.ts", "main/orchestration/stages/dispatch-support.ts", "main/guide/guide-agent-service.ts", "main/guide/stages/guide-pipeline.ts", "main/guide/ux-confirm.ts", "main/desktop/desktop-route.ts", "main/desktop/workflow-policy.ts", "main/desktop/dispatcher-loop.ts", "main/desktop/dispatcher-phases.ts", "main/desktop/production-agent.ts", "main/desktop/dispatcher-completion.ts", "main/project/document-engine.ts", "main/project/document-sync.ts", "main/project/prd-store.ts"]
-    },
-    {
-      "id": "legacy_guide_candidate",
-      "action": "retire_after_legacy_confirmations_and_entrypoints_migrate",
-      "reason": "Old guide/PRD orchestration; runtime importers, reexports and pending records must be resolved before deletion.",
-      "pattern": "^main/guide/(prd-confirm|prd-engine-llm|prd-sections|pipeline|dialogue-router|guide-tools)\\.ts$|^main/guide/stages/(guide-runtime|clarify-flow|requirement-confirm|research-flow|prd-pipeline)\\.ts$"
-    },
-    {
-      "id": "legacy_desktop_candidate",
-      "action": "retire_after_mixed_helpers_and_old_projects_migrate",
-      "reason": "Old phase orchestration and MVP presentation; imported modules are candidates, not deletion approvals.",
-      "pattern": "^main/desktop/(dispatcher-(prompt|gate|finalize|telemetry|switch)|advance-rejection-loop|phase-checkpoint|mvp-confirm|delivery-policy|core-delivery|quick-production-review|notice-cards|delivered-notice|pending-confirmation-store)\\.ts$"
+      "id": "current_routes_and_storage_keep",
+      "action": "keep",
+      "reason": "Current short-flow routing, version policy and authoritative document storage remain after old execution bodies were removed.",
+      "paths": [
+        "main/orchestration/stages/agent-dispatch.ts",
+        "main/orchestration/stages/dispatch-support.ts",
+        "main/guide/guide-agent-service.ts",
+        "main/guide/stages/guide-pipeline.ts",
+        "main/guide/ux-confirm.ts",
+        "main/desktop/desktop-route.ts",
+        "main/desktop/workflow-policy.ts",
+        "main/project/document-engine.ts",
+        "main/project/document-sync.ts",
+        "main/project/prd-store.ts"
+      ]
     },
     {
       "id": "frozen_experiment_separate",
-      "action": "preserve_evidence_and_narrow_reader_before_retiring_executor",
-      "reason": "Opt-in pinned experiments are different from current independent-design and harness-evaluation; do not replay or silently migrate.",
+      "action": "read_only_reports_schema_and_evidence",
+      "reason": "Only historical validation, event/usage reading and aggregation remain; executor and replay APIs removed.",
       "pattern": "^main/desktop/dispatch-experiment(?:-[a-z]+)*\\.ts$"
     },
     {
       "id": "shared_capability_keep_migrate",
-      "action": "retain_capabilities_migrate_interfaces_in_batch_B",
-      "reason": "Resource discovery, runtime preparation and independent capability verification remain needed by current products.",
-      "paths": ["main/desktop/component-library.ts", "main/desktop/resource-discovery.ts", "main/desktop/install-packages-tool.ts", "main/desktop/skeleton-provision.ts", "main/desktop/process-driver.ts", "main/desktop/capability-verifiers.ts", "main/desktop/core-verification.ts", "main/desktop/core-verification-cache.ts", "main/desktop/launch-smoke.ts", "main/desktop/speech-verification.ts", "main/desktop/file-verification.ts", "main/desktop/llm-verification.ts", "main/desktop/gui-acceptance.ts", "main/desktop/gui-fixtures.ts", "main/desktop/verification-fingerprint.ts", "main/desktop/verification-receipts.ts", "main/desktop/production-context.ts", "main/desktop/delivery-state.ts", "main/desktop/contract-schema.ts", "main/model/requirement-capabilities.ts", "main/project/requirement-contract.ts", "main/software/runtime-manager.ts", "main/software/capability-bindings.ts", "main/software/capability-resources.ts", "main/software/capability-tools.ts", "main/templates/tools/speech_bridge.cjs"]
+      "action": "keep_current_capabilities_and_verifiers",
+      "reason": "Shared resource discovery, project preparation and independent capability verification were retained and migrated in batch B.",
+      "paths": [
+        "main/desktop/component-library.ts",
+        "main/desktop/resource-discovery.ts",
+        "main/desktop/install-packages-tool.ts",
+        "main/desktop/skeleton-provision.ts",
+        "main/desktop/process-driver.ts",
+        "main/desktop/capability-verifiers.ts",
+        "main/desktop/core-verification.ts",
+        "main/desktop/core-verification-cache.ts",
+        "main/desktop/launch-smoke.ts",
+        "main/desktop/speech-verification.ts",
+        "main/desktop/file-verification.ts",
+        "main/desktop/llm-verification.ts",
+        "main/desktop/gui-acceptance.ts",
+        "main/desktop/gui-fixtures.ts",
+        "main/desktop/verification-fingerprint.ts",
+        "main/desktop/verification-receipts.ts",
+        "main/desktop/production-context.ts",
+        "main/desktop/delivery-state.ts",
+        "main/desktop/contract-schema.ts",
+        "main/model/requirement-capabilities.ts",
+        "main/project/requirement-contract.ts",
+        "main/software/runtime-manager.ts",
+        "main/software/capability-bindings.ts",
+        "main/software/capability-resources.ts",
+        "main/software/capability-tools.ts",
+        "main/templates/tools/speech_bridge.cjs"
+      ]
     },
     {
       "id": "history_data_and_user_access_keep",
       "action": "keep_read_export_launch_and_storage_boundaries",
       "reason": "Project metadata, histories, receipts, budgets and launch/export APIs must remain available during retirement.",
-      "paths": ["main/guide/confirmation-journal.ts", "main/platform/sessions/session-service.ts", "main/platform/sessions/session-tree.ts", "main/ipc/projects.ts", "main/ipc/project-deliverables.ts", "main/delivery/project-export.ts", "main/project/project-service.ts", "main/desktop/production-budget.ts", "main/platform/llm/request-ledger.ts", "main/platform/llm/monetary-budget.ts", "storage/config-paths.ts", "shared/workflow-version.ts"]
+      "paths": [
+        "main/guide/confirmation-journal.ts",
+        "main/platform/sessions/session-service.ts",
+        "main/platform/sessions/session-tree.ts",
+        "main/ipc/projects.ts",
+        "main/ipc/project-deliverables.ts",
+        "main/delivery/project-export.ts",
+        "main/project/project-service.ts",
+        "main/desktop/production-budget.ts",
+        "main/platform/llm/request-ledger.ts",
+        "main/platform/llm/monetary-budget.ts",
+        "storage/config-paths.ts",
+        "shared/workflow-version.ts"
+      ]
     },
     {
-      "id": "retired_web_guard_keep_until_compatibility_decided",
-      "action": "keep_explicit_retirement_response_no_silent_fallback",
-      "reason": "Old web generation is already guarded; archival UI, preview and export are separate from generation.",
-      "paths": ["main/guide/web-line-retired.ts"]
+      "id": "legacy_card_identity_keep",
+      "action": "keep_for_explicit_rejection",
+      "reason": "Historical card IDs remain recognizable, but cannot mutate scope or start retired generation.",
+      "paths": [
+        "main/guide/web-line-retired.ts"
+      ]
+    },
+    {
+      "id": "historical_schema_and_shared_diagnostics",
+      "action": "keep_readers_no_execution",
+      "reason": "Pure historical schema, prompt-setting defaults, conversation reading and independent diagnostics survive old executor removal.",
+      "paths": [
+        "main/guide/prd-sections.ts",
+        "main/guide/legacy-prd-parser.ts",
+        "main/guide/guide-default-prompt.ts",
+        "main/guide/conversation-text.ts",
+        "main/review/prd/prd-review-verdict.ts",
+        "main/desktop/verification-outcome.ts"
+      ]
     }
   ],
   "anchors": [
-    {"id":"retirement_before_channel","path":"main/orchestration/stages/agent-dispatch.ts","needle":"const retirement=workflowRetirementReason(findProject(input.project_id))","meaning":"Legacy and frozen execution return before channel resolution or model admission."},
-    {"id":"explicit_copy_migration","path":"main/software/migrate-workflow.ts","needle":"await importSoftwareProject(original.root_path, original.mode, signal)","meaning":"Migration creates a new independent copy, preserving original records and data."},
-    {"id":"new_project_version","path":"main/ipc/projects.ts","needle":"createProject(input, { workflowVersion: 'software-v1' })","meaning":"New UI projects select software-v1."},
-    {"id":"experiment_opt_in","path":"main/desktop/dispatch-experiment.ts","needle":"if (process.env[EXPERIMENT_SWITCH] !== '1') return undefined","meaning":"A config file is not an active experiment without the switch."},
-    {"id":"experiment_isolation","path":"main/desktop/dispatch-experiment.ts","needle":"assertExperimentHome()","meaning":"Experiment reading checks isolated home and pinned configuration."},
-    {"id":"unmarked_project_policy","path":"main/desktop/workflow-policy.ts","needle":"if (project.workflow_version === undefined) return false","meaning":"Unmarked projects do not auto-upgrade."},
-    {"id":"unknown_version_rejected","path":"main/desktop/workflow-policy.ts","needle":"WORKFLOW_VERSION_UNSUPPORTED","meaning":"Unknown versions cannot become legacy/new successful execution by default."},
-    {"id":"modern_guide_early_return","path":"main/guide/stages/guide-pipeline.ts","needle":"return handleLeanGuide(input, publish, model)","meaning":"Modern guide bypasses the remaining legacy guide body."},
-    {"id":"modern_build_early_return","path":"main/desktop/desktop-route.ts","needle":"await runLeanProduction({ ...input, query, env","meaning":"Modern projects use the shared Pi production loop."},
-    {"id":"old_dispatcher_entry","path":"main/desktop/desktop-route.ts","needle":"runDesktopDispatcherLoop(loopInput)","meaning":"Legacy executor is still called after the modern early return."},
-    {"id":"shared_production_tools","path":"main/desktop/lean-production.ts","needle":"productionAgentTools(baseTools","meaning":"Shared helper in an old-named module still serves modern projects."},
-    {"id":"legacy_python_fallback","path":"main/desktop/lean-production.ts","needle":"if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2","meaning":"lean-v1 still consumes Python skeleton support; software-v1 does not materialize it by default."},
-    {"id":"software_tool_filter","path":"main/software/agent-tools.ts","needle":"const FILE_TOOLS = new Set","meaning":"Old resource/installer tools are not exposed by this filtering path."},
-    {"id":"new_capability_verification","path":"main/desktop/core-verification.ts","needle":"const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane: brief, manifest, signal: options.signal }, options.capabilityVerifiers)","meaning":"Current short workflow still runs capability verifiers."},
-    {"id":"web_retirement_guard","path":"main/orchestration/stages/agent-dispatch.ts","needle":"if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage))","meaning":"Existing retired web-stage response is separate from desktop migration."}
+    {
+      "id": "retirement_before_channel",
+      "path": "main/orchestration/stages/agent-dispatch.ts",
+      "needle": "const retirement=workflowRetirementReason(findProject(input.project_id))",
+      "meaning": "Legacy and frozen execution return before channel resolution or model admission."
+    },
+    {
+      "id": "explicit_copy_migration",
+      "path": "main/software/migrate-workflow.ts",
+      "needle": "await importSoftwareProject(original.root_path, original.mode, signal)",
+      "meaning": "Migration creates a new independent copy, preserving original records and data."
+    },
+    {
+      "id": "new_project_version",
+      "path": "main/ipc/projects.ts",
+      "needle": "createProject(input, { workflowVersion: 'software-v1' })",
+      "meaning": "New UI projects select software-v1."
+    },
+    {
+      "id": "experiment_isolation",
+      "path": "main/desktop/dispatch-experiment.ts",
+      "needle": "EXPERIMENT_REQUIRES_ISOLATED_HOME",
+      "meaning": "Historical report CLI validates isolated experiment home; no executor is retained."
+    },
+    {
+      "id": "unmarked_project_policy",
+      "path": "main/desktop/workflow-policy.ts",
+      "needle": "if (project.workflow_version === undefined) return false",
+      "meaning": "Unmarked projects do not auto-upgrade."
+    },
+    {
+      "id": "unknown_version_rejected",
+      "path": "main/desktop/workflow-policy.ts",
+      "needle": "WORKFLOW_VERSION_UNSUPPORTED",
+      "meaning": "Unknown versions cannot become legacy/new successful execution by default."
+    },
+    {
+      "id": "modern_guide_early_return",
+      "path": "main/guide/stages/guide-pipeline.ts",
+      "needle": "return handleLeanGuide(input, publish, model)",
+      "meaning": "Modern guide bypasses the remaining legacy guide body."
+    },
+    {
+      "id": "modern_build_early_return",
+      "path": "main/desktop/desktop-route.ts",
+      "needle": "await runLeanProduction({ ...input, query, env",
+      "meaning": "Modern projects use the shared Pi production loop."
+    },
+    {
+      "id": "shared_production_tools",
+      "path": "main/desktop/lean-production.ts",
+      "needle": "productionAgentTools(baseTools",
+      "meaning": "Shared helper in an old-named module still serves modern projects."
+    },
+    {
+      "id": "legacy_python_fallback",
+      "path": "main/desktop/lean-production.ts",
+      "needle": "if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2",
+      "meaning": "lean-v1 still consumes Python skeleton support; software-v1 does not materialize it by default."
+    },
+    {
+      "id": "software_tool_filter",
+      "path": "main/software/agent-tools.ts",
+      "needle": "const FILE_TOOLS = new Set",
+      "meaning": "Old resource/installer tools are not exposed by this filtering path."
+    },
+    {
+      "id": "new_capability_verification",
+      "path": "main/desktop/core-verification.ts",
+      "needle": "const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane: brief, manifest, signal: options.signal }, options.capabilityVerifiers)",
+      "meaning": "Current short workflow still runs capability verifiers."
+    },
+    {
+      "id": "web_retirement_guard",
+      "path": "main/orchestration/stages/agent-dispatch.ts",
+      "needle": "if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage))",
+      "meaning": "Existing retired web-stage response is separate from desktop migration."
+    },
+    {
+      "id": "experiment_cli_read_only",
+      "path": "scripts/dispatch-experiment-entry.ts",
+      "needle": "if(!['inspect','report','aggregate'].includes(command))",
+      "meaning": "All former preparation, restore, evaluation and execution commands reject before touching the requested home."
+    }
   ],
-  "symbols": ["isLeanProject", "isSoftwareProject", "readExperiment", "enterDesktopLine", "handleDesktopDispatchMessage", "runLeanProduction", "runDesktopDispatcherLoop", "buildDesktopChildTools", "productionAgentTools", "guardDispatcherCompletion", "getDesktopPhase", "runPrdPipeline", "restorePrdConfirmation", "restoreUxConfirmation", "buildResourceDiscoveryTool", "buildInstallPackagesTool", "provisionDesktopSkeletonV2", "runCoreVerification", "runCapabilityVerifiers", "holdForMvpConfirm", "confirmMvpDelivered"],
-  "asset_terms": ["speech_runtime.py", "speech_locator.py", "speech_worker.py", "speech_bridge.cjs", "driver-skeleton.py", "contract.json", "PHASE_ADVANCE", "desktop-arch", "00_VERIFY/MVP", "pending-confirmations"],
-  "asset_files": ["main/templates/tools/speech_runtime.py", "main/templates/tools/speech_locator.py", "main/templates/tools/speech_worker.py", "main/templates/tools/speech_probe.py", "main/templates/tools/voice-golden.wav"]
+  "symbols": [
+    "isLeanProject",
+    "isSoftwareProject",
+    "readExperiment",
+    "enterDesktopLine",
+    "handleDesktopDispatchMessage",
+    "runLeanProduction",
+    "runDesktopDispatcherLoop",
+    "buildDesktopChildTools",
+    "productionAgentTools",
+    "guardDispatcherCompletion",
+    "getDesktopPhase",
+    "runPrdPipeline",
+    "restorePrdConfirmation",
+    "restoreUxConfirmation",
+    "buildResourceDiscoveryTool",
+    "buildInstallPackagesTool",
+    "provisionDesktopSkeletonV2",
+    "runCoreVerification",
+    "runCapabilityVerifiers",
+    "holdForMvpConfirm",
+    "confirmMvpDelivered"
+  ],
+  "asset_terms": [
+    "speech_runtime.py",
+    "speech_locator.py",
+    "speech_worker.py",
+    "speech_bridge.cjs",
+    "driver-skeleton.py",
+    "contract.json",
+    "PHASE_ADVANCE",
+    "desktop-arch",
+    "00_VERIFY/MVP",
+    "pending-confirmations"
+  ],
+  "asset_files": [
+    "main/templates/tools/speech_runtime.py",
+    "main/templates/tools/speech_locator.py",
+    "main/templates/tools/speech_worker.py",
+    "main/templates/tools/speech_probe.py",
+    "main/templates/tools/voice-golden.wav"
+  ],
+  "retired_files": [
+    {
+      "path": "main/desktop/advance-rejection-loop.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c6afd32d5a0426816abdc6122f7cf88a84570381",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/core-delivery.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "26ed420d9d12b39d16d52728c863278cc586c491",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/delivered-notice.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "0f260217bede01dbf725d9aa583bbf1ab8cbbe9b",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/delivery-policy.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "935c3f3899aed667456e4728cddb9c4f1d166b03",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-autonomous.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "71a8afe7d00ef2a65e5423beacece9da5cb9ac80",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-inputs.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "3c01fa978302f0c6a44a29da43517aa8564496d0",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-matrix.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "168be8879c9aefd1561cbc8a3ea7e855b358810b",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-models.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "bea81d9afcd05e8f55ab978ef116dce9e776b248",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-policy.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "352b493fb9aad06867ddc6e8ba188d107e9b5ce4",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-recovery.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "ceb2295426a4dd3f06386a7df606a62601989ba4",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-runtime.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "70634cd6854f6d6812a95255d97b2ccfebc0f0f7",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatch-experiment-snapshot.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "19c5088072bab2a5b554e201e0bec6768731dba8",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-completion.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "cc8b9b4cc3a9b112388c3d4fefc6e7334be70f80",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-finalize.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "99e454923ee0871c2ccc6c56134cb5788df56be2",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-gate.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "915e5c16a0fcfe38be7dac19b8b91a22830ebb25",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-loop.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "0bcf6713c92494d0ae6659d273b2ffc910dfd02b",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-phases.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "d2478aa7234c431e7eb837eba82b7aef7b0b429b",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-prompt.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "02f2cb1bdec96c68f83d082427f904add4846389",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-switch.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "a8c7ee25829481875203bfd633a8007b1babc5b6",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/dispatcher-telemetry.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "be6e4c6ab542e6276a6e0ae0fe7e2661bf3b54a7",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/mvp-confirm.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "a3c1861de194b0a8aaf7bac7abb86f470216778e",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/notice-cards.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "fa5fce96bd05852407391731e850818bb893f406",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/pending-confirmation-store.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "3f2f181e54f902c801f7c13892c02db02c95c64d",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/phase-checkpoint.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "9232f017e25079a5d28b77ca74a7e59a8efbfd6c",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/production-agent.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "024876188d6544be0e032afe2f950dff17349a43",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/desktop/quick-production-review.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c847502df8607a2ca47a816df3faad0a60bbe957",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/dialogue-router.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "6e33b8465a7706a6a2137360d289fc319650cd13",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/guide-tools.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "4f25c46de8a10444db20671dff76c3d2bd2fd675",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/pipeline.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c42e85412b5339a57a140adefeb52921aefe6c87",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/prd-confirm.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "450b5c79423ee1066aa693ad1d7ce28714b62fda",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/prd-engine-llm.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "118f3ffb79c653275d48c453c0e2a8067d20f819",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/stages/clarify-flow.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "614e6ebb26029e715bce66802c0dda5639ce2910",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/stages/guide-runtime.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "fc3d6821ba4aaf0e9d94ec4a172a4c9a6536c37a",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/stages/prd-pipeline.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "41869ef9db0decd7152b03e24b87036715872f15",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/stages/requirement-confirm.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "b208cc67d5db40eacade8feecab286fd2325853a",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/guide/stages/research-flow.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "104878cd1183c5ec777e1a58e15858639741ce83",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/review/prd/prd-review-card.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "8590daad6701d162083f5a1de5c184b586eec442",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "main/review/prd/prd-review-gate.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "dc18657f78bcb7977c6bd3c748049e6178f5fc2d",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-choices.mjs",
+      "from_revision": "3c1f427",
+      "git_blob": "7f84673e23e798ab365a9fc6c64d284ffa23b17a",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-choices.test.mjs",
+      "from_revision": "3c1f427",
+      "git_blob": "23a76152051be922f6a65c03316763679b294665",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-control.mjs",
+      "from_revision": "3c1f427",
+      "git_blob": "4e9bcf8502bbab830297c68d18a07ce422be13d5",
+      "reason": "Old executor removed after explicit retirement and source-copy migration."
+    },
+    {
+      "path": "tests/experiments/prd-forms-experiment.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "a23844c46a84bcc5a02d69e4d064529b15b3a2fd",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/advance-rejection-loop.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "dcba7330f8a53142ce9a4b536682df75d5d5fb6f",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/core-delivery.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "86dfe64bc549ba8fb881d14d5410c5783e601f88",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/delivered-notice.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "2c3069f17525ef062458138adb1d540d9568ccf2",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/delivery-policy.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "ddbd6b4f80a7351ad5240c0136778655152ef7bf",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/desktop-route.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "8e5f21226c17fd141b814cb310114e4a7227c8ed",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment-models.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "693abea3ce38381a5c431da30d38af66e286bb35",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment-recovery.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "de9f113e60c919eb83050d55a7b4b528cfb61460",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment-reliability.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "b9eca5a91e9e9a909c4e18ab2760c4ff8251bf04",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "5e0cdd6494288f99a61ead9b329c3842e290f4df",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-handoff-readiness.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "19ad9e96e6688778382ab933f6af526006f4c5d3",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-telemetry-attempts.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "0c88296f0a2292811a50b64726fd9977e5681221",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-telemetry-outcome.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "717bfede7a486c63e8512338335cb3b5f31f4f5a",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatcher-gate.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "9ff948fbab767a9c5d3961b81b091a98dd6e400e",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatcher-loop.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "2c547af8a5170d5bcfefa14a81856bed73de252e",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatcher-phases.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "b03b0a58168b34453c52debcef5264cc36c27a2e",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatcher-prompt.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "20d5fcfd606fb4c70f1726ddf2b85cbd031b13f3",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/dispatcher-switch.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c0e26a48249a47a703795460beb3ce77effcfb2e",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/early-artifacts.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "44102fd72d2b609fdb6462231edce91cb79d9b61",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/mvp-confirm.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "836ce039038d0e797bc502fb318387c0984959cb",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/notice-cards.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "aa841e497990378bde30c5445ebbb9593ab2ca80",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/phase-checkpoint.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "af1b87f5b19ac691f2ef87e481547eed1c301d4a",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/production-agent.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c18e40fa1f8d7375c4ab46de28cff4e40573faf3",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/quick-review-recovery.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "37dcb2a55e66abeca530e9170f01794c442e6b76",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/snapshot-display-name.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "d157aff49ccf1519a62dfd95cc0b886b5f507333",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/desktop/verification-policy.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "317a957d1a40715d53e14e2b18337fec23613ddc",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-advisory-research.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "4406c9c39dcb99979c9c2f2aceeb3639a734cfee",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-agent-service.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "0807ac0b33a0c63801f7f37e1733c6f452078c0a",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-auto-delegation.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "18dac0279932e5bed1abe217dcb5ae69027779a6",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-clarification-loop.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "e51baf21708f840d2df900a44586191bdcae0f9e",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-clarification-round-limit.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "dc182c3e29fa28913da2554846b9a72d067a5fad",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-prd-confirm.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c0a4ac12f649b12f01a398dfaca1ac1cf8e7dbe6",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-prd-review-round-limit.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "09c41947280aed5f79e55a579ebedaeeb8826bab",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-prd-review.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "20f854cae31cae32c9c3b42a82ec6da44e19750a",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-requirement-confirm.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c3d59f849f1b5d93ddc6621a1136b59385c14d71",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-research-mode.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "82c07cce2e27def0124e9734e2b8cd2dccd89453",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide-tools.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c38ae16aab4d4de48a6851172d3c1a8aab2ddad7",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/guide/structured-text-decision.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "c76ad953f19ce1333dbd0a46c17dc87a07518734",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/prd-organization-pipeline.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "77d52adb3e02bf2baddb7c623e2fd2d7f3b93152",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "tests/unit/user-facing-output.test.ts",
+      "from_revision": "3c1f427",
+      "git_blob": "99ecdda07597a91e2ea22d7f232d3cf8a48f1e85",
+      "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    }
+  ]
 }

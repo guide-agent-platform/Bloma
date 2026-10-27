@@ -17,7 +17,7 @@ import { readPrdBackplane } from '../project/document-engine'
 import { requirementPriority } from '../model/prd-backplane'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 import type { ProjectContract } from './contract-schema'
-import type { AdvanceDecision } from './dispatcher-gate'
+import type { VerificationRejection } from './verification-outcome'
 
 export interface AuditFinding {
   file: string
@@ -315,7 +315,7 @@ export async function runVerifyEffectivenessPhase(input: {
 }
 
 /** 6a 拒收决策（test-invalid）：永真断言/吞异常/无断言硬拒收。 */
-export function buildTestInvalidReject(outcome: TestEffectivenessOutcome, driverReport: DriverExecutionReport, reportPath: string): AdvanceDecision {
+export function buildTestInvalidReject(outcome: TestEffectivenessOutcome, driverReport: DriverExecutionReport, reportPath: string): VerificationRejection {
   const findings = outcome.audit.findings.filter((f) => f.state === 'reject')
   return {
     decision: 'reject',
@@ -330,7 +330,7 @@ export function buildTestInvalidReject(outcome: TestEffectivenessOutcome, driver
 }
 
 /** 6b 拒收决策（fault-survived）：注入已知缺陷后测试仍全绿 = 没证明任何东西。 */
-export function buildFaultSurvivedReject(outcome: TestEffectivenessOutcome, reportPath: string): AdvanceDecision {
+export function buildFaultSurvivedReject(outcome: TestEffectivenessOutcome, reportPath: string): VerificationRejection {
   const survivedEntries = outcome.faultKill.entries.filter((e) => e.result === 'survived')
   return {
     decision: 'reject',

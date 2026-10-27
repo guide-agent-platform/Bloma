@@ -9,7 +9,7 @@ import { openPiSession, piSessionPath } from '../../main/agent/loop/pi-session-s
 import { emptyAssistant } from '../../main/agent/loop/pi-messages'
 import { createProductionBudget } from '../../main/desktop/production-budget'
 import { enqueueSteer } from '../../main/agent/loop/steer-queue'
-import { AssistantTurnCollector } from '../../main/desktop/dispatcher-loop'
+import { AssistantTurnCollector } from '../support/assistant-turn-collector'
 
 let home: string, oldHome: string | undefined
 beforeEach(() => { oldHome = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-pi-')); process.env.PROMA_HOME = home })

@@ -602,10 +602,5 @@ async function returnToPrd(pending: PendingUxConfirm, feedback: string): Promise
       sessionId: pending.session_id, history: [], maxTokens: resolveGenerationMaxTokens(resolution.channel ?? {}), persistAssistant: () => {} })
     return
   }
-  pending.publish(makeUxEvent(pending, 'message_delta', { text: '这条意见会改变需求或业务规则，我先更新 PRD 与验收，再重新整理界面设计。' }))
-  // The existing candidate list is only a clue; the organizer reads the user's latest feedback.
-  const { runPrdPipeline } = await import('./stages/prd-pipeline')
-  appendSessionMessage(pending.session_id, { role: 'user', content: [{ type: 'text', text: `在界面设计阶段修改需求：${feedback}` }], timestamp: Date.now(), metadata: { source: 'ux_scope_revision' } })
-  await runPrdPipeline({ request_id: pending.request_id, project_id: pending.project_id, session_id: pending.session_id, mode: pending.mode,
-    channel_id: pending.channel_id, requirements: pending.requirements, query: pending.query, env: pending.env, publish: pending.publish, signal: pending.signal })
+  pending.publish(makeUxEvent(pending,'message_delta',{text:'旧需求生成入口已退役，请重新打开当前任务单；历史项目可复制到新流程。'}))
 }

@@ -2,7 +2,7 @@
 
 核对日期：2026-10-27，Asia/Shanghai。源代码基线 `sprint2 / 607425a`；本批新增扫描器、范围清单与报告，不修改应用执行逻辑。
 
-本页的 885/101 等统计是批次 A 快照，原始版本保留在 Git `e380fee`。后继 B 已新增能力接口，最新机器清单与 scope 已刷新为 version 2，见 [批次 B](software-capability-bridge-20261027.md)；不能用 A 的历史数字代表 B/C/D 后的当前依赖。
+本页的 885/101 等统计是批次 A 快照，原始版本保留在 Git `e380fee`。后继 B/C/D 已实施能力桥接、长期里程碑与旧执行器退役；当前 scope 为 version 6，机器清单记录 85 个保留模块及 81 个已删除源码/测试路径。见 [批次 D](workflow-retirement-implementation-20261027.md)；不能用 A 的历史数字代表当前依赖。
 
 对应用户指令“先实行一”：执行 [近期计划](workflow-retirement-modes-capabilities-20261027.md) 的 A 批次，形成可复查依赖和迁移/删除条件。**本批直接删除批准数为 0；未删除文件、切换真实项目流程或恢复任何实验。**
 

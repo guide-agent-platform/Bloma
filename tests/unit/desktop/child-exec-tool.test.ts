@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { restorePromaHome } from '../../support/proma-home-guard'
 import { DriverExecutionError, type DriverCommandRequest } from '../../../main/desktop/process-driver'
 import { buildChildScriptRunnerTool } from '../../../main/desktop/child-exec-tool'
-import { buildDesktopChildTools } from '../../../main/desktop/dispatcher-loop'
+import { buildDesktopChildTools } from '../../../main/desktop/production-runtime-tools'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { createProject } from '../../../main/project/project-service'
 

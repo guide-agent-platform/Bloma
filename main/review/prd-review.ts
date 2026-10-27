@@ -5,6 +5,8 @@
  */
 export * from './prd/prd-review-contracts'
 export * from './prd/prd-review-prompts'
-export * from './prd/prd-review-gate'
+
 export * from './prd/prd-review-rules'
-export * from './prd/prd-review-card'
+
+
+export {deriveVerdict} from './prd/prd-review-verdict'

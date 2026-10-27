@@ -2,6 +2,8 @@
 
 后继执行已推进，当前状态请读 [逐批实施记录](harness-improvement-progress-20261027.md)、[独立验收设计](independent-acceptance-design-20261027.md) 和 [固定任务对照工具](harness-evaluation-20261027.md)。本交接以下内容保留为原接手快照，不能据此将已完成工程重新列为待做；真实付费对照仍待新预算。
 
+后续已完成复杂能力桥接与长期型差异，并继续实施旧流程退役；相关现状及边界见 [近期实施表](workflow-retirement-modes-capabilities-20261027.md)、[长期里程碑](software-longterm-milestones-20261027.md) 和 [退役实施记录](workflow-retirement-implementation-20261027.md)。所有实施均本地逐批提交，不 push、不新增付费样本、不迁移真实项目。
+
 核对日期：2026-10-27，Asia/Shanghai。工程基线：`sprint2 / 840f8eb`。本交接的文档提交会在该基线上增加一个提交，进入新会话后以 `git log -3 --oneline` 核对实际 HEAD。
 
 ## 用户目标与执行范围

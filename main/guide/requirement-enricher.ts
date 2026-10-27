@@ -4,7 +4,7 @@ import type { SketchRequirement } from "../model/prd-backplane";
 import { isPlaceholderAssertion } from "../model/prd-backplane";
 import { parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { categoryTemperature } from '../platform/llm/model-resolution'
-import { readConversation } from './prd-engine-llm'
+import { readConversation } from './conversation-text'
 import { callLlmForJson } from '../kernel/llm-call'
 import { sanitizeClarificationRequests, type EnrichmentClarificationRequest } from './clarification'
 

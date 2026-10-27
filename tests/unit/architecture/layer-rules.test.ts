@@ -115,8 +115,8 @@ const WHITELIST = new Set<string>([
   'R1|main/agent/loop -> main/project/learnings-log',
   'R1|main/agent/loop -> main/project/project-service',
   // ── 主题三：agent/prompting 表达层引用 PRD/需求领域件（表达适配层的固有耦合，PR4 评估上提或下沉）
-  'R1|main/agent/prompting -> main/guide/guide-agent-service',
-  'R1|main/agent/prompting -> main/guide/prd-engine-llm',
+  // Existing setting defaults are consolidated as static data; no guide executor import.
+  'R1|main/agent/prompting -> main/guide/guide-default-prompt',
   'R1|main/agent/prompting -> main/guide/requirement-enricher',
   'R1|main/agent/prompting -> main/guide/requirement-normalizer',
   'R1|main/agent/prompting -> main/project/project-templates',

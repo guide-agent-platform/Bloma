@@ -14,7 +14,7 @@ import {
   type PrdBackplane,
   type SketchRequirement,
 } from '../../main/model/prd-backplane'
-import { KEY_TASKS_PROMPT_ADDENDUM, buildBackplaneFromParsed, parseKeyTasks } from '../../main/guide/prd-engine-llm'
+import { KEY_TASKS_PROMPT_ADDENDUM, buildBackplaneFromParsed, parseKeyTasks } from '../../main/guide/legacy-prd-parser'
 
 afterEach(() => {
   vi.unstubAllEnvs()

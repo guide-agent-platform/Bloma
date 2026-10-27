@@ -17,7 +17,7 @@ import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration } from './launch-smoke'
 import { resolveDriverVenvCommand } from './process-driver'
 import { violatesCommandBlacklist } from './contract-schema'
-import { isMvpConfirmPending } from './mvp-confirm'
+
 import { clearCorrectionSubmission, readCorrectionSubmission, saveCorrectionSubmission } from './correction-outbox'
 import { isSoftwareProject } from './workflow-policy'
 import { getPromaHome } from '../../storage/config-paths'
@@ -154,8 +154,8 @@ function sanitizePick(raw: unknown): CorrectionPick | { type: 'done' } | null {
 export async function startCorrectionSession(input: { projectId: string }): Promise<CorrectionStartResult> {
   const project = findProject(input.projectId)
   if (readCorrectionSubmission(input.projectId)) return { ok: false, reason: 'already-running', error: '上次点选意见尚未提交，请先重试提交或取消' }
-  // 批11 ②：MVP 门挂起态也允许拉起（「先在程序里点点看」选项）——未交付且无挂起门才拦
-  if (project.current_stage !== 'completed' && !isMvpConfirmPending(input.projectId)) {
+  // Archived MVP cards have no authority to launch a correction process.
+  if (project.current_stage !== 'completed') {
     return { ok: false, reason: 'not-delivered', error: 'CORRECTION_NOT_DELIVERED: 项目尚未完成交付，不能进入修改预览' }
   }
   if (activeSessions.has(input.projectId) || startingSessions.has(input.projectId)) {
