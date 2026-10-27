@@ -1,132 +1,31 @@
-import { existsSync, unlinkSync } from 'node:fs'
-import { dirname } from 'node:path'
-import type { PromptSlotDetail, PromptSlotId, PromptSlotInfo } from '../../../shared/types'
-import { getPromptOverridePath, ensureDir } from '../../../storage/config-paths'
-import { writeTextFileAtomic } from '../../../storage/json-store'
-import { loadPromptOverride, promptOverrideNames } from './prompt-config'
-import { UX_SKETCH_SYSTEM_PROMPT } from './ux-sketch-prompt'
-import { DEFAULT_PRD_SYSTEM_PROMPT as PRD_DEFAULT, DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../guide/guide-default-prompt'
-import { DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT } from '../../guide/requirement-enricher'
-import { DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT } from '../../guide/requirement-normalizer'
-
-/**
- * PromptService — 引擎 system prompt 外置覆盖的界面化配置服务。
- *
- * 覆盖文件位于 `{PROMA_HOME}/prompts/{id}.md`（见 prompt-config.ts），文件存在即
- * **全量替换**内置默认、改完即时生效、无需重启。本服务为设置页「提示词配置」提供
- * 槽位清单、当前生效内容读取、覆盖写入与恢复默认（删除覆盖文件）能力。
- *
- * 六槽位：prd / sketch（静态 UX 草图）/ guide / enricher / normalizer / loop（追加）。
- * 前五槽位替换内置默认；loop 由 runAgentLoop 入口追加，不替换项目/阶段锚。
- */
-
-interface PromptSlotDef {
-  id: PromptSlotId
-  label: string
-  description: string
-  enabled: boolean
-  /** enabled 槽位的内置默认内容（无覆盖时展示），未启用槽位缺省 */
-  getDefault?: () => string
-}
-
-const PROMPT_SLOTS: PromptSlotDef[] = [
-  {
-    id: 'prd-system',
-    label: 'PRD 需求提炼提示词',
-    description: '从对话历史提炼产品定位、功能验收要点、范围外与假设，供桌面实现和验收使用。',
-    enabled: true,
-    getDefault: () => PRD_DEFAULT,
-  },
-  {
-    id: 'sketch-system',
-    label: 'UX 外观草图提示词',
-    description: '根据已确认需求生成 Windows 桌面外观草图（静态 HTML），用于确认界面方向。',
-    enabled: true,
-    getDefault: () => UX_SKETCH_SYSTEM_PROMPT,
-  },
-  {
-    id: 'guide-system',
-    label: '向导 Agent 对话提示词',
-    description: '驱动向导 Agent 需求澄清对话（二选一 JSON 输出契约）。',
-    enabled: true,
-    getDefault: () => GUIDE_DEFAULT,
-  },
-  {
-    id: 'enricher-system',
-    label: '功能项加厚提示词',
-    description: '把薄功能项补成 story + 行为断言 + 优先级（带反编造接地守卫）。',
-    enabled: true,
-    getDefault: () => ENRICHER_DEFAULT,
-  },
-  {
-    id: 'normalizer-system',
-    label: '修改诉求归一化提示词',
-    description: '向导群·需求归一化腿：把修改诉求整理为故事化功能项（revise/append/skip/out_of_scope 四态）。',
-    enabled: true,
-    getDefault: () => NORMALIZER_DEFAULT,
-  },
-  {
-    id: 'loop-system',
-    label: 'Agent Loop 追加规则',
-    description: '在默认行为之上追加自定义规则（追加模式），背板锚定段不可覆盖。',
-    enabled: true,
-    getDefault: () => '',
-  },
+import {existsSync,unlinkSync} from 'node:fs'
+import {dirname} from 'node:path'
+import type {PromptSlotDetail,PromptSlotId,PromptSlotInfo} from '../../../shared/types'
+import {getPromptOverridePath,ensureDir} from '../../../storage/config-paths'
+import {writeTextFileAtomic} from '../../../storage/json-store'
+import {loadPromptOverride,promptOverrideNames} from './prompt-config'
+import {LEAN_SKETCH_PROMPT} from './ux-sketch-prompt'
+const active=[
+  {id:'sketch-system' as const,label:'UX 外观草图提示词',description:'调整当前软件的静态界面方向；完整 HTML 与安全约束由宿主保留。',enabled:true,getDefault:()=>LEAN_SKETCH_PROMPT},
+  {id:'loop-system' as const,label:'Agent Loop 追加规则',description:'追加制作规则，保留宿主的需求、权限与验收约束。',enabled:true,getDefault:()=>''},
 ]
-
-function findSlot(promptId: string): PromptSlotDef {
-  const slot = PROMPT_SLOTS.find((s) => s.id === promptId)
-  if (!slot) throw new Error('VALIDATION_ERROR: unknown prompt slot')
-  return slot
+const retired:Partial<Record<PromptSlotId,string>>={'prd-system':'旧 PRD 提炼','guide-system':'旧向导对话','enricher-system':'旧功能项加厚','normalizer-system':'旧修改归一化'}
+function slot(id:string){
+  const current=active.find(row=>row.id===id)
+  if(current)return current
+  const label=Object.hasOwn(retired,id)?retired[id as PromptSlotId]:undefined
+  if(label)return{id:id as PromptSlotId,label:label+'（历史只读）',description:'对应流程已退役；历史覆盖保留，不参与当前生成。',enabled:false,getDefault:()=>''}
+  throw Error('VALIDATION_ERROR: unknown prompt slot')
 }
-
-function hasOverride(promptId: string): boolean {
-  return loadPromptOverride(promptId) !== null
+function writable(id:string){const value=slot(id);if(!value.enabled)throw Error('VALIDATION_ERROR: retired prompt slot is read-only');return value}
+export function listPromptSlots():PromptSlotInfo[]{
+  const visible=[...active,...Object.keys(retired).filter(id=>promptOverrideNames(id).some(name=>existsSync(getPromptOverridePath(name)))).map(slot)]
+  return visible.map(({getDefault,...row})=>({...row,has_override:loadPromptOverride(row.id)!==null}))
 }
-
-export function listPromptSlots(): PromptSlotInfo[] {
-  return PROMPT_SLOTS.map((slot) => ({
-    id: slot.id,
-    label: slot.label,
-    description: slot.description,
-    enabled: slot.enabled,
-    has_override: hasOverride(slot.id),
-  }))
+export function readPromptSlot(id:PromptSlotId):PromptSlotDetail{const {getDefault,...row}=slot(id),override=loadPromptOverride(id);return{...row,has_override:override!==null,content:override??getDefault()}}
+export function savePromptSlot(id:PromptSlotId,content:string):{saved:true;prompt_id:PromptSlotId}{
+  writable(id)
+  if(typeof content!=='string'||!content.trim())throw Error('VALIDATION_ERROR: prompt content must not be blank')
+  const path=getPromptOverridePath(id);ensureDir(dirname(path));writeTextFileAtomic(path,content.trim());return{saved:true,prompt_id:id}
 }
-
-export function readPromptSlot(promptId: PromptSlotId): PromptSlotDetail {
-  const slot = findSlot(promptId)
-  const override = loadPromptOverride(promptId)
-  const content = slot.enabled
-    ? (override ?? slot.getDefault?.() ?? '')
-    : ''
-  return {
-    id: slot.id,
-    label: slot.label,
-    description: slot.description,
-    enabled: slot.enabled,
-    has_override: hasOverride(promptId),
-    content,
-  }
-}
-
-export function savePromptSlot(promptId: PromptSlotId, content: string): { saved: true; prompt_id: PromptSlotId } {
-  const slot = findSlot(promptId)
-  if (!slot.enabled) throw new Error('VALIDATION_ERROR: prompt slot not enabled')
-  if (typeof content !== 'string') throw new Error('VALIDATION_ERROR: prompt content must be text')
-  const trimmed = content.trim()
-  if (!trimmed) throw new Error('VALIDATION_ERROR: prompt content must not be blank')
-  const path = getPromptOverridePath(promptId)
-  ensureDir(dirname(path))
-  writeTextFileAtomic(path, trimmed)
-  return { saved: true, prompt_id: promptId }
-}
-
-export function resetPromptSlot(promptId: PromptSlotId): { reset: true; prompt_id: PromptSlotId } {
-  findSlot(promptId)
-  for (const name of promptOverrideNames(promptId)) {
-    const path = getPromptOverridePath(name)
-    if (existsSync(path)) unlinkSync(path)
-  }
-  return { reset: true, prompt_id: promptId }
-}
+export function resetPromptSlot(id:PromptSlotId):{reset:true;prompt_id:PromptSlotId}{writable(id);for(const name of promptOverrideNames(id)){const path=getPromptOverridePath(name);if(existsSync(path))unlinkSync(path)}return{reset:true,prompt_id:id}}

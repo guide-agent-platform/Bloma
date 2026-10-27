@@ -15,7 +15,7 @@ import {
   type PrdBackplane,
   type SketchRequirement,
 } from '../../main/model/prd-backplane'
-import { CAP_PROMPT_ADDENDUM, buildBackplaneFromParsed, parseAiCapabilities } from '../../main/guide/legacy-prd-parser'
+
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -81,48 +81,7 @@ describe('deriveAiCapabilities（确定性派生兜底）', () => {
   })
 })
 
-describe('parseAiCapabilities（LLM 产出清洗）', () => {
-  it('capability_id 归一 CAP-0N；source 白名单外归 pending_assumption', () => {
-    const caps = parseAiCapabilities([
-      { capability_id: 'cap_2', task: '语音转文字', keyProcessing: '模型调用', ioDependency: '…', forbiddenSubstitutions: ['写死'], evidence: ['语音变化文字变化'], source: '神' },
-    ])
-    expect(caps).toHaveLength(1)
-    expect(caps[0].capability_id).toBe('CAP-02')
-    expect(caps[0].source).toBe('pending_assumption')
-  })
-  it('缺 task 弃条；非对象/非数组 → 空数组；保留全部有效能力', () => {
-    expect(parseAiCapabilities('x')).toEqual([])
-    expect(parseAiCapabilities([{ keyProcessing: '无 task' }, { task: '有效' }])).toHaveLength(1)
-    expect(parseAiCapabilities(Array.from({ length: 6 }, (_, i) => ({ task: `能力${i}` })))).toHaveLength(6)
-  })
-})
 
-describe('buildBackplaneFromParsed（挂载：开关+派生兜底）', () => {
-  const items = [req('F-001', 'AI 智能总结笔记')]
-  const parsedBase = { document: '', positioning: '定位', acceptance: {}, out_of_scope: [], assumptions: [] }
-
-  it('off：LLM 产出也不挂（字节级现状——prd.json 无 ai_capabilities 键）', () => {
-    const bp = buildBackplaneFromParsed({ ...parsedBase, ai_capabilities: [sampleCap] }, items, 'p1')
-    expect('ai_capabilities' in bp).toBe(false)
-  })
-  it('on：LLM 产出优先挂载', () => {
-    vi.stubEnv('BLOMA_CAP_CONTRACT', '1')
-    const bp = buildBackplaneFromParsed({ ...parsedBase, ai_capabilities: [sampleCap] }, items, 'p1')
-    expect(backplaneAiCapabilities(bp)).toHaveLength(1)
-    expect(backplaneAiCapabilities(bp)[0].task).toBe('根据笔记内容生成智能总结')
-  })
-  it('on：LLM 漏报 + 命中 AI 信号 → 确定性派生（随心记负样本防线）', () => {
-    vi.stubEnv('BLOMA_CAP_CONTRACT', '1')
-    const bp = buildBackplaneFromParsed({ ...parsedBase }, items, 'p1')
-    expect(backplaneAiCapabilities(bp)).toHaveLength(1)
-    expect(backplaneAiCapabilities(bp)[0].source).toBe('confirmed_derived')
-  })
-  it('on：纯展示项目零派生（挂空数组，零注入）', () => {
-    vi.stubEnv('BLOMA_CAP_CONTRACT', '1')
-    const bp = buildBackplaneFromParsed({ ...parsedBase }, [req('F-001', '做一个计算器')], 'p1')
-    expect(backplaneAiCapabilities(bp)).toEqual([])
-  })
-})
 
 describe('renderBackplaneAnchor / renderCapSection（注入与零注入回归锁）', () => {
   it('renderCapSection([]) → 空串', () => {
@@ -140,13 +99,5 @@ describe('renderBackplaneAnchor / renderCapSection（注入与零注入回归锁
     expect(anchor).toContain('【能力契约（CAP，什么不算完成）】')
     expect(anchor).toContain('不算完成：固定模板冒充；降级为普通增删改查')
     expect(anchor).toContain('验收证据：修改笔记后总结随之变化')
-  })
-})
-
-describe('CAP_PROMPT_ADDENDUM（system prompt 附加块）', () => {
-  it('自包含 schema 与判定指令', () => {
-    expect(CAP_PROMPT_ADDENDUM).toContain('"ai_capabilities"')
-    expect(CAP_PROMPT_ADDENDUM).toContain('forbiddenSubstitutions')
-    expect(CAP_PROMPT_ADDENDUM).toContain('user_explicit')
   })
 })

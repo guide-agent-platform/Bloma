@@ -116,9 +116,6 @@ const WHITELIST = new Set<string>([
   'R1|main/agent/loop -> main/project/project-service',
   // ── 主题三：agent/prompting 表达层引用 PRD/需求领域件（表达适配层的固有耦合，PR4 评估上提或下沉）
   // Existing setting defaults are consolidated as static data; no guide executor import.
-  'R1|main/agent/prompting -> main/guide/guide-default-prompt',
-  'R1|main/agent/prompting -> main/guide/requirement-enricher',
-  'R1|main/agent/prompting -> main/guide/requirement-normalizer',
   'R1|main/agent/prompting -> main/project/project-templates',
   // ── 主题四：platform 反向依赖 domain（真违规，治理方向=事件化或函数下沉；PR3 治理）
   // ── 主题五：上游贴面适配（loop-query 是薄适配层，允许引用本仓运行时件；保持与上游 diff 最小）

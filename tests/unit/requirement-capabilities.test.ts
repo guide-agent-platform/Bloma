@@ -4,7 +4,7 @@ import { deriveAiCapabilities, type PrdBackplane } from '../../main/model/prd-ba
 import { requirementEvidenceHash } from '../../main/project/requirement-contract'
 import { parseOrganizedRequirements } from '../../main/model/requirements-model'
 import { organizedPrd } from '../support/organized-prd'
-import { applyNormalization } from '../../main/guide/requirement-normalizer'
+import { parseLeanBrief } from '../../main/guide/lean-brief'
 
 describe('confirmed verification capabilities', () => {
   it('does not turn ordinary organization, negated requirements or contact renaming into provider/filesystem work', () => {
@@ -34,9 +34,12 @@ describe('confirmed verification capabilities', () => {
     expect(parseOrganizedRequirements(raw, raw.requirements_model.sources)).toBeUndefined()
   })
   it('does not carry an old adapter declaration across a normalized behavior revision', () => {
-    const revised = applyNormalization([{ id: 'F-002', description: '模型增强', capabilities: ['llm'] }],
-      { action: 'revise', reviseId: 'F-002', description: '按日期整理文件', via: 'llm' }, 'F-003')
-    expect(revised[0].capabilities).toBeUndefined()
-    expect([...requirementCapabilities(revised[0])]).toEqual([])
+    const previous={project_id:'p',name:'测试',positioning:'模型增强',requirements:[{id:'F-002',description:'模型增强',capabilities:['llm']}],acceptance:{'F-002':'生成增强结果'},assumptions:[],out_of_scope:[]} as PrdBackplane
+    const revised=parseLeanBrief(JSON.stringify({action:'brief',goal:'整理文件',ui:'none',requirements:[{id:'F-002',description:'按日期整理文件',expected:'文件按日期显示'}]}),{projectId:'p',sessionId:'s',source:'整理文件',previous,software:true})
+    expect(revised?.action).toBe('brief')
+    if(revised?.action==='brief'){
+      expect(revised.brief.requirements[0].capabilities).toBeUndefined()
+      expect([...requirementCapabilities(revised.brief.requirements[0])]).toEqual([])
+    }
   })
 })

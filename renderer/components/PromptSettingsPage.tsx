@@ -83,7 +83,7 @@ interface PromptSlotCardProps {
 
 const PromptSlotCard: React.FC<PromptSlotCardProps> = ({ detail, active, onClick }) => {
   const statusColor = detail.enabled ? 'var(--color-quick)' : 'var(--gray-400)'
-  const statusText = detail.enabled ? '已启用' : '未启用'
+  const statusText = detail.enabled ? '已启用' : '已退役 · 历史只读'
   return (
     <button
       type="button"
@@ -139,7 +139,7 @@ const PromptSlotCard: React.FC<PromptSlotCardProps> = ({ detail, active, onClick
               whiteSpace: 'nowrap',
             }}
           >
-            自定义中
+            {detail.enabled?'自定义中':'历史覆盖已保留'}
           </span>
         )}
       </div>
@@ -155,7 +155,7 @@ const PromptSlotCard: React.FC<PromptSlotCardProps> = ({ detail, active, onClick
 // =========================================================================
 
 const EMPTY_DETAIL: PromptSlotDetail = {
-  id: 'prd-system',
+  id: 'sketch-system',
   label: '',
   description: '',
   enabled: false,
@@ -185,7 +185,7 @@ export const PromptSettingsPage: React.FC = () => {
           setSlots(result.data)
           setLoading('loaded')
           const firstEnabled = result.data.find((s) => s.enabled)
-          setActiveSlotId((prev) => prev ?? (firstEnabled?.id ?? result.data[0]?.id ?? null))
+          setActiveSlotId((prev) => prev&&result.data.some(slot=>slot.id===prev) ? prev : (firstEnabled?.id ?? result.data[0]?.id ?? null))
         } else {
           setLoading('error')
         }
@@ -494,8 +494,9 @@ export const PromptSettingsPage: React.FC = () => {
                     {detail.label}
                   </p>
                   <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
-                    该提示词尚未接入，暂不能配置。
+                    {detail.description}
                   </p>
+                  {detail.has_override&&<textarea aria-label="历史提示词（只读）" readOnly value={detail.content} style={{width:'100%',minHeight:180,marginTop:12}}/>}
                 </div>
               </div>
             )}

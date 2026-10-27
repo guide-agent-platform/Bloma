@@ -6,60 +6,9 @@
  *   长任务线程化/ui_kit）。
  */
 import { describe, expect, it } from 'vitest'
-import { parseUxExperience } from '../../../main/guide/legacy-prd-parser'
+
 import { renderUxDigest } from '../../../main/desktop/requirement-digest'
 
-
-describe('parseUxExperience（七态白名单解析）', () => {
-  it('合法 states + feedback_rules 解析通过', () => {
-    const ux = parseUxExperience({
-      states: [
-        { id: 'empty', observable: '空态引导' },
-        { id: 'success', observable: '列表立即可见' },
-        { id: 'failed', observable: '行内提示错误原因' },
-      ],
-      feedback_rules: ['操作即时反馈', '失败给原因与下一步'],
-    })
-    expect(ux).toEqual({
-      states: [
-        { id: 'empty', observable: '空态引导' },
-        { id: 'success', observable: '列表立即可见' },
-        { id: 'failed', observable: '行内提示错误原因' },
-      ],
-      feedback_rules: ['操作即时反馈', '失败给原因与下一步'],
-    })
-  })
-
-  it('白名单外 id / observable 为空 / 重复 id 的条目被过滤；states 为空 → undefined（降级不 fail）', () => {
-    expect(
-      parseUxExperience({
-        states: [
-          { id: 'fancy_state', observable: '白名单外' },
-          { id: 'success', observable: '  ' },
-          { id: 'empty', observable: '有效' },
-          { id: 'empty', observable: '重复' },
-        ],
-        feedback_rules: ['x'],
-      }),
-    ).toEqual({ states: [{ id: 'empty', observable: '有效' }], feedback_rules: ['x'] })
-    expect(parseUxExperience({ states: [], feedback_rules: ['x'] })).toBeUndefined()
-    expect(parseUxExperience({ states: [{ id: 'loading', observable: '白名单外' }] })).toBeUndefined()
-    expect(parseUxExperience('not-an-object')).toBeUndefined()
-    expect(parseUxExperience(undefined)).toBeUndefined()
-  })
-
-  it('上限防御：states ≤7、feedback_rules ≤6、非字符串规则被滤', () => {
-    const allIds = ['empty', 'ready_input', 'validating', 'running', 'success', 'partial', 'failed']
-    const states = allIds.map((id) => ({ id, observable: `${id} 表现` }))
-    states.push({ id: 'empty', observable: '第 8 个会被截' })
-    const ux = parseUxExperience({
-      states,
-      feedback_rules: ['1', '2', '3', '4', '5', '6', '7', 42, null],
-    })
-    expect(ux?.states.length).toBe(7)
-    expect(ux?.feedback_rules).toEqual(['1', '2', '3', '4', '5', '6'])
-  })
-})
 
 describe('renderUxDigest（体验契约段注入）', () => {
   it('背板 ux 存在 → 渲染状态与反馈规则（含冻结声明）', () => {

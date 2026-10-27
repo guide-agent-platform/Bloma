@@ -1,3 +1,4 @@
+import {LEAN_SKETCH_PROMPT} from '../../main/agent/prompting/ux-sketch-prompt'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,7 +45,7 @@ describe('提示词设置到真实模型装配边界', () => {
 
   it('设置页可编辑 UX 草图，保存内容确实送到草图模型调用', async () => {
     expect(listPromptSlots().map((slot) => slot.id)).toContain('sketch-system')
-    expect(readPromptSlot('sketch-system').content).toContain('外观草图')
+    expect(readPromptSlot('sketch-system').content).toBe(LEAN_SKETCH_PROMPT)
     savePromptSlot('sketch-system', '草图覆盖标记：保持用户确认的布局')
     vi.mocked(callLlmForJson).mockResolvedValue({ html: '<!DOCTYPE html><html></html>', source: 'llm' } as never)
     await generateUxSketch({
@@ -67,7 +68,7 @@ describe('提示词设置到真实模型装配边界', () => {
     expect(loadPromptOverride('sketch-system')).toBe('设置页版本')
     resetPromptSlot('sketch-system')
     expect(readPromptSlot('sketch-system').has_override).toBe(false)
-    expect(readPromptSlot('sketch-system').content).toContain('外观草图')
+    expect(readPromptSlot('sketch-system').content).toBe(LEAN_SKETCH_PROMPT)
     for (const name of ['sketch-system', 'ux-sketch', 'ux-sketch.md']) {
       expect(existsSync(join(home, 'prompts', `${name}.md`))).toBe(false)
     }

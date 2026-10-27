@@ -18,12 +18,7 @@ vi.mock('../../../main/platform/llm/channel-manager', async importOriginal => ({
   decryptApiKey: () => 'test-key',
   getFirstEnabledChannel: () => undefined,
 }))
-vi.mock('../../../main/guide/guide-research', async importOriginal => ({
-  ...await importOriginal<typeof import('../../../main/guide/guide-research')>(),
-  researchMarketSimilar: vi.fn(async (queries: string[]) => ({
-    available: false, queries, results: [], summary: '', reason: 'empty',
-  })),
-}))
+
 
 // 旧夹具将JSON文本当作决策，并期待生成Web草图。当前验收使用真实guide_decide
 // 工具流与宿主路由，保留首轮护栏、连续澄清收敛与实际分析事件的行为验证。

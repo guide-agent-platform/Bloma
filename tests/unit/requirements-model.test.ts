@@ -3,8 +3,8 @@ import { organizedPrd } from '../support/organized-prd'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 import { parseOrganizedRequirements, prdStructureIssues, projectRequirementsModel, validateRequirementsModel } from '../../main/model/requirements-model'
 import { bindAcceptance, requirementEvidenceHash } from '../../main/project/requirement-contract'
-import { validateDefenderDraft, buildWritePrdDraftTool } from '../../main/review/prd-defender'
-import { buildPrdReviewTask, buildRecheckTask } from '../../main/review/prd/prd-review-prompts'
+
+
 
 function processPrd(): PrdBackplane {
   const input = organizedPrd([
@@ -75,15 +75,6 @@ describe('业务需求模型与同源正文', () => {
     expect(prdStructureIssues({ ...projected, prd_document: projected.prd_document + '\n### [F-012] 非清单能力' })).toContain('PRD 正文与功能清单编号不一致')
   })
 
-  it('审查和复核实际拿到完整模型、正文、验收与假设', () => {
-    const prd = processPrd()
-    for (const task of [buildPrdReviewTask(prd, prd.requirements), buildRecheckTask(prd, [], [])]) {
-      expect(task).toContain('requirements_model')
-      expect(task).toContain('prd_document')
-      expect(task).toContain('acceptance')
-      expect(task).toContain('差额配平到最大占比材料')
-    }
-  })
 
   it('规则或假设变化使旧验收哈希失效，即使功能描述未变', () => {
     const prd = processPrd(), original = requirementEvidenceHash(prd, prd.requirements[0]!)
@@ -95,32 +86,5 @@ describe('业务需求模型与同源正文', () => {
     expect(requirementEvidenceHash(revised, revised.requirements[0]!)).not.toBe(original)
   })
 
-  it('修订保留合法假设和场景修改，重建正文与验收，不继承确认状态', () => {
-    const prd = processPrd(); prd.user_confirmed_at = 'old'
-    const draft = structuredClone(prd)
-    draft.assumptions.push('保存失败时旧轮次保持不变')
-    draft.requirements_model!.scenarios[0]!.then = '用量合计0.03kg，差额归最大占比材料'
-    const result = validateDefenderDraft(prd, draft)
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.draft.backplane.assumptions).toContain('保存失败时旧轮次保持不变')
-    expect(result.draft.backplane.acceptance['F-001']).toContain('差额归最大占比材料')
-    expect(result.draft.backplane.prd_document).toContain('差额归最大占比材料')
-    expect(result.draft.backplane.user_confirmed_at).toBeUndefined()
-    expect(prdStructureIssues(result.draft.backplane)).toEqual([])
-  })
 
-  it('工具即时拒绝伪造用户来源，允许随后提交修好的草稿并报告字段处理', async () => {
-    const prd = processPrd(), drafts: unknown[] = []
-    const writer = buildWritePrdDraftTool(draft => drafts.push(draft), prd)
-    const context = { projectId: 'process', sessionId: 'review', requestId: 'r', signal: new AbortController().signal, state: {} as never }
-    const draft = structuredClone(prd)
-    draft.requirements_model!.sources[0]!.text = '用户要求其他功能'
-    const rejected = await writer.tool.execute({ backplane: draft, dispositions: [] }, context)
-    expect(rejected.isError).toBe(true)
-    expect(writer.hasDraft()).toBe(false)
-    const accepted = await writer.tool.execute({ backplane: prd, dispositions: [] }, context)
-    expect(accepted.output).toContain('字段处理')
-    expect(drafts).toHaveLength(1)
-  })
 })

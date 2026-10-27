@@ -4,6 +4,6 @@ const home = process.argv[2]
 if (!home) throw new Error('Explicit Bloma home required')
 process.env.PROMA_HOME = home
 const report = { captured_at: new Date().toISOString(), scope: 'configured override/default precedence; actual rendered system hash is recorded per SDK request',
-  sources: ['guide-system', 'prd-system', 'sketch-system', 'loop-system', 'enricher-system', 'normalizer-system'].map(describePromptSource) }
+  sources: ['sketch-system', 'loop-system'].map(describePromptSource) }
 writeFileSync('run-artifacts/robustness-prompt-sources.json', JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))

@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -142,12 +142,17 @@
       "action": "keep_readers_no_execution",
       "reason": "Pure historical schema, prompt-setting defaults, conversation reading and independent diagnostics survive old executor removal.",
       "paths": [
-        "main/guide/prd-sections.ts",
-        "main/guide/legacy-prd-parser.ts",
-        "main/guide/guide-default-prompt.ts",
-        "main/guide/conversation-text.ts",
-        "main/review/prd/prd-review-verdict.ts",
         "main/desktop/verification-outcome.ts"
+      ]
+    },
+    {
+      "id": "connected_prompt_settings",
+      "action": "keep_active_or_readonly_history",
+      "reason": "Only current UX and loop settings are writable; retired overrides remain read-only without old engine imports.",
+      "paths": [
+        "main/agent/prompting/prompt-service.ts",
+        "main/agent/prompting/ux-sketch-prompt.ts",
+        "renderer/components/PromptSettingsPage.tsx"
       ]
     }
   ],
@@ -765,6 +770,162 @@
       "from_revision": "3c1f427",
       "git_blob": "99ecdda07597a91e2ea22d7f232d3cf8a48f1e85",
       "reason": "Retired executor tests; shared and current boundaries retained or migrated."
+    },
+    {
+      "path": "main/guide/clarification.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "6a2385c657e6cc0c80e34e89db8f6ae26c3217fb",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/conversation-text.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "8a375acad1c79eaba0ad512b8c8867962ee7e429",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/guide-default-prompt.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "cd50a3385cd96c7c5c094aae306b4f9d58763447",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/guide-research.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "deacdde66b701fd9f05f24499e00c6ddbd4fe9ad",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/legacy-prd-parser.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "e863f7dfbba52d16253f70bfba5a5ceda50a3991",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/prd-sections.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "2d95130006893494b411cb5a6615a8a7eead3fb9",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/requirement-earsifier.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "6f05d56f1158480e5e44a048964297977adcb8bf",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/requirement-enricher.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "8fac619c8836c5f9b075c5b38318b30b8a6d92f7",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/requirement-normalizer.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "746e7e4d28a5f5de96c35323092e37793c1318e3",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/guide/requirements-organization.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "f267ddf8bf56622f70075b8ce00e12c63a98df94",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/review/prd-defender.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "b96cdc19b116333b202cd3381fa3c932277fce62",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/review/prd-review.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "140ac71f6109ad697fa80d3d8d4b35bdebcda756",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/review/prd/prd-review-contracts.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "9aaa51ac596d942a193849561aa9a49095face66",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/review/prd/prd-review-prompts.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "1b72913c6108a0b6d6f1d00bf67ac7c46ea80e79",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/review/prd/prd-review-rules.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "5d45236d83633d1bbb11b1464d0e2f80ee1deed7",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/review/prd/prd-review-verdict.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "84482f5d4b455a39e816266f4dba9a5ca805b553",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/guide-clarification.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "5ec17741f92c0174a056a9c8a5e43329acd68424",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/guide-research.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "4f2c06ec62bccbb414b453935af970666df540ee",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/prd-interface-spec.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "9fa2210d70bd3d7704bf9e089eda87004ae29567",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/prd-internal-audit.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "9421e01aca708ac5709e5ced6250f62f76ad4455",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/prd-sections.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "88213a4d832fd3cc26afbc237867911483fbe15c",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/prd-template-audit.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "3dceb1b2aecb56f0ad5a1dc7870f202b8bcd6fc6",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/prompt-override-engines.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "a88adc5d21ec5d9ee44dc570997269d64eb166e7",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/requirement-earsifier.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "35b5fd2829abb01e05b2db056f5ece8ca624a2f3",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/requirement-enricher.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "4c642683a2fd784c3ec282f595bc6ddd81bed50b",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "tests/unit/requirement-normalizer.test.ts",
+      "from_revision": "4ddf814",
+      "git_blob": "86721f7ef821b7a6f4488925579b6a8963e2b239",
+      "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
     }
   ]
 }

@@ -13,10 +13,7 @@ import { createHash } from 'node:crypto'
  * 刻意不做缓存：每次生成才读一次盘，成本可忽略，换来「改文件即时生效、
  * 无需重启」。
  *
- * 当前接线：prd-system / sketch-system / guide-system / enricher-system / normalizer-system
- * 五引擎（80c0e07 全量接入，TDD）+ loop-system（追加模式槽位，废旧管道Loop转正时由
- * mvp-system 迁移改名，默认空、追加于动态 system 之后，背板锚定段不可覆盖）。
-
+ * 当前接线：sketch-system 与 loop-system。旧槽位仅保留历史文件读取，不再参与生成。
  */
 /** UX 草图统一使用设置页 sketch-system；兼容过去的手工文件名（最后一项曾被重复加 .md）。 */
 export function promptOverrideNames(name: string): readonly string[] {
