@@ -26,6 +26,7 @@ import { FALLBACK_UX_SUMMARY, renderUxDesignSummary, uxDesignFingerprint, type U
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import { resolveGenerationMaxTokens } from '../platform/llm/model-resolution'
 import { generateUxVisualDesign, type UxVisualEvidence, type UxVisualResult } from './ux-visual-pipeline'
+import { workflowRetirementReason } from '../desktop/workflow-retirement'
 
 /** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
  *  但回门只认 USER_CONTINUE_KEYWORDS（继续/确认……）不含「开工」——用户照提示操作
@@ -154,6 +155,8 @@ function makeUxEvent(pending: Pick<PendingUxConfirm, 'session_id' | 'project_id'
  * 不能以需求列表或文字替代用户要确认的界面。
  */
 export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: string, retryPreview = false): Promise<void> {
+  const retirement=workflowRetirementReason(findProject(pending.project_id))
+  if(retirement){pending.publish(makeUxEvent(pending,'message_delta',{text:retirement}));return}
   if (pending.signal?.aborted) return
   if (feedback && pending.unappliedFeedback && feedback !== pending.unappliedFeedback) feedback = /^(?:重试|再试一次|再试)$/.test(feedback.trim())
     ? pending.unappliedFeedback : `${pending.unappliedFeedback}\n补充意见：${feedback}`

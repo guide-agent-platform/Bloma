@@ -1,6 +1,6 @@
 import type { Project } from '../../shared/types'
 import { findProject } from '../project/project-service'
-import { readExperiment } from './dispatch-experiment'
+import { workflowRetirementReason } from './workflow-retirement'
 import { isModernWorkflowVersion } from '../../shared/workflow-version'
 
 /** Frozen experiments and unmarked historical projects never silently migrate. */
@@ -12,9 +12,11 @@ export function usesLeanWorkflow(project: Pick<Project, 'workflow_version'>, exp
 }
 
 export function isLeanProject(projectId: string): boolean {
-  return usesLeanWorkflow(findProject(projectId), Boolean(readExperiment(projectId)))
+  const project=findProject(projectId)
+  return usesLeanWorkflow(project) && !workflowRetirementReason(project)
 }
 
 export function isSoftwareProject(projectId: string): boolean {
-  return findProject(projectId).workflow_version === 'software-v1' && !readExperiment(projectId)
+  const project=findProject(projectId)
+  return project.workflow_version === 'software-v1' && !workflowRetirementReason(project)
 }

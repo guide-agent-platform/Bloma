@@ -41,8 +41,16 @@ import { trackAnalytics } from '../delivery/track-analytics'
 
 import { safeInvoke, extractRequestId, requireFields, validateProjectCreate } from './shared';
 import { importSoftwareProject } from '../software/import-project'
+import { migrateLegacyWorkflow } from '../software/migrate-workflow'
+import { workflowRetirementReason } from '../desktop/workflow-retirement'
+import { hasRunForProject } from '../orchestration/stages/run-registry'
 
 export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
+  ipcMain.handle(IPC_CHANNELS.PROJECT_MIGRATE_WORKFLOW, (_event,payload:unknown)=>safeInvoke(extractRequestId(payload),async()=>{
+    const input=requireFields<import('../../shared/types').RequestEnvelope & {project_id:string}>(payload,['project_id'])
+    if(hasRunForProject(input.project_id))throw Error('WORKFLOW_MIGRATION_PROJECT_BUSY')
+    return migrateLegacyWorkflow(input.project_id)
+  }))
   void mainWindow
   ipcMain.handle(IPC_CHANNELS.PROJECT_IMPORT, async (_event, payload: unknown) => safeInvoke(extractRequestId(payload), async () => {
     const input = requireFields<import('../../shared/types').ProjectImportInput>(payload, ['mode'])
@@ -81,6 +89,7 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
       return listProjects(input.scope ?? 'active').map((project) => ({
         ...project,
         progress_summary: getProjectProgressSummary(project.project_id),
+        workflow_retirement: workflowRetirementReason(project),
       }))
     })
   })

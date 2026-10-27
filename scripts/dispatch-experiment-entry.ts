@@ -17,6 +17,7 @@ const option = (name: string): string => {
 }
 const optional = (name: string) => args.includes(`--${name}`) ? option(name) : undefined
 try {
+  if(!['inspect','report','aggregate'].includes(command))throw Error('LEGACY_EXPERIMENT_EXECUTION_RETIRED: only inspect, report and aggregate remain available; evidence and ledgers are unchanged')
   const home = resolve(option('home'))
   process.env.PROMA_HOME = home
   if (command === 'prepare') {

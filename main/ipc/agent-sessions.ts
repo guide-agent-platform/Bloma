@@ -24,7 +24,6 @@ import { readPendingDecision } from '../guide/pending-decision'
 
 
 
-import { resolveRequirementConfirm } from '../guide/guide-agent-service'
 
 
 
@@ -190,13 +189,8 @@ export function registerAgentSessionsIpc(ipcMain: IpcMain, mainWindow: BrowserWi
   ipcMain.handle(IPC_CHANNELS.AGENT_CONFIRM_REQUIREMENTS, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateConfirmRequirements(payload)
-      const controller = new AbortController()
-      const runId = registerBackgroundRun(input.session_id, controller, input.project_id)
-      try {
-        return await resolveRequirementConfirm(input, controller.signal)
-      } finally {
-        unregisterBackgroundRun(input.session_id, runId)
-      }
+      void input
+      throw Error('LEGACY_REQUIREMENT_CONFIRMATION_RETIRED: 旧需求弹窗已退役，请打开当前任务单；历史项目可复制到新流程。')
     })
   })
 

@@ -1,6 +1,12 @@
 {
-  "version": 4,
+  "version": 5,
   "groups": [
+    {
+      "id": "legacy_retirement_boundary",
+      "action": "keep",
+      "reason": "Explicit historical read-only response and source-copy migration; never inherit PASS or reset old accounting.",
+      "paths": ["main/desktop/workflow-retirement.ts", "main/software/migrate-workflow.ts"]
+    },
     {
       "id": "production_shared_extracted",
       "action": "keep",
@@ -63,6 +69,8 @@
     }
   ],
   "anchors": [
+    {"id":"retirement_before_channel","path":"main/orchestration/stages/agent-dispatch.ts","needle":"const retirement=workflowRetirementReason(findProject(input.project_id))","meaning":"Legacy and frozen execution return before channel resolution or model admission."},
+    {"id":"explicit_copy_migration","path":"main/software/migrate-workflow.ts","needle":"await importSoftwareProject(original.root_path, original.mode, signal)","meaning":"Migration creates a new independent copy, preserving original records and data."},
     {"id":"new_project_version","path":"main/ipc/projects.ts","needle":"createProject(input, { workflowVersion: 'software-v1' })","meaning":"New UI projects select software-v1."},
     {"id":"experiment_opt_in","path":"main/desktop/dispatch-experiment.ts","needle":"if (process.env[EXPERIMENT_SWITCH] !== '1') return undefined","meaning":"A config file is not an active experiment without the switch."},
     {"id":"experiment_isolation","path":"main/desktop/dispatch-experiment.ts","needle":"assertExperimentHome()","meaning":"Experiment reading checks isolated home and pinned configuration."},

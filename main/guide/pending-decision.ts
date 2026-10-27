@@ -9,11 +9,13 @@ import { leanScopeDecision } from './lean-scope'
 import { uxDecisionPayload, type PendingUxConfirm } from './ux-confirm'
 import { parseLeanSuggestions } from './lean-suggestions'
 import { longtermPendingDecision } from '../software/longterm-state'
+import { workflowRetirementReason } from '../desktop/workflow-retirement'
 
 /** Read-only rehydration. Showing a card never consumes confirmation or starts
  * model work; normal scope/hash/ownership checks still run on the user's click. */
 export function readPendingDecision(projectId: string, sessionId: string):{project_id:string;payload:Record<string,unknown>;preview_url?:string}|undefined {
   const project = findProject(projectId)
+  if(workflowRetirementReason(project))return
   const milestone=longtermPendingDecision(projectId,sessionId)
   if(milestone)return{project_id:projectId,payload:milestone}
   if (project.desktop_phase || project.status === 'completed') return

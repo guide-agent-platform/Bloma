@@ -4,6 +4,7 @@ import { isModernWorkflowVersion } from '../../shared/workflow-version'
 import { desktopDeliveryPolicy } from './delivery-policy'
 import { commitDesktopDelivery } from './delivery-state'
 import { isLeanProject } from './workflow-policy'
+import { workflowRetirementReason } from './workflow-retirement'
 /**
  * 桌面线路由器（接线批，2026-09-24）——runAgent 意图分流 + PRD 确认改道 + 凭据链。
  *
@@ -161,6 +162,8 @@ export async function enterDesktopLine(
   deps: DesktopRouteDeps,
 ): Promise<boolean> {
   const project = findProject(input.projectId)
+  const retirement=workflowRetirementReason(project)
+  if(retirement){deps.publish(input,'message_delta',{text:retirement});deps.complete(input.sessionId,input.projectId,'incomplete');return true}
   if (!shouldEnterDesktopLine(project)) return false
   if (input.signal?.aborted) return true
   if (isLeanProject(input.projectId)) {
@@ -225,6 +228,8 @@ export async function handleDesktopDispatchMessage(
   deps: DesktopRouteDeps,
 ): Promise<void> {
   input.signal?.throwIfAborted()
+  const retirement=workflowRetirementReason(findProject(input.projectId))
+  if(retirement){deps.publish(input,'message_delta',{text:retirement});deps.complete(input.sessionId,input.projectId,'incomplete');return}
   if (isLeanProject(input.projectId)) {
     const { runLeanProduction } = await import('./lean-production')
     await runLeanProduction(input, deps)

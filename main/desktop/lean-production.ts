@@ -44,6 +44,7 @@ import { prepareIndependentDesign } from '../software/independent-design'
 import { recordEvaluationEvent } from '../software/harness-evaluation'
 import { isLongtermSoftware, ensureLongtermState, stageLongtermMilestone, longtermPendingDecision } from '../software/longterm-state'
 import { handleLongtermMessage } from '../software/longterm-message'
+import { workflowRetirementReason } from './workflow-retirement'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -52,6 +53,8 @@ const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(par
  * dispatcher dialogue, PHASE_ADVANCE markers or synthetic architecture stages. */
 export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopRouteDeps): Promise<void> {
   let project = findProject(input.projectId)
+  const retirement=workflowRetirementReason(project)
+  if(retirement){deps.publish(input,'message_delta',{text:retirement});deps.complete(input.sessionId,input.projectId,'incomplete');return}
   if(project.status==='archived'||project.status==='abandoned'){
     deps.publish(input,'message_delta',{text:'项目已归档或放弃，版本和数据保留；恢复项目后才能继续制作。'});deps.complete(input.sessionId,input.projectId,'incomplete');return
   }

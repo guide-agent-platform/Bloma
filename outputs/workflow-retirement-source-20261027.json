@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "ab4afab0d825a9566732f95558844d51cbd9b48f",
-  "scope_version": 4,
+  "source_revision": "878aba11b5358889597058ee70a1a6b41713e8b4",
+  "scope_version": 5,
   "scanner_sha256": "dd3867909d61517debd2133b53edc4347ee9076af25c0a9214817ed873b2c841",
-  "scope_sha256": "66844c59a248ad58bc8ba1976f78f40ba937f3b4cfee83b246bd81e62df42ecd",
-  "source_input_digest": "e5a287d03fa5b67746efc546b7eb94c6c120c442c1a04b39b1d6dbddba4a4a50",
+  "scope_sha256": "209c351429eb22a66bb69ba989ce129c89d81fe22e56b3e0daf184f4356de71b",
+  "source_input_digest": "a5789adf828953dd954172487b44171ff494309121238a2dca8bf400b9dfb915",
   "method": "tracked files + TypeScript AST static/type/reexport/literal dynamic/require imports; no app execution; no symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,11 +19,12 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 904,
-    "module_edges": 3755,
+    "scanned_sources": 908,
+    "module_edges": 3781,
     "asset_edges": 38,
-    "scoped_modules": 114,
+    "scoped_modules": 116,
     "groups": {
+      "legacy_retirement_boundary": 2,
       "production_shared_extracted": 4,
       "longterm_milestones_keep": 5,
       "modern_workflow_keep": 14,
@@ -37,6 +38,15 @@
     }
   },
   "groups": [
+    {
+      "id": "legacy_retirement_boundary",
+      "action": "keep",
+      "reason": "Explicit historical read-only response and source-copy migration; never inherit PASS or reset old accounting.",
+      "paths": [
+        "main/desktop/workflow-retirement.ts",
+        "main/software/migrate-workflow.ts"
+      ]
+    },
     {
       "id": "production_shared_extracted",
       "action": "keep",
@@ -241,7 +251,7 @@
           "resolution": "module",
           "specifier": "./advance-rejection-loop",
           "kind": "static_runtime",
-          "line": 44
+          "line": 45
         }
       ],
       "type_importers": [],
@@ -485,7 +495,7 @@
           "resolution": "module",
           "specifier": "./core-delivery",
           "kind": "static_runtime",
-          "line": 64
+          "line": 65
         }
       ],
       "type_importers": [],
@@ -635,7 +645,7 @@
           "resolution": "module",
           "specifier": "./core-verification",
           "kind": "type",
-          "line": 66
+          "line": 67
         },
         {
           "from": "main/desktop/production-contracts.ts",
@@ -737,7 +747,7 @@
           "resolution": "module",
           "specifier": "./delivered-notice",
           "kind": "static_runtime",
-          "line": 46
+          "line": 47
         }
       ],
       "type_importers": [],
@@ -846,7 +856,7 @@
     {
       "path": "main/desktop/desktop-route.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "4f6ac869639045192389eca0dee2b94e6832cb75c18142b2c19ec8e00b3d531a",
+      "sha256": "1dbe571e38276f5059cfee46560c89d81b19ba0c4caee6e90fce55142e6c88f1",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -1036,6 +1046,14 @@
           "specifier": "../../../main/desktop/desktop-route",
           "kind": "static_runtime",
           "line": 19
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/desktop/desktop-route.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/desktop-route",
+          "kind": "static_runtime",
+          "line": 11
         },
         {
           "from": "tests/unit/ux-design-contract.test.ts",
@@ -1268,7 +1286,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment-models",
           "kind": "static_runtime",
-          "line": 40
+          "line": 41
         },
         {
           "from": "main/desktop/dispatch-experiment-policy.ts",
@@ -1655,7 +1673,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment",
           "kind": "static_runtime",
-          "line": 37
+          "line": 38
         },
         {
           "from": "main/desktop/dispatch-experiment-aggregate.ts",
@@ -1768,14 +1786,6 @@
           "specifier": "./dispatch-experiment",
           "kind": "static_runtime",
           "line": 17
-        },
-        {
-          "from": "main/desktop/workflow-policy.ts",
-          "to": "main/desktop/dispatch-experiment.ts",
-          "resolution": "module",
-          "specifier": "./dispatch-experiment",
-          "kind": "static_runtime",
-          "line": 3
         },
         {
           "from": "scripts/dispatch-experiment-entry.ts",
@@ -2074,7 +2084,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-loop",
           "kind": "static_runtime",
-          "line": 43
+          "line": 44
         }
       ],
       "type_importers": [
@@ -2260,7 +2270,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-phases",
           "kind": "static_runtime",
-          "line": 41
+          "line": 42
         },
         {
           "from": "main/desktop/dispatcher-gate.ts",
@@ -2522,7 +2532,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-switch",
           "kind": "static_runtime",
-          "line": 42
+          "line": 43
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -2561,7 +2571,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-telemetry",
           "kind": "static_runtime",
-          "line": 48
+          "line": 49
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -3119,7 +3129,7 @@
           "resolution": "module",
           "specifier": "./launch-smoke",
           "kind": "static_runtime",
-          "line": 47
+          "line": 48
         },
         {
           "from": "main/desktop/drive-app-session.ts",
@@ -3469,7 +3479,7 @@
     {
       "path": "main/desktop/lean-production.ts",
       "group": "modern_workflow_keep",
-      "sha256": "46006db0ce221d419e3272374f2480fd277379af35fa029b65cee77be61f57a0",
+      "sha256": "c7ebcb6a742c17b1dc9b35038f12682457464ad99a4e1b1934401f9b7a165e67",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -3478,7 +3488,7 @@
           "resolution": "module",
           "specifier": "./lean-production",
           "kind": "dynamic_runtime",
-          "line": 167
+          "line": 170
         },
         {
           "from": "main/desktop/desktop-route.ts",
@@ -3486,7 +3496,7 @@
           "resolution": "module",
           "specifier": "./lean-production",
           "kind": "dynamic_runtime",
-          "line": 229
+          "line": 234
         }
       ],
       "type_importers": [],
@@ -3572,7 +3582,7 @@
           "resolution": "module",
           "specifier": "./mvp-confirm",
           "kind": "static_runtime",
-          "line": 52
+          "line": 53
         }
       ],
       "type_importers": [],
@@ -3627,7 +3637,7 @@
           "resolution": "module",
           "specifier": "./notice-cards",
           "kind": "static_runtime",
-          "line": 45
+          "line": 46
         },
         {
           "from": "main/desktop/mvp-confirm.ts",
@@ -3708,7 +3718,7 @@
           "resolution": "module",
           "specifier": "./phase-checkpoint",
           "kind": "static_runtime",
-          "line": 62
+          "line": 63
         },
         {
           "from": "main/desktop/dispatcher-finalize.ts",
@@ -4217,7 +4227,7 @@
           "resolution": "module",
           "specifier": "./production-context",
           "kind": "static_runtime",
-          "line": 69
+          "line": 70
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -4407,7 +4417,7 @@
           "resolution": "module",
           "specifier": "./quick-production-review",
           "kind": "static_runtime",
-          "line": 70
+          "line": 71
         }
       ],
       "type_importers": [],
@@ -4652,7 +4662,7 @@
           "resolution": "module",
           "specifier": "./verification-fingerprint",
           "kind": "static_runtime",
-          "line": 63
+          "line": 64
         },
         {
           "from": "main/desktop/file-verification.ts",
@@ -4880,7 +4890,7 @@
     {
       "path": "main/desktop/workflow-policy.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "5ad996d3053b7139b43e88b30a313d1e10ef2c1beb765c1d211ea1c09e334e35",
+      "sha256": "a2f8cdf15210ad75f71b3a7dc4ea288668678acc0008308c5549b233b56b7973",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -5019,6 +5029,101 @@
           "to": "main/desktop/workflow-policy.ts",
           "resolution": "module",
           "specifier": "../../../main/desktop/workflow-policy",
+          "kind": "static_runtime",
+          "line": 6
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/desktop/workflow-policy.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/workflow-policy",
+          "kind": "static_runtime",
+          "line": 7
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/desktop/workflow-retirement.ts",
+      "group": "legacy_retirement_boundary",
+      "sha256": "c1048768a0533442e4ba7c81d5443ae603ce76e7b8240dbc4e284caa7ad134eb",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/desktop-route.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "./workflow-retirement",
+          "kind": "static_runtime",
+          "line": 7
+        },
+        {
+          "from": "main/desktop/lean-production.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "./workflow-retirement",
+          "kind": "static_runtime",
+          "line": 47
+        },
+        {
+          "from": "main/desktop/workflow-policy.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "./workflow-retirement",
+          "kind": "static_runtime",
+          "line": 3
+        },
+        {
+          "from": "main/guide/pending-decision.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../desktop/workflow-retirement",
+          "kind": "static_runtime",
+          "line": 12
+        },
+        {
+          "from": "main/guide/stages/guide-pipeline.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../../desktop/workflow-retirement",
+          "kind": "static_runtime",
+          "line": 61
+        },
+        {
+          "from": "main/guide/ux-confirm.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../desktop/workflow-retirement",
+          "kind": "static_runtime",
+          "line": 29
+        },
+        {
+          "from": "main/ipc/projects.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../desktop/workflow-retirement",
+          "kind": "static_runtime",
+          "line": 45
+        },
+        {
+          "from": "main/orchestration/stages/agent-dispatch.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../../desktop/workflow-retirement",
+          "kind": "static_runtime",
+          "line": 49
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/workflow-retirement",
           "kind": "static_runtime",
           "line": 6
         }
@@ -5179,14 +5284,6 @@
           "line": 9
         },
         {
-          "from": "main/ipc/agent-sessions.ts",
-          "to": "main/guide/guide-agent-service.ts",
-          "resolution": "module",
-          "specifier": "../guide/guide-agent-service",
-          "kind": "static_runtime",
-          "line": 27
-        },
-        {
           "from": "main/orchestration/stages/agent-dispatch.ts",
           "to": "main/guide/guide-agent-service.ts",
           "resolution": "module",
@@ -5316,6 +5413,14 @@
           "specifier": "../../main/guide/guide-agent-service",
           "kind": "static_runtime",
           "line": 13
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/guide/guide-agent-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/guide/guide-agent-service",
+          "kind": "static_runtime",
+          "line": 12
         }
       ],
       "string_references": [],
@@ -5622,7 +5727,7 @@
           "resolution": "module",
           "specifier": "../lean-guide",
           "kind": "dynamic_runtime",
-          "line": 73
+          "line": 76
         },
         {
           "from": "main/guide/ux-confirm.ts",
@@ -5630,7 +5735,7 @@
           "resolution": "module",
           "specifier": "./lean-guide",
           "kind": "dynamic_runtime",
-          "line": 594
+          "line": 597
         }
       ],
       "type_importers": [],
@@ -5810,7 +5915,7 @@
     {
       "path": "main/guide/pending-decision.ts",
       "group": "modern_workflow_keep",
-      "sha256": "37d1fe4431b00de716bf1db449aca780f20dcbfd722999c4cb05d4fc78b12cef",
+      "sha256": "fdd6903f7ca395e83a531a0f98979dce31c1ded30e74074539d8eab25e9c9156",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -5855,6 +5960,14 @@
           "specifier": "../../../main/guide/pending-decision",
           "kind": "static_runtime",
           "line": 18
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/guide/pending-decision.ts",
+          "resolution": "module",
+          "specifier": "../../../main/guide/pending-decision",
+          "kind": "static_runtime",
+          "line": 13
         }
       ],
       "string_references": [],
@@ -6268,7 +6381,7 @@
     {
       "path": "main/guide/stages/guide-pipeline.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "c08dd29eb42cfac74b539f7252b0db410489c4d96d68e96a595d8bdfaf6777ce",
+      "sha256": "cc81ccfcce14695226b8a23920348ac37e8285874f858145af361122cdd5ad9d",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -6450,7 +6563,7 @@
           "resolution": "module",
           "specifier": "./stages/prd-pipeline",
           "kind": "dynamic_runtime",
-          "line": 604
+          "line": 607
         }
       ],
       "type_importers": [],
@@ -6581,7 +6694,7 @@
     {
       "path": "main/guide/ux-confirm.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "c0553adb7d99dd03588be03010b7f869ce4e1600f007085daceb3240dc3da7a2",
+      "sha256": "cdcc68e9ad86fb72e9c0041b4ab0e19882ddd06f07aec7505823182811e00456",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -6752,7 +6865,7 @@
     {
       "path": "main/ipc/projects.ts",
       "group": "history_data_and_user_access_keep",
-      "sha256": "90d5e3599d299db5b709ea977877cb7933aabdbcb3519037a7b1d038ae338290",
+      "sha256": "87f9f44fd2ef6e9ca22c26de3370a820f51622c2e9085608adab834dc99556cc",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -6862,7 +6975,7 @@
     {
       "path": "main/orchestration/stages/agent-dispatch.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "bd2e02d26bf3e1bdac9940945847e55f5136a001e224a99a5fdae42671af3198",
+      "sha256": "5f1f91928e17f024d0b9172ff28b20495e39e22d5787c0d2e469d1b3ceeeeb30",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -6899,6 +7012,14 @@
           "specifier": "../../main/orchestration/stages/agent-dispatch",
           "kind": "static_runtime",
           "line": 10
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/orchestration/stages/agent-dispatch.ts",
+          "resolution": "module",
+          "specifier": "../../../main/orchestration/stages/agent-dispatch",
+          "kind": "static_runtime",
+          "line": 14
         }
       ],
       "string_references": [
@@ -8124,7 +8245,7 @@
           "resolution": "module",
           "specifier": "../project/prd-store",
           "kind": "static_runtime",
-          "line": 38
+          "line": 39
         },
         {
           "from": "main/desktop/dispatch-experiment-autonomous.ts",
@@ -8608,6 +8729,14 @@
           "specifier": "../../../main/project/prd-store",
           "kind": "static_runtime",
           "line": 8
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/project/prd-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/prd-store",
+          "kind": "static_runtime",
+          "line": 9
         }
       ],
       "string_references": [],
@@ -8779,7 +8908,7 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
-          "line": 35
+          "line": 36
         },
         {
           "from": "main/desktop/dispatch-experiment-runtime.ts",
@@ -9292,6 +9421,14 @@
           "specifier": "../project/project-service",
           "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "main/software/migrate-workflow.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 4
         },
         {
           "from": "main/software/native-gui-registration.ts",
@@ -10297,6 +10434,14 @@
           "line": 6
         },
         {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 5
+        },
+        {
           "from": "tests/unit/startup-reconcile.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -10384,7 +10529,7 @@
           "resolution": "module",
           "specifier": "../project/requirement-contract",
           "kind": "static_runtime",
-          "line": 39
+          "line": 40
         },
         {
           "from": "main/desktop/early-artifacts.ts",
@@ -11429,6 +11574,37 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/software/migrate-workflow.ts",
+      "group": "legacy_retirement_boundary",
+      "sha256": "6b680d9f504224a299ea54f3a5742fddeb4a0300434a7e12052a810dd41dded4",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/ipc/projects.ts",
+          "to": "main/software/migrate-workflow.ts",
+          "resolution": "module",
+          "specifier": "../software/migrate-workflow",
+          "kind": "static_runtime",
+          "line": 44
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/software/migrate-workflow.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/migrate-workflow",
+          "kind": "static_runtime",
+          "line": 8
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/software/release-store.ts",
       "group": "modern_workflow_keep",
       "sha256": "38e3ede550473d5bb25c828a01b1cd29935aeb094fb3de14de94f085415723fc",
@@ -11637,6 +11813,14 @@
           "specifier": "../../../main/software/release-store",
           "kind": "static_runtime",
           "line": 7
+        },
+        {
+          "from": "tests/unit/software/workflow-retirement.test.ts",
+          "to": "main/software/release-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/release-store",
+          "kind": "static_runtime",
+          "line": 10
         }
       ],
       "string_references": [
@@ -11975,6 +12159,14 @@
           "specifier": "../../shared/workflow-version",
           "kind": "static_runtime",
           "line": 4
+        },
+        {
+          "from": "main/desktop/workflow-retirement.ts",
+          "to": "shared/workflow-version.ts",
+          "resolution": "module",
+          "specifier": "../../shared/workflow-version",
+          "kind": "static_runtime",
+          "line": 5
         },
         {
           "from": "main/project/document-sync.ts",
@@ -12375,6 +12567,14 @@
           "line": 4
         },
         {
+          "from": "main/desktop/workflow-retirement.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 3
+        },
+        {
           "from": "main/guide/clarification.ts",
           "to": "storage/config-paths.ts",
           "resolution": "module",
@@ -12717,6 +12917,14 @@
           "specifier": "../../storage/config-paths",
           "kind": "static_runtime",
           "line": 4
+        },
+        {
+          "from": "main/software/migrate-workflow.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 2
         },
         {
           "from": "main/software/native-gui-registration.ts",
@@ -13266,11 +13474,25 @@
   ],
   "anchors": [
     {
+      "id": "retirement_before_channel",
+      "path": "main/orchestration/stages/agent-dispatch.ts",
+      "needle": "const retirement=workflowRetirementReason(findProject(input.project_id))",
+      "meaning": "Legacy and frozen execution return before channel resolution or model admission.",
+      "line": 89
+    },
+    {
+      "id": "explicit_copy_migration",
+      "path": "main/software/migrate-workflow.ts",
+      "needle": "await importSoftwareProject(original.root_path, original.mode, signal)",
+      "meaning": "Migration creates a new independent copy, preserving original records and data.",
+      "line": 15
+    },
+    {
       "id": "new_project_version",
       "path": "main/ipc/projects.ts",
       "needle": "createProject(input, { workflowVersion: 'software-v1' })",
       "meaning": "New UI projects select software-v1.",
-      "line": 57
+      "line": 65
     },
     {
       "id": "experiment_opt_in",
@@ -13305,35 +13527,35 @@
       "path": "main/guide/stages/guide-pipeline.ts",
       "needle": "return handleLeanGuide(input, publish, model)",
       "meaning": "Modern guide bypasses the remaining legacy guide body.",
-      "line": 74
+      "line": 77
     },
     {
       "id": "modern_build_early_return",
       "path": "main/desktop/desktop-route.ts",
       "needle": "await runLeanProduction({ ...input, query, env",
       "meaning": "Modern projects use the shared Pi production loop.",
-      "line": 168
+      "line": 171
     },
     {
       "id": "old_dispatcher_entry",
       "path": "main/desktop/desktop-route.ts",
       "needle": "runDesktopDispatcherLoop(loopInput)",
       "meaning": "Legacy executor is still called after the modern early return.",
-      "line": 520
+      "line": 525
     },
     {
       "id": "shared_production_tools",
       "path": "main/desktop/lean-production.ts",
       "needle": "productionAgentTools(baseTools",
       "meaning": "Shared helper in an old-named module still serves modern projects.",
-      "line": 192
+      "line": 195
     },
     {
       "id": "legacy_python_fallback",
       "path": "main/desktop/lean-production.ts",
       "needle": "if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2",
       "meaning": "lean-v1 still consumes Python skeleton support; software-v1 does not materialize it by default.",
-      "line": 156
+      "line": 159
     },
     {
       "id": "software_tool_filter",
@@ -13354,7 +13576,7 @@
       "path": "main/orchestration/stages/agent-dispatch.ts",
       "needle": "if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage))",
       "meaning": "Existing retired web-stage response is separate from desktop migration.",
-      "line": 260
+      "line": 269
     }
   ],
   "symbols": [
@@ -13363,32 +13585,32 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 95,
+          "line": 96,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 105,
+          "line": 106,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 166,
+          "line": 169,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 228,
+          "line": 233,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 72,
+          "line": 75,
           "kind": "source"
         },
         {
           "path": "main/ipc/projects.ts",
-          "line": 248,
+          "line": 257,
           "kind": "source"
         },
         {
@@ -13404,6 +13626,16 @@
         {
           "path": "tests/unit/desktop/workflow-policy.test.ts",
           "line": 19,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 39,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 59,
           "kind": "test"
         }
       ]
@@ -13478,22 +13710,22 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 61,
+          "line": 64,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 80,
+          "line": 83,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 118,
+          "line": 121,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 122,
+          "line": 125,
           "kind": "source"
         },
         {
@@ -13598,12 +13830,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 475,
+          "line": 480,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 523,
+          "line": 528,
           "kind": "source"
         },
         {
@@ -13669,16 +13901,6 @@
         {
           "path": "main/desktop/quick-production-review.ts",
           "line": 115,
-          "kind": "source"
-        },
-        {
-          "path": "main/desktop/workflow-policy.ts",
-          "line": 15,
-          "kind": "source"
-        },
-        {
-          "path": "main/desktop/workflow-policy.ts",
-          "line": 19,
           "kind": "source"
         },
         {
@@ -13833,7 +14055,7 @@
         },
         {
           "path": "main/guide/ux-confirm.ts",
-          "line": 574,
+          "line": 577,
           "kind": "source"
         },
         {
@@ -13995,6 +14217,11 @@
           "path": "tests/unit/software/verification-tool.test.ts",
           "line": 99,
           "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 48,
+          "kind": "test"
         }
       ]
     },
@@ -14003,7 +14230,7 @@
       "sites": [
         {
           "path": "main/orchestration/stages/agent-dispatch.ts",
-          "line": 224,
+          "line": 233,
           "kind": "source"
         },
         {
@@ -14210,6 +14437,11 @@
           "path": "tests/unit/desktop/desktop-route.test.ts",
           "line": 952,
           "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 49,
+          "kind": "test"
         }
       ]
     },
@@ -14218,12 +14450,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 168,
+          "line": 171,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 230,
+          "line": 235,
           "kind": "source"
         }
       ]
@@ -14233,7 +14465,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 520,
+          "line": 525,
           "kind": "source"
         },
         {
@@ -14458,12 +14690,12 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 190,
+          "line": 193,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 219,
+          "line": 222,
           "kind": "source"
         },
         {
@@ -14518,7 +14750,7 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 192,
+          "line": 195,
           "kind": "source"
         }
       ]
@@ -14533,7 +14765,7 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 237,
+          "line": 240,
           "kind": "source"
         },
         {
@@ -14573,47 +14805,47 @@
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 99,
+          "line": 100,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 356,
+          "line": 361,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 382,
+          "line": 387,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 414,
+          "line": 419,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 587,
+          "line": 592,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 613,
+          "line": 618,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 655,
+          "line": 660,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 672,
+          "line": 677,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 739,
+          "line": 744,
           "kind": "source"
         },
         {
@@ -14713,37 +14945,37 @@
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 151,
+          "line": 154,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 265,
+          "line": 268,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 339,
+          "line": 342,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 434,
+          "line": 437,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 558,
+          "line": 561,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 601,
+          "line": 604,
           "kind": "source"
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 922,
+          "line": 925,
           "kind": "source"
         },
         {
@@ -14768,7 +15000,7 @@
         },
         {
           "path": "main/guide/ux-confirm.ts",
-          "line": 606,
+          "line": 609,
           "kind": "source"
         }
       ]
@@ -14778,7 +15010,7 @@
       "sites": [
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 381,
+          "line": 384,
           "kind": "source"
         },
         {
@@ -14813,7 +15045,7 @@
         },
         {
           "path": "main/guide/stages/guide-pipeline.ts",
-          "line": 382,
+          "line": 385,
           "kind": "source"
         },
         {
@@ -14953,7 +15185,7 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 156,
+          "line": 159,
           "kind": "source"
         },
         {
@@ -15003,7 +15235,7 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 288,
+          "line": 291,
           "kind": "source"
         },
         {
@@ -15163,7 +15395,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 623,
+          "line": 628,
           "kind": "source"
         },
         {
@@ -15268,7 +15500,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 274,
+          "line": 279,
           "kind": "source"
         },
         {
@@ -15735,7 +15967,7 @@
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 506,
+          "line": 511,
           "value": "contract.json"
         },
         {
@@ -16420,12 +16652,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 180,
+          "line": 183,
           "value": "desktop-arch"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 236,
+          "line": 241,
           "value": "desktop-arch"
         },
         {
@@ -17106,6 +17338,16 @@
           "path": "tests/unit/guide/confirmation-recovery.test.ts",
           "line": 144,
           "value": "pending-confirmations/archive"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 23,
+          "value": "pending-confirmations"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 24,
+          "value": "pending-confirmations/old-card.json"
         }
       ]
     }

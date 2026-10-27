@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path'
 import { cancelExperimentProject, nativeHeartbeat, nativeProcessEvent, nativeProcessReceipt } from './dispatch-experiment-native-control.mjs'
 import { assertPreparationResume, preparationTokenCap, selectClarificationAnswer, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
 const [command, ...args] = process.argv.slice(2)
+throw Error('LEGACY_EXPERIMENT_EXECUTION_RETIRED: native experiment replay is disabled; use inspect/report/aggregate')
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
 const home = resolve(option('home', ''))
 const reportDir = resolve(option('report-dir', join(home, 'native-report')))

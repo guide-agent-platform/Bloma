@@ -148,6 +148,7 @@ export async function supervise(jobPath) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  throw Error('LEGACY_EXPERIMENT_EXECUTION_RETIRED: retired workers cannot restart')
   supervise(process.argv[2]).then(result => { if (result.mode === 'qualify' && !result.qualified) process.exitCode = 1 }, error => {
     console.error(error.message); process.exitCode = 1
     const job = read(process.argv[2]); if (job?.output_dir) fs.writeFileSync(path.join(job.output_dir, 'supervisor-error.json'), JSON.stringify({ at: new Date().toISOString(), error: error.message }, null, 2))

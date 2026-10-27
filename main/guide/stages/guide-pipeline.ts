@@ -58,6 +58,7 @@ import {
 import { classifyUserDesktopIntent } from '../../desktop/user-intent-lexicon'
 import { runPrdPipeline } from './prd-pipeline'
 import { isLeanProject } from '../../desktop/workflow-policy'
+import { workflowRetirementReason } from '../../desktop/workflow-retirement'
 
 export async function handleGuideMessage(
   input: AgentSendMessageInput,
@@ -69,6 +70,8 @@ export async function handleGuideMessage(
   persistSystem?: (text: string) => void,
 ): Promise<void> {
   const project = findProject(input.project_id)
+  const retirement=workflowRetirementReason(project)
+  if(retirement){persistAssistant?.(retirement);publish(makeGuideEvent(input,'message_delta',{text:retirement}));return}
   if (isLeanProject(input.project_id)) {
     const { handleLeanGuide } = await import('../lean-guide')
     return handleLeanGuide(input, publish, model)

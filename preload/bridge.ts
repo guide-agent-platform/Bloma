@@ -144,6 +144,7 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_SET_MODE, input),
   },
   project: {
+    migrateWorkflow: (input) => ipcRenderer.invoke(IPC_CHANNELS.PROJECT_MIGRATE_WORKFLOW, input),
     create: (input: ProjectCreateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CREATE, input),
     import: (input: import('../shared/types').ProjectImportInput) =>

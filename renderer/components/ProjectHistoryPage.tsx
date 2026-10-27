@@ -88,6 +88,19 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
   const [renamingProject, setRenamingProject] = React.useState<Project | null>(null)
   const [renameDraft, setRenameDraft] = React.useState('')
   const [renameSubmitting, setRenameSubmitting] = React.useState(false)
+  const [migratingProject,setMigratingProject]=React.useState<string>()
+  const migrate=async(project:Project)=>{
+    if(migratingProject)return
+    setMigratingProject(project.project_id)
+    try{
+      const api=window.electronAPI?.project
+      if(!api?.migrateWorkflow)throw Error('当前环境无法复制项目')
+      const result=await api.migrateWorkflow({request_id:crypto.randomUUID(),project_id:project.project_id})
+      if(!result.ok){setExportNotice(result.error.message);return}
+      setExportNotice('已创建独立副本；原项目、数据、历史与账本保留。新副本需重新确认需求和验收，外部数据位置需另核对。')
+      await load(activeTab);onResumeProject(result.data)
+    }catch(error){setExportNotice(String(error))}finally{setMigratingProject(undefined)}
+  }
 
   const load = React.useCallback(async (scope: ActiveTab) => {
     setLoadState('loading')
@@ -588,6 +601,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
                 project.status === 'archived' ? (
                   <>
                     <ActionButton label="恢复" dataAiId="project-restore-button" onClick={() => handleUnarchive(project)} />
+                    {(project.workflow_version===undefined||project.workflow_version==='lean-v1')&&<ActionButton label={migratingProject===project.project_id?'复制中…':'复制到新流程'} dataAiId="project-migrate-workflow" disabled={!!migratingProject} onClick={()=>void migrate(project)}/>}
                     <ActionButton label="重命名" dataAiId="project-rename-button" onClick={() => handleStartRename(project)} />
                     <ActionButton
                       label={exportingProject?.project_id === project.project_id ? '导出中…' : '导出'}
@@ -599,6 +613,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
                   </>
                 ) : (
                   <>
+                    {(project.workflow_version===undefined||project.workflow_version==='lean-v1')&&<ActionButton label={migratingProject===project.project_id?'复制中…':'复制到新流程'} dataAiId="project-migrate-workflow" disabled={!!migratingProject} onClick={()=>void migrate(project)}/>}
                     {project.status === 'abandoned' ? (
                       <ActionButton label="恢复进行" dataAiId="project-reopen-button" onClick={() => handleReopen(project)} />
                     ) : project.status === 'active' ? (
@@ -977,6 +992,7 @@ const ProjectRow: React.FC<{
                 最近：{project.progress_summary}
               </p>
             )}
+            {project.workflow_retirement&&<p data-ai-id="workflow-retirement-notice" style={{fontSize:'var(--font-size-xs)',color:'var(--color-text-muted)',maxWidth:360}}>{project.workflow_retirement}</p>}
           </div>
         </button>
       )}

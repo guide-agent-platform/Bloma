@@ -47,6 +47,7 @@ export const IPC_CHANNELS = {
   PERMISSION_SET_MODE: 'permission:set-mode',
   PROJECT_CREATE: 'project:create',
   PROJECT_IMPORT: 'project:import',
+  PROJECT_MIGRATE_WORKFLOW: 'project:migrate-workflow',
   PROJECT_LIST: 'project:list',
   PROJECT_ARCHIVE: 'project:archive',
   PROJECT_UNARCHIVE: 'project:unarchive',
@@ -1321,6 +1322,9 @@ export interface Project {
   imported_source?: { path: string; head?: string; branch?: string; dirty: boolean; baseline_digest: string }
   /** Host-selected production workflow. Missing = historical compatibility. */
   workflow_version?: import('./workflow-version').ModernWorkflowVersion
+  workflow_migration?: { source_project_id: string; source_workflow: string; at: string }
+  /** Read-only IPC projection, never a workflow migration. */
+  workflow_retirement?: string
   /** Stable during a task/repair/resume; a new user task after delivery gets a new allowance. */
   lean_operation_id?: string
   gui_acceptance?: { status: 'pending' | 'sealed' | 'unverified'; scope_hash: string; reason?: string }
@@ -1859,6 +1863,7 @@ export type ElectronAPI = {
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
     import(input: ProjectImportInput): Promise<ApiResult<ProjectImportResult>>
+    migrateWorkflow(input: RequestEnvelope & { project_id: string }): Promise<ApiResult<Project>>
     list(input: ProjectListInput): Promise<ApiResult<Project[]>>
     archive(input: ProjectArchiveInput): Promise<ApiResult<Project>>
     unarchive(input: ProjectUnarchiveInput): Promise<ApiResult<Project>>

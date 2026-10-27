@@ -129,6 +129,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
     <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused} data-has-preview={Boolean(props.deliveryPanel || props.previewUrl || scopePending)} data-view={mobileView} data-resizing-conversation={conversation.resizing} style={{ '--studio-conversation-width': `${conversation.width}px` } as React.CSSProperties}>
       <div className="workspace-topbar">
         <WorkspaceHeader compact showConnection={false} onAllProjects={props.onAllProjects} onOpenSettings={props.onOpenSettings} onUpgrade={props.onUpgrade} onHome={props.onHome} />
+        {project?.workflow_retirement&&<div role="status" style={{padding:'8px 16px',fontSize:'var(--font-size-sm)'}}>{project.workflow_retirement}</div>}
         <WorkspaceProgress steps={progress} liveDetail={liveDetail} onRecords={() => openTool('records')} />
         <nav className="workspace-project-tools" aria-label="项目资料">
           <button type="button" className="theatre-tool" data-ai-id="docs-button" aria-label="文档" aria-pressed={documents} onClick={() => openTool('documents')}><FileText size={15} /></button>

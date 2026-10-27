@@ -46,11 +46,11 @@ import { maybeRenameUnnamedProject } from '../../project/project-service'
 import { isCurrentReceiptGeneration, updateReceipt } from '../../platform/attachments/send-inbox'
 import { sessionMaterials } from '../../platform/attachments/material-context'
 import { trialFeedbackText } from '../../software/trial'
+import { workflowRetirementReason } from '../../desktop/workflow-retirement'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
   // 项目自动命名（2026-10-05 用户反馈修复）：「模式选择→建项目」路径无 initial_message
   // → 全部「未命名项目」；首条用户消息到达时补名（内部自防御，失败不阻断消息链路）。
-  maybeRenameUnnamedProject(input.project_id, input.content)
   // 排队判定（全链路审查 P1-1 修复，2026-10-01）：升级为项目级——同会话活跃或同项目
   // 另一会话/后台审查（backgroundRuns）占锁时都入队，不再静默丢弃（旧逻辑只查 session，
   // PROJECT_BUSY 在 registerForegroundRun 抛出后不排队不落盘，渲染端乐观气泡刷新即丢）。
@@ -86,6 +86,15 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   let receiptOutcome: 'completed' | 'failed' | 'cancelled' = 'completed'
 
   try {
+    const retirement=workflowRetirementReason(findProject(input.project_id))
+    if(retirement){
+      appendAgentMessage(input.session_id,{role:'assistant',content:[{type:'text',text:retirement}],timestamp:Date.now()})
+      publishForRun(makeEvent(input,'message_delta',{text:retirement}))
+      persistTerminalMessage(input.session_id,'incomplete')
+      publishForRun(makeEvent(input,'completed',{subtype:'incomplete'}))
+      return{accepted:true,session_id:input.session_id,stream_started:true}
+    }
+    maybeRenameUnnamedProject(input.project_id, input.content)
     const observedContent = input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content,input.client_message_id??input.request_id) : input.content
     updateReceipt(input.client_message_id, 'running', undefined, input.run_generation)
     // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
