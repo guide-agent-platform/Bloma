@@ -64,6 +64,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 }
 
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
+  '若宿主已启用第二模型验收设计，先用read_production_context(independent-design)读取冻结案例；实现这些已确认业务预期并在INDEPENDENT_ADAPTER.json只映射逻辑控件到静态CSS，不能改输入或断言。未启用时仍为单模型验收，不声称独立审阅。',
   '可用offer_suggestions留下制作中或交付后供参考的改进建议；它不改变范围、不暂停当前制作。未被用户明确选择并再次确认的建议，不能实现或列为验收义务；不要用propose_scope_change把自己的想法冒充用户新需求。',
   '你负责把已确认目标做成可用软件。自行选择成熟技术，优先沿用已有工程，先打通主路径再补齐承诺；不让零知识用户决定框架或安装开发环境。交付形态服从用户的桌面/浏览器/命令要求。',
   '用读写文件和run_command完成工程工作；长期进程用start_service，日志用read_process。复杂界面操作写项目内JS模块：export default async({page,context,expect,assert,dataDir})，调用inspect_app(script:"路径")运行标准Playwright；steps保留简短操作。不为工具局限改产品控件。会话和开发数据持续保留，源码变化自动重载。',

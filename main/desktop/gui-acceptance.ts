@@ -141,7 +141,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
       materializeGuiFixtures(options.projectId, suite, join(temporary, 'data'))
       const { observeSoftwareGui } = await import('../software/gui-observer')
       result.evidence_dir = join(getPromaHome(), 'software-gui-evidence', options.projectId, randomUUID())
-      Object.assign(result, await observeSoftwareGui({ projectId: options.projectId, root, launch: launch.launch, suite, temporary, signal: options.signal, screenshotDir: result.evidence_dir }))
+      Object.assign(result, await observeSoftwareGui({ projectId: options.projectId, root, launch: launch.launch, suite, temporary, signal: options.signal, screenshotDir: result.evidence_dir, purpose:'acceptance' }))
     } else {
     if (suite.steps.some(step => step.kind === 'select')) throw Error('GUI_SELECT_RUNTIME_UNSUPPORTED: select仅用于Electron/浏览器原生下拉框')
     if (suite.steps.some(step => step.has_text !== undefined)) throw Error('GUI_TEXT_LOCATOR_RUNTIME_UNSUPPORTED: has_text仅用于Electron/浏览器；此运行时需真实CSS')

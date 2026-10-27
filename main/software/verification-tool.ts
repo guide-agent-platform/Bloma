@@ -31,6 +31,7 @@ export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<ty
           cli: result.core?.host_cli ? { status: result.core.host_cli.status, error: result.core.host_cli.error,
             cases: result.core.host_cli.cases.slice(0, 6).map(item => ({ ...item, actual: item.actual.slice(0, 500), stderr: item.stderr?.slice(-1200) })) } : undefined,
           issues: result.security?.issues.slice(0, 8), candidate_id: result.candidate?.id, report: result.report_path, evidence_dir: result.core?.host_gui?.evidence_dir,
+          independent:result.independent&&('diagnostic'in result.independent?{status:result.independent.status,diagnostic:result.independent.diagnostic,report:result.independent.report_path}:{status:result.independent.status}),
           next: result.status === 'passed' ? '当前版本通过，可以结束制作；宿主会核对版本后交付。' : '按实际失败修复，再verify_app；不要降低已确认预期。' })),
           isError: result.status !== 'passed', feedback: { schema_version: 1, execution: 'completed', source: 'host', scope: 'software_candidate',
             verification: result.status === 'passed' ? 'passed' : result.status === 'failed' ? 'failed' : 'unverified',

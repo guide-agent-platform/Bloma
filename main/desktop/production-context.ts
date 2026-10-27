@@ -14,6 +14,7 @@ import { SOFTWARE_DATA_UPDATE_GUIDANCE } from '../software/data-update'
 import { SOFTWARE_DELIVERY_GUIDANCE } from '../software/artifact-qualification'
 import { softwareResumeContext } from '../software/run-state'
 import { SOFTWARE_LAUNCH_GUIDANCE } from './launch-smoke'
+import { readIndependentDesign, readIndependentPolicy } from '../software/independent-design'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -54,12 +55,14 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
     description: '只读制作交接：overview看范围，features按编号读功能，prd读正文；launch看LAUNCH.json字段类型与示例，verification-gui/llm/speech看验证协议；resume看中断现场与账本引用，data-update/delivery看更新与交付约定。避免重复通读。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume'] },
+      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
+        if(input.topic==='independent-design')return{output:JSON.stringify({enabled:readIndependentPolicy()?.enabled??false,design:readIndependentDesign(projectId)??{status:'disabled',reason:'未启用第二模型验收设计；当前为单模型验收。'},
+          adapter:'启用时，在项目根INDEPENDENT_ADAPTER.json提供{version:1,design_digest:冻结设计digest,controls:{逻辑控件名:静态CSS选择器}}。不得包含输入、预期或脚本；宿主按冻结业务设计编排并执行，B的文字不能签发PASS。'})}
         if (input.topic === 'data-update' && isSoftwareProject(projectId)) return { output: SOFTWARE_DATA_UPDATE_GUIDANCE }
         if (input.topic === 'delivery' && isSoftwareProject(projectId)) return { output: SOFTWARE_LAUNCH_GUIDANCE + '\n' + SOFTWARE_DELIVERY_GUIDANCE }
         if (input.topic === 'resume' && isSoftwareProject(projectId)) return { output: JSON.stringify(softwareResumeContext(projectId)) }

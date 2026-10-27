@@ -121,7 +121,7 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
 
 /** DOM actions are host-owned and run against the normal application. No product
  * self-test mode, injected business assertions or self-reported PASS scripts. */
-export async function observeSoftwareGui(input: { projectId: string; root: string; launch: LaunchDeclaration; suite: GuiAcceptanceSuite; temporary: string; signal?: AbortSignal; screenshotDir?: string }): Promise<Pick<GuiAcceptanceResult, 'status' | 'steps' | 'error'>> {
+export async function observeSoftwareGui(input: { projectId: string; root: string; launch: LaunchDeclaration; suite: GuiAcceptanceSuite; temporary: string; signal?: AbortSignal; screenshotDir?: string; purpose?:'acceptance'|'development' }): Promise<Pick<GuiAcceptanceResult, 'status' | 'steps' | 'error'>> {
   const { _electron, chromium } = await import('playwright')
   const result: Pick<GuiAcceptanceResult, 'status' | 'steps' | 'error'> = { status: 'unverified', steps: [] }
   const data = join(input.temporary, 'data'), userData = join(input.temporary, 'user-data'), screenshotDir = input.screenshotDir ?? join(input.temporary, 'evidence')
@@ -145,7 +145,7 @@ export async function observeSoftwareGui(input: { projectId: string; root: strin
         page = await app.firstWindow({ timeout: 15000 })
       } else if (input.launch.ui === 'browser' && input.launch.url) {
         await startSoftwareProcess({ root: input.root, projectId: input.projectId, sessionId: owner, command: input.launch.command,
-          url: input.launch.url, dataDir: data, signal: input.signal })
+          url: input.launch.url, dataDir: data, signal: input.signal, purpose: input.purpose })
         const installed = existsSync(chromium.executablePath())
         context = await chromium.launchPersistentContext(userData, { headless: true, ...(installed ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }),
           env: softwareEnvironment(input.projectId, data), timeout: 20000 })

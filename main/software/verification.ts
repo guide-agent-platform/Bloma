@@ -21,8 +21,11 @@ import { runtimeBindingVersion } from './runtime-bindings'
 import { fileDigest, prepareSoftwareRelease, readSoftwareCandidate, runtimeInventory, verifyReleaseSource, type SoftwareRelease } from './release-store'
 import { frozenNativeGuiVersion } from './native-gui-tests'
 import { verificationFailure, type VerificationFailure } from './verification-diagnostics'
+import { independentDesignVersion } from './independent-design'
+import { independentAdapterVersion, verifyIndependentDesign } from './independent-verification'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
+  independent?:Awaited<ReturnType<typeof verifyIndependentDesign>>
   core?: CoreVerificationResult; security?: SecurityScanResult; launch?: LaunchSmokeResult | null; reused?: boolean; report_path?: string; failure?: VerificationFailure }
 interface Receipt { version: 1; state: 'running' | 'complete'; key: string; at: number; result?: SoftwareVerification; result_hash?: string; reusable?: boolean }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -59,7 +62,7 @@ async function inputs(projectId: string, requestId: string, signal?: AbortSignal
   }
   return { key: digest({ protocol: 1, hostId, source: (await runtimeInventory(project.root_path, signal)).digest, requestId, operation: project.lean_operation_id,
     scope: prdScopeFingerprint(brief), confirmed: brief.user_confirmed_at, ux: project.ux_confirmation, rules: ruleVersion, fixtures: fixtureVersion,
-    runtime, command: resolved.command, environment: resolved.env, managed: runtimeBindingVersion(projectId), implementation, platform: process.platform, arch: process.arch, node: process.versions.node }), reusable }
+    runtime, command: resolved.command, environment: resolved.env, managed: runtimeBindingVersion(projectId), independent:independentDesignVersion(projectId),adapter:independentAdapterVersion(project.root_path),implementation, platform: process.platform, arch: process.arch, node: process.versions.node }), reusable }
 }
 export async function recentSoftwareVerification(projectId: string, requestId: string, signal?: AbortSignal): Promise<SoftwareVerification | undefined> {
   const file = receiptPath(projectId); if (poisoned.has(file) || !existsSync(file)) return
@@ -108,6 +111,10 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     const core = result.core = await runCoreVerification({ projectId, sandboxRoot: candidate.root, signal })
     const localPending = core.local_status === 'passed' && core.distribution?.status === 'environment_blocked'
     if (core.status !== 'passed' && !localPending) { result.status = core.status; result.summary = [core.summary, ...core.missing].join('\n'); return result }
+    const independent = result.independent = await verifyIndependentDesign(projectId,candidate,signal)
+    if(independent.status!=='disabled'&&independent.status!=='passed'){
+      result.status=independent.status;result.summary=`独立设计的宿主执行未通过：${'error' in independent?independent.error??'实际断言失败':'缺少当前证据'}`;return result
+    }
     const launch = result.launch = await runLaunchSmoke(candidate.root, { signal, allowCleanExit: candidate.launch.mode === 'command' })
     const brief = readPrdBackplane(projectId), windowReady = brief.lean_brief?.ui !== 'required'
       || candidate.launch.ui === 'browser' && launch.http_ready === true
