@@ -96,6 +96,7 @@ export const IPC_CHANNELS = {
   /** 交付面板（2026-10-04 呈现层收口）：桌面项目文件清单+DELIVERY.md+启动声明；启动程序 */
   PROJECT_DELIVERABLES: 'project:deliverables',
   PROJECT_LAUNCH_APP: 'project:launch-app',
+  SOFTWARE_SUGGESTIONS_DECIDE: 'software:suggestions-decide',
   /** 点选纠错会话（批11 MVP-E，2026-10-08）：修改预览实例拉起/选区轮询/收口 */
   CORRECTION_START: 'correction:start',
   CORRECTION_PICKS: 'correction:picks',
@@ -435,6 +436,7 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface ProjectDeliverablesResult {
+  improvement_suggestions?: SoftwareSuggestions
   trial?: SoftwareTrial
   can_trial?: boolean
   data_snapshots?: Array<{ id: string; at: string; schema: string }>
@@ -474,6 +476,13 @@ export interface ProjectLaunchAppInput extends RequestEnvelope {
 export interface SoftwareTrial {
   release_id: string; source: string; process_id: string; pid?: number; state: string; data_dir: string; url?: string
   qualification: 'unverified_test_data'; at: string
+}
+export interface SoftwareSuggestions {
+  version:1; id:string; project_id:string; session_id:string; scope:string; operation:string
+  items:Array<LeanScopeSuggestion & {state:'offered'|'adopt_requested'|'deferred'|'rejected'|'staged'}>
+}
+export interface SoftwareSuggestionDecisionInput extends RequestEnvelope {
+  project_id:string;session_id:string;set_id:string;suggestion_id:string;action:'adopt'|'defer'|'reject'
 }
 
 /** 启动程序结果。 */
@@ -1226,6 +1235,7 @@ export interface AgentEvent {
     | 'rollback_done'
     | 'ux_sketch_ready'
     | 'software_preview_changed'
+    | 'software_suggestions_changed'
     | 'ux_sketch_closed'
     | 'mvp_review_ready'
     | 'mvp_review_closed'
@@ -1878,6 +1888,7 @@ export type ElectronAPI = {
     onArtifactEvent(listener: (payload: DesktopArtifactEventPayload) => void): () => void
   }
   projectDeliverables: {
+    decideSuggestion(input: SoftwareSuggestionDecisionInput): Promise<ApiResult<{suggestions:SoftwareSuggestions;detail:string}>>
     /** 交付面板（2026-10-04）：项目文件清单 + DELIVERY.md + 启动声明快照 */
     get(input: ProjectDeliverablesInput): Promise<ApiResult<ProjectDeliverablesResult>>
     /** 启动程序（仅 completed 项目 + 合法 LAUNCH.json；detached spawn） */

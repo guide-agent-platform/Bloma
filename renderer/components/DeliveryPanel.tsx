@@ -5,7 +5,8 @@ import { Markdown } from './Markdown'
 import { CorrectionPanel } from './CorrectionPanel'
 import { ProgramScreenshot } from './ProgramScreenshot'
 import { SketchViewport } from './SketchViewport'
-import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom, softwarePreviewsAtom, softwareTrialsAtom } from '../agent-atoms'
+import { SoftwareSuggestions } from './SoftwareSuggestions'
+import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom, softwarePreviewsAtom, softwareTrialsAtom, softwareSuggestionsVersionAtom } from '../agent-atoms'
 import type { ProjectDeliverablesResult } from '../../shared/types'
 
 /**
@@ -29,6 +30,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
   const projectId = project?.project_id
   const liveUrl = useAtomValue(softwarePreviewsAtom)[projectId ?? '']
   const setTrials = useSetAtom(softwareTrialsAtom)
+  const suggestionsVersion=useAtomValue(softwareSuggestionsVersionAtom)
   // 自动刷新信号：桌面阶段推进（stage_changed 回填后变化）或产物变更（version+1）
   const desktopPhase = useAtomValue(desktopPhaseAtom)
   const artifactsVersion = useAtomValue(desktopArtifactsAtom).version
@@ -69,7 +71,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     void refresh()
     setLaunchState(null)
     // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
-  }, [refresh, desktopPhase, artifactsVersion, project?.current_stage])
+  }, [refresh, desktopPhase, artifactsVersion, project?.current_stage, suggestionsVersion])
 
   const onLaunch = async (restart = false, snapshot?: string, previous = false, trial = false): Promise<void> => {
     if (!projectId) return
@@ -190,6 +192,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       {embedded && data?.trial?.state !== 'running' && liveUrl && <><span>开发调试画面 · 可能随调试关闭</span><iframe title="开发调试画面" src={liveUrl} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" style={{ flex: 1, width: '100%', minHeight: 360, border: 0 }} /></>}
       {embedded && !liveUrl && data?.trial?.state !== 'running' && project?.current_stage !== 'completed' && data?.confirmed_sketch_url && <div className="delivery-confirmed-sketch"><SketchViewport src={data.confirmed_sketch_url} readOnly /></div>}
       <div className="theatre-delivery-body" data-has-sketch={Boolean(embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url)} style={{ flex: data?.trial?.state === 'running' ? '0 0 auto' : 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
+        <SoftwareSuggestions key={projectId} value={data?.improvement_suggestions} refresh={()=>void refresh()} />
         {data?.trial?.state !== 'running' && <ProgramScreenshot />}
         {!loading && !liveUrl && data?.trial?.state !== 'running' && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
         {/* 点选纠错（批11 MVP-E，2026-10-08）：入口/会话视图内嵌交付面板；completed 项目

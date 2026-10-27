@@ -171,7 +171,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     catch (error) { if (monetaryStopMessage(error)) monetaryFailure = error; throw error }
   }
   const baseTools = collaboration ? buildSoftwareAgentTools(input.projectId, 'parent', collaboration,
-    url => emit('software_preview_changed', { preview_url: url ?? null })) : buildDesktopChildTools(input.projectId, 'implement', 'diff')
+    url => emit('software_preview_changed', { preview_url: url ?? null }), () => emit('software_suggestions_changed', {})) : buildDesktopChildTools(input.projectId, 'implement', 'diff')
   let scopePending = false
   const tools = productionAgentTools(baseTools, [...(software ? [] : [buildDesktopEnvProbeTool()]),
     buildLeanScopeTool(input.projectId, input.content, emit, () => { scopePending = true }),

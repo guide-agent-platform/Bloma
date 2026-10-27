@@ -158,3 +158,8 @@
 .software-trial-controls button:hover { background: var(--color-surface-muted); }
 .software-trial-controls button:disabled { opacity: .5; cursor: default; }
 .software-trial-controls span { flex-basis: 100%; line-height: 1.5; }
+.software-improvement-suggestions { margin: 4px 0 14px; padding: 12px; border: 1px solid var(--color-border); border-radius: 12px; font-size: var(--font-size-xs); line-height: 1.6; }
+.software-improvement-suggestions h3 { margin: 0; font-size: var(--font-size-sm); }
+.software-improvement-suggestions p { margin: 5px 0; color: var(--color-text-muted); }
+.software-improvement-suggestions article { padding: 10px 0; border-top: 1px solid var(--color-border); }
+.software-improvement-suggestions .software-trial-controls { display: flex; flex-wrap: wrap; gap: 6px; border: 0; }

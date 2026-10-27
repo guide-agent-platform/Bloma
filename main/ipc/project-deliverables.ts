@@ -29,6 +29,9 @@ import { activeSoftwareRelease } from '../software/release-store'
 import { listSoftwareDataSnapshots, softwareFallbackReleaseId } from '../software/data-update'
 import { launchSoftwareTrial, softwareTrial, closeSoftwareTrial } from '../software/trial'
 import { readPrdBackplane } from '../project/prd-store'
+import { readSoftwareSuggestions, decideSoftwareSuggestion } from '../software/improvement-suggestions'
+import { hasRunForProject } from '../orchestration/stages/run-registry'
+import { randomUUID } from 'node:crypto'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -69,6 +72,11 @@ function listFiles(rootPath: string): string[] {
 }
 
 export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: BrowserWindow): void {
+  ipcMain.handle(IPC_CHANNELS.SOFTWARE_SUGGESTIONS_DECIDE, (_event,payload:unknown)=>safeInvoke(extractRequestId(payload),async()=>{
+    const input=requireFields<import('../../shared/types').SoftwareSuggestionDecisionInput>(payload,['request_id','project_id','session_id','set_id','suggestion_id','action'])
+    return decideSoftwareSuggestion(input,hasRunForProject(input.project_id),(type,data)=>_mainWindow.webContents.send('agent:stream-event',{
+      event_id:randomUUID(),project_id:input.project_id,session_id:input.session_id,type,payload:data,created_at:new Date().toISOString()}))
+  }))
   ipcMain.handle(IPC_CHANNELS.PROJECT_DELIVERABLES, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectDeliverablesInput>(payload, ['project_id'])
@@ -111,6 +119,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       }
       result.can_launch = (project.current_stage === 'completed' || Boolean(stable)) && result.launch.parse_ok
       if (isSoftwareProject(project.project_id)) {
+        result.improvement_suggestions = readSoftwareSuggestions(project.project_id)
         result.trial = softwareTrial(project.project_id)
         result.can_trial = Boolean(readPrdBackplane(project.project_id).user_confirmed_at && readLaunchDeclaration(project.root_path)?.ok)
       }

@@ -12,15 +12,16 @@ import { prepareSoftwareRuntime, projectRuntimeRequest } from './runtime-manager
 import { runtimeBindingVersion } from './runtime-bindings'
 import { buildRepositoryContextTool } from './repository-context'
 import { buildSoftwareVerifyTool } from './verification-tool'
+import { buildImprovementSuggestionTool } from './improvement-suggestions'
 
 type Policy = ReturnType<typeof createSoftwareCollaborationPolicy>
 const FILE_TOOLS = new Set(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file'])
-export function buildSoftwareAgentTools(projectId: string, role: DelegationRunRole | 'parent', policy: Policy, previewChanged?: (url?: string) => void): AgentLoopTool[] {
+export function buildSoftwareAgentTools(projectId: string, role: DelegationRunRole | 'parent', policy: Policy, previewChanged?: (url?: string) => void, suggestionsChanged?: () => void): AgentLoopTool[] {
   const readonly = ['review', 'research', 'explore'].includes(role)
   const files = buildAgentTools({ projectId, role: readonly ? 'research' : 'implement', realFullstackVariant: true, software: true,
     assertFileWrite: policy.assertFileWrite }).filter(tool => FILE_TOOLS.has(tool.name))
   const tools = [...files, buildProductionContextTool(projectId), buildSoftwareImageTool(projectId), buildRepositoryContextTool(projectId)]
-  if (role === 'parent') tools.push(...buildSoftwareExecutionTools(projectId, policy.assertCommand, previewChanged), environmentTool(projectId), prepareEnvironmentTool(projectId, policy), buildSoftwareInspectTool(projectId, policy, previewChanged), buildSoftwareVerifyTool(projectId, policy, previewChanged))
+  if (role === 'parent') tools.push(...buildSoftwareExecutionTools(projectId, policy.assertCommand, previewChanged), environmentTool(projectId), prepareEnvironmentTool(projectId, policy), buildSoftwareInspectTool(projectId, policy, previewChanged), buildSoftwareVerifyTool(projectId, policy, previewChanged), buildImprovementSuggestionTool(projectId,suggestionsChanged,policy.assertCommand))
   return tools
 }
 
@@ -63,6 +64,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 }
 
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
+  '可用offer_suggestions留下制作中或交付后供参考的改进建议；它不改变范围、不暂停当前制作。未被用户明确选择并再次确认的建议，不能实现或列为验收义务；不要用propose_scope_change把自己的想法冒充用户新需求。',
   '你负责把已确认目标做成可用软件。自行选择成熟技术，优先沿用已有工程，先打通主路径再补齐承诺；不让零知识用户决定框架或安装开发环境。交付形态服从用户的桌面/浏览器/命令要求。',
   '用读写文件和run_command完成工程工作；长期进程用start_service，日志用read_process。复杂界面操作写项目内JS模块：export default async({page,context,expect,assert,dataDir})，调用inspect_app(script:"路径")运行标准Playwright；steps保留简短操作。不为工具局限改产品控件。会话和开发数据持续保留，源码变化自动重载。',
   '尽早实测主路径。界面验收可直接verify_app(script:"tests/acceptance.mjs")：模块导出async({test,page,expect,assert,dataDir,phase})，test使用node:test API，每个业务测试名含一个F编号；重开分支用phase==="reopened"。无需展开动作表，旧GUI/CLI登记仍兼容。按真实失败修复，定位可改但不能改输入、断言过关；通过后简短交接。协议细节按需read_production_context查询。',

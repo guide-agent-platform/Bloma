@@ -206,6 +206,7 @@ const electronAPI: ElectronAPI = {
   dom: {
   },
   projectDeliverables: {
+    decideSuggestion: (input: import('../shared/types').SoftwareSuggestionDecisionInput) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_SUGGESTIONS_DECIDE, input),
     get: (input: import('../shared/types').ProjectDeliverablesInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELIVERABLES, input),
     launch: (input: import('../shared/types').ProjectLaunchAppInput) =>

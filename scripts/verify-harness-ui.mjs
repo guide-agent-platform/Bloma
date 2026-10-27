@@ -16,12 +16,14 @@ import {writeFileSync} from 'node:fs';import{join}from'node:path';import{randomU
 import{createProject,updateProject}from'./main/project/project-service';import{parseLeanBrief}from'./main/guide/lean-brief';
 import{readPrdBackplane,markPrdUserConfirmed}from'./main/project/prd-store';import{syncDocuments}from'./main/project/document-sync';
 import{prdScopeFingerprint}from'./main/project/requirement-contract';
+import{offerSoftwareSuggestions}from'./main/software/improvement-suggestions';
 const p=createProject({request_id:'c',mode:'quick',initial_message:'试用演示'},{workflowVersion:'software-v1'}),sid=randomUUID();
 const parsed=parseLeanBrief(JSON.stringify({action:'brief',goal:'独立试用',ui:'required',delivery:'browser',requirements:[{description:'保存姓名',expected:'显示已保存姓名'}]}),{projectId:p.project_id,sessionId:sid,source:'试用演示',previous:readPrdBackplane(p.project_id),software:true});
 parsed.brief.lean_brief.preview='skip';syncDocuments({request_id:'sync',project_id:p.project_id,session_id:sid,checkpoint:'requirement_confirmed'},parsed.brief);
 const brief=markPrdUserConfirmed(p.project_id),scope=prdScopeFingerprint(brief);updateProject(p.project_id,{last_session_id:sid,current_stage:'generating_mvp',desktop_phase:'desktop-implement',ux_confirmation:{prd_fingerprint:scope,design_hash:scope,html_hash:null}});
 writeFileSync(join(p.root_path,'app.cjs'),"require('http').createServer((q,s)=>{s.setHeader('Content-Type','text/html;charset=utf-8');s.end('<title>Real trial</title><h1>实际运行的隔离试用</h1><input aria-label=姓名><button>保存</button>')}).listen(Number(process.env.PORT||33661),'127.0.0.1')");
-writeFileSync(join(p.root_path,'LAUNCH.json'),JSON.stringify({schema_version:2,ui:'browser',command:['node','app.cjs'],url:'http://127.0.0.1:33661'}));console.log(JSON.stringify({pid:p.project_id,sid}));
+writeFileSync(join(p.root_path,'LAUNCH.json'),JSON.stringify({schema_version:2,ui:'browser',command:['node','app.cjs'],url:'http://127.0.0.1:33661'}));
+offerSoftwareSuggestions(p.project_id,sid,[{title:'导出备份',description:'导出当前姓名',benefit:'保存一份备份',expected:'导出文件包含全部姓名'}]);console.log(JSON.stringify({pid:p.project_id,sid}));
 `},outfile:helper,bundle:true,platform:'node',format:'esm',external:['electron'],logLevel:'silent'})
 const prepared=spawnSync(process.execPath,[helper],{cwd:root,env,encoding:'utf8'});assert.equal(prepared.status,0,prepared.stderr)
 const {pid,sid}=JSON.parse(prepared.stdout.trim().split('\n').at(-1)),now=new Date().toISOString()
@@ -58,6 +60,16 @@ try{
   }
   await page.getByRole('button',{name:'关闭试用',exact:true}).click()
   await page.getByText('独立试用已关闭，测试数据和版本记录保留。',{exact:true}).waitFor()
+  await page.getByRole('heading',{name:'供参考的改进建议'}).waitFor()
+  await page.getByRole('button',{name:'以后再说',exact:true}).click()
+  await page.getByText('已留待以后',{exact:true}).waitFor()
+  await page.reload()
+  const switcher=page.getByRole('button',{name:'草图与程序',exact:true});if(await switcher.isVisible())await switcher.click()
+  await page.getByText('已留待以后',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'本轮采用',exact:true}).click()
+  await page.getByRole('button',{name:/按这份做/}).waitFor()
+  await page.getByText('导出当前姓名',{exact:true}).waitFor()
+  report.checks.push('optional suggestions defer and restore without changing scope','explicit adoption stages the real updated scope for confirmation')
   report.checks.push('user can close owned trial independently');assert.deepEqual(report.errors,[])
 }finally{
   if(app){

@@ -516,6 +516,7 @@ export function setupGlobalAgentListeners(): () => void {
       } catch { /* null clears the live preview */ }
       store.set(softwarePreviewsAtom, previous => { const next = { ...previous }; if (url) next[event.project_id!] = url; else delete next[event.project_id!]; return next })
     }
+    if (event.type === 'software_suggestions_changed') store.set(softwareSuggestionsVersionAtom, value=>value+1)
     if (event.type === 'rollback_done' || event.type === 'ux_sketch_ready' || event.type === 'mvp_review_ready') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
@@ -1019,6 +1020,7 @@ export const previewUrlsAtom = atom<Record<string, { url: string; reviewUrl?: st
 export const softwarePreviewsAtom = atom<Record<string, string>>({})
 /** User trials are versioned independently of transient Agent debug URLs. */
 export const softwareTrialsAtom = atom<Record<string, import('../shared/types').SoftwareTrial>>({})
+export const softwareSuggestionsVersionAtom = atom(0)
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)
