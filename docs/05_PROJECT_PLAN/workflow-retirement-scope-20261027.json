@@ -1,6 +1,12 @@
 {
-  "version": 2,
+  "version": 3,
   "groups": [
+    {
+      "id": "longterm_milestones_keep",
+      "action": "keep",
+      "reason": "Current software-v1 longterm state, exact-candidate confirmation and backlog UI; preserve during legacy retirement.",
+      "paths": ["main/software/longterm-state.ts", "main/software/longterm-control.ts", "main/software/longterm-message.ts", "renderer/components/LongtermProjectPanel.tsx", "renderer/lib/project-status.ts"]
+    },
     {
       "id": "modern_workflow_keep",
       "action": "keep",

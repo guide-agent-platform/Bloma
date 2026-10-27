@@ -24,6 +24,7 @@ import { exportProjectHandoff } from '../delivery/project-export'
 import { upgradeExport } from '../coding/export-manifest'
 import { readExperimentSwitches } from '../platform/shell/experiment-switches'
 import { isLeanProject } from '../desktop/workflow-policy'
+import { isLongtermSoftware, readLongtermState, saveLongtermState } from '../software/longterm-state'
 import { dirname } from 'node:path'
 
 
@@ -94,7 +95,12 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_UNARCHIVE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectUnarchiveInput>(payload, ['project_id'])
-      return unarchiveProject(input)
+      const project=unarchiveProject(input)
+      if(isLongtermSoftware(input.project_id)){
+        const state=readLongtermState(input.project_id)
+        if(state?.archived_at){state.archived_at=undefined;saveLongtermState(state);return findProject(input.project_id)}
+      }
+      return project
     })
   })
 
@@ -247,6 +253,10 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_FINALIZE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectFinalizeInput>(payload, ['project_id', 'session_id'])
+      if(isLongtermSoftware(input.project_id)){
+        const state=readLongtermState(input.project_id),current=state?.milestones.find(item=>item.id===state.current_id)
+        if(current?.status!=='delivered'||findProject(input.project_id).status==='archived')throw Error('LONGTERM_MILESTONE_CONFIRMATION_REQUIRED')
+      }
       // U6：满意度埋点 + 项目收口。product_finalized 走研究安全级，不含具体对话内容。
       trackAnalytics({
         request_id: input.request_id,

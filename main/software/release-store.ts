@@ -158,12 +158,17 @@ export async function verifyReleaseSource(release: SoftwareRelease, signal?: Abo
   if (source.digest !== release.source.digest) throw new ReleaseIntegrityError('RELEASE_WORKING_SOURCE_CHANGED', release.source, source)
 }
 /** Only the host after actual candidate checks may call this, never model tools. */
-export async function promoteSoftwareRelease(release: SoftwareRelease, evidence: NonNullable<SoftwareRelease['verified']>, signal?: AbortSignal, stillCurrent?: () => boolean) {
+export async function sealSoftwareRelease(release: SoftwareRelease, evidence: NonNullable<SoftwareRelease['verified']>, signal?: AbortSignal, stillCurrent?: () => boolean) {
   await verifyReleaseSource(release, signal)
   signal?.throwIfAborted()
   if (stillCurrent && !stillCurrent()) throw Error('RELEASE_VERIFICATION_SCOPE_CHANGED')
   release.verified = evidence
   writeTextFileAtomic(join(dirname(release.root), 'release.json'), JSON.stringify(release))
+}
+export async function promoteSoftwareRelease(release: SoftwareRelease, evidence: NonNullable<SoftwareRelease['verified']>, signal?: AbortSignal, stillCurrent?: () => boolean) {
+  await sealSoftwareRelease(release,evidence,signal)
+  signal?.throwIfAborted()
+  if(stillCurrent&&!stillCurrent())throw Error('RELEASE_VERIFICATION_SCOPE_CHANGED')
   writeTextFileAtomic(join(base(release.projectId), 'active.json'), JSON.stringify({ id: release.id }))
 }
 export async function activeSoftwareRelease(projectId: string, signal?: AbortSignal, verifyBytes = true): Promise<SoftwareRelease | undefined> {

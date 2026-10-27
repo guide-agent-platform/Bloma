@@ -33,7 +33,7 @@ import { createSoftwareCollaborationPolicy } from '../software/collaboration-pol
 import { buildSoftwareAgentTools, SOFTWARE_ENGINEERING_INSTRUCTIONS } from '../software/agent-tools'
 import { stopSoftwareSession } from '../software/process-manager'
 import { closeDebugSessions, retainedDebugVersion } from '../software/debug-sessions'
-import { prepareSoftwareRelease, promoteSoftwareRelease, verifyReleaseSource } from '../software/release-store'
+import { prepareSoftwareRelease, promoteSoftwareRelease, sealSoftwareRelease, verifyReleaseSource } from '../software/release-store'
 import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
 import { verifySoftwareCandidate, recentSoftwareVerification } from '../software/verification'
 import { importedProjectContext } from '../software/import-project'
@@ -42,6 +42,8 @@ import { monetaryStopMessage, monetaryInputBlocked } from '../platform/llm/monet
 import { trialFeedbackText } from '../software/trial'
 import { prepareIndependentDesign } from '../software/independent-design'
 import { recordEvaluationEvent } from '../software/harness-evaluation'
+import { isLongtermSoftware, ensureLongtermState, stageLongtermMilestone, longtermPendingDecision } from '../software/longterm-state'
+import { handleLongtermMessage } from '../software/longterm-message'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -49,8 +51,13 @@ const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(par
 /** A continuous Pi executor followed by one host verification boundary. No
  * dispatcher dialogue, PHASE_ADVANCE markers or synthetic architecture stages. */
 export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopRouteDeps): Promise<void> {
-  recordEvaluationEvent(input.projectId,'operation_started',{session_id:input.sessionId,request_id:input.requestId})
-  const project = findProject(input.projectId)
+  let project = findProject(input.projectId)
+  if(project.status==='archived'||project.status==='abandoned'){
+    deps.publish(input,'message_delta',{text:'项目已归档或放弃，版本和数据保留；恢复项目后才能继续制作。'});deps.complete(input.sessionId,input.projectId,'incomplete');return
+  }
+  if(await handleLongtermMessage(input,deps))return
+  project=findProject(input.projectId)
+  if(input.cardOptionId){deps.publish(input,'message_delta',{text:'确认卡已不属于当前制作阶段，请刷新任务单或当前里程碑后操作。'});deps.complete(input.sessionId,input.projectId,'incomplete');return}
   if (isSoftwareProject(input.projectId) && /^(?:继续|恢复|查看进度|查看结果)[。！!\s]*$/.test(input.content.trim())) {
     const saved = readSoftwareRunState(input.projectId)
     if (saved?.status === 'waiting_environment' && saved.operationId === project.lean_operation_id && saved.source
@@ -85,6 +92,7 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
       } }
     }
   }
+  recordEvaluationEvent(input.projectId,'operation_started',{session_id:input.sessionId,request_id:input.requestId})
   try {
     const finish = await withLeanRuntime(input.projectId, 'desktop-implement', input.signal,
       signal => runLeanProductionInner({ ...input, signal }, deps))
@@ -144,6 +152,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   if (!brief.user_confirmed_at || !brief.lean_brief) { blocked('目标尚未确认，本次没有开始制作。', true); return }
   let ux: ReturnType<typeof readConfirmedUxBinding>
   try { ux = readConfirmedUxBinding(input.projectId, brief) } catch (error) { blocked(String(error), true); return }
+  if(software&&isLongtermSoftware(input.projectId))ensureLongtermState(input.projectId,input.sessionId)
   if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2(project.root_path, project.name, { includeScaffold: false })
   const budget = leanBudget(input.projectId, 'desktop-implement')
   let initialBudgetStop: string | undefined
@@ -178,7 +187,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     catch (error) { if (monetaryStopMessage(error)) monetaryFailure = error; throw error }
   }
   const baseTools = collaboration ? buildSoftwareAgentTools(input.projectId, 'parent', collaboration,
-    url => emit('software_preview_changed', { preview_url: url ?? null }), () => emit('software_suggestions_changed', {})) : buildDesktopChildTools(input.projectId, 'implement', 'diff')
+    url => emit('software_preview_changed', { preview_url: url ?? null }), () => emit('software_suggestions_changed', {}),()=>emit('longterm_changed',{summary:findProject(input.projectId).longterm_summary})) : buildDesktopChildTools(input.projectId, 'implement', 'diff')
   let scopePending = false
   const tools = productionAgentTools(baseTools, [...(software ? [] : [buildDesktopEnvProbeTool()]),
     buildLeanScopeTool(input.projectId, input.content, emit, () => { scopePending = true }),
@@ -325,7 +334,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         if (candidate) {
           const began = Date.now(); let accounted = false
           try {
-            await promoteSoftwareRelease(candidate, { version, scope, at: new Date().toISOString() }, runSignal,
+            await (isLongtermSoftware(input.projectId)?sealSoftwareRelease:promoteSoftwareRelease)(candidate, { version, scope, at: new Date().toISOString() }, runSignal,
               () => { budget.recordRuntime(Date.now() - began); accounted = true; return prdScopeFingerprint(readPrdBackplane(input.projectId)) === scope && versionOf() === version })
           } finally { if (!accounted) budget.recordRuntime(Date.now() - began) }
           saveSoftwareRegressionBaseline(input.projectId, version)
@@ -338,6 +347,13 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         const report = join(candidate?.root ?? project.root_path, '00_VERIFY/core-verification.json')
         checkpoint('verified', { candidateId: candidate?.id, source: software ? softwareVerificationFingerprint(project.root_path) : undefined,
           ...(existsSync(report) ? { check: { path: report, sha256: createHash('sha256').update(readFileSync(report)).digest('hex') } } : {}) })
+        if(software&&candidate&&isLongtermSoftware(input.projectId)){
+          stageLongtermMilestone(input.projectId,input.sessionId,input.requestId,candidate)
+          emit('longterm_changed',{summary:findProject(input.projectId).longterm_summary})
+          emit('user_decision_required',longtermPendingDecision(input.projectId,input.sessionId)!)
+          const message='当前里程碑已通过宿主检查，可启动这个版本核对。确认本阶段后再决定下一轮；待办没有自动进入实现。'
+          deps.persistAssistant(input.sessionId,message);emit('message_delta',{text:message});deps.complete(input.sessionId,input.projectId,'incomplete');return
+        }
         commitDesktopDelivery(input.projectId, runSignal)
         recordEvaluationEvent(input.projectId,'delivery_final',{status:'delivered',candidate_id:candidate?.id})
         emit('stage_changed', { stage: 'delivered' })

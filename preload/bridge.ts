@@ -206,6 +206,7 @@ const electronAPI: ElectronAPI = {
   dom: {
   },
   projectDeliverables: {
+    longtermAction: (input:import('../shared/types').LongtermActionInput) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_LONGTERM_ACTION,input),
     decideSuggestion: (input: import('../shared/types').SoftwareSuggestionDecisionInput) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_SUGGESTIONS_DECIDE, input),
     get: (input: import('../shared/types').ProjectDeliverablesInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELIVERABLES, input),

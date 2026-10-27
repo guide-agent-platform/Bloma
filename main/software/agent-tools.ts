@@ -14,15 +14,24 @@ import { buildRepositoryContextTool } from './repository-context'
 import { buildSoftwareVerifyTool } from './verification-tool'
 import { buildImprovementSuggestionTool } from './improvement-suggestions'
 import { buildCapabilityTools } from './capability-tools'
+import { isLongtermSoftware, recordLongtermDecision } from './longterm-state'
 
 type Policy = ReturnType<typeof createSoftwareCollaborationPolicy>
 const FILE_TOOLS = new Set(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file'])
-export function buildSoftwareAgentTools(projectId: string, role: DelegationRunRole | 'parent', policy: Policy, previewChanged?: (url?: string) => void, suggestionsChanged?: () => void): AgentLoopTool[] {
+export function buildSoftwareAgentTools(projectId: string, role: DelegationRunRole | 'parent', policy: Policy, previewChanged?: (url?: string) => void, suggestionsChanged?: () => void, longtermChanged?:()=>void): AgentLoopTool[] {
   const readonly = ['review', 'research', 'explore'].includes(role)
   const files = buildAgentTools({ projectId, role: readonly ? 'research' : 'implement', realFullstackVariant: true, software: true,
     assertFileWrite: policy.assertFileWrite }).filter(tool => FILE_TOOLS.has(tool.name))
   const tools = [...files, buildProductionContextTool(projectId), buildSoftwareImageTool(projectId), buildRepositoryContextTool(projectId),...buildCapabilityTools(projectId,policy,role==='parent')]
   if (role === 'parent') tools.push(...buildSoftwareExecutionTools(projectId, policy.assertCommand, previewChanged), environmentTool(projectId), prepareEnvironmentTool(projectId, policy), buildSoftwareInspectTool(projectId, policy, previewChanged), buildSoftwareVerifyTool(projectId, policy, previewChanged), buildImprovementSuggestionTool(projectId,suggestionsChanged,policy.assertCommand))
+  let longterm=false
+  try{longterm=isLongtermSoftware(projectId)}catch{/* isolated schema clients may build tools before storing a project */}
+  if(role==='parent'&&longterm)tools.push({name:'record_longterm_decision',description:'保存当前长期里程碑的重要接口/数据格式/资源/迁移决定和理由，供下一轮恢复。不改范围、不验证、不暂停；不要保存密钥或把待办当成本轮授权。',
+    input_schema:{type:'object',additionalProperties:false,required:['decision','reason'],properties:{decision:{type:'string',maxLength:1200},reason:{type:'string',maxLength:1600}}},execute:async(input,ctx)=>{
+      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||typeof input.decision!=='string'||typeof input.reason!=='string')throw Error('LONGTERM_DECISION_INVALID')
+        const state=recordLongtermDecision(projectId,ctx.sessionId,input.decision,input.reason);longtermChanged?.();return{output:JSON.stringify({saved:true,revision:state.revision,decision:state.decisions.at(-1)})}
+      }catch(error){return{output:String(error),isError:true}}
+    }})
   return tools
 }
 
@@ -65,6 +74,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 }
 
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
+  '长期型读取read_production_context(longterm)恢复当前里程碑、待办与决策。只实现当前已确认目标；待办不自动开工。能力/接口/数据结构有重要变化时用record_longterm_decision保存兼容、迁移或回滚决定及原因。宿主检查通过后保留当前版本，待用户核对里程碑；不要把本阶段通过说成整个长期产品已完成。',
   '语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立交付分别验收。',
   '若宿主已启用第二模型验收设计，先用read_production_context(independent-design)读取冻结案例；实现这些已确认业务预期并在INDEPENDENT_ADAPTER.json只映射逻辑控件到静态CSS，不能改输入或断言。未启用时仍为单模型验收，不声称独立审阅。',
   '可用offer_suggestions留下制作中或交付后供参考的改进建议；它不改变范围、不暂停当前制作。未被用户明确选择并再次确认的建议，不能实现或列为验收义务；不要用propose_scope_change把自己的想法冒充用户新需求。',

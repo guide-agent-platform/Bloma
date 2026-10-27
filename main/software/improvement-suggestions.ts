@@ -10,6 +10,7 @@ import { stageLeanScope } from '../guide/lean-scope'
 import { findProject } from '../project/project-service'
 import { readPrdBackplane } from '../project/prd-store'
 import { prdScopeFingerprint } from '../project/requirement-contract'
+import { noteLongtermSuggestion } from './longterm-state'
 
 function path(projectId: string) {
   if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw Error('SUGGESTIONS_PROJECT_INVALID')
@@ -48,18 +49,19 @@ export function offerSoftwareSuggestions(projectId: string, sessionId: string, i
   save(value); return value
 }
 export function decideSoftwareSuggestion(input: SoftwareSuggestionDecisionInput, busy: boolean, emit: Parameters<typeof stageLeanScope>[5]) {
+  if(['archived','abandoned'].includes(findProject(input.project_id).status))throw Error('SUGGESTIONS_PROJECT_ARCHIVED')
   const value = readSoftwareSuggestions(input.project_id)
   if (!value || value.id !== input.set_id || value.session_id !== input.session_id) throw Error('SUGGESTIONS_STALE_OR_OWNER_MISMATCH')
   if (!['adopt','defer','reject'].includes(input.action)) throw Error('SUGGESTIONS_ACTION_INVALID')
   const item = value.items.find(item => item.id === input.suggestion_id)
   if (!item || item.state === 'staged') throw Error('SUGGESTIONS_UNKNOWN_OR_CONSUMED')
-  if (input.action !== 'adopt') { item.state=input.action==='defer'?'deferred':'rejected';save(value);return { suggestions:value,detail:'选择已保存，当前任务继续。' } }
+  if (input.action !== 'adopt') { item.state=input.action==='defer'?'deferred':'rejected';noteLongtermSuggestion(input.project_id,input.session_id,item,item.state);save(value);return { suggestions:value,detail:'选择已保存，当前任务继续。' } }
   item.state='adopt_requested';save(value)
-  if (busy) return {suggestions:value,detail:'已记录本轮采用。当前制作继续；结束后点击“更新任务单并确认”，再确认新增范围。'}
+  if (busy) {noteLongtermSuggestion(input.project_id,input.session_id,item,'adopt_requested');return {suggestions:value,detail:'已记录本轮采用。当前制作继续；结束后点击“更新任务单并确认”，再确认新增范围。'}}
   const selected=value.items.filter(item=>item.state==='adopt_requested'),previous=readPrdBackplane(input.project_id)
   const next=adoptLeanSuggestions(previous,selected,selected.map(item=>item.id))
   stageLeanScope(input.project_id,input.session_id,input.request_id,previous,next,emit,{adoptedSuggestions:selected})
-  for(const idea of selected)idea.state='staged'
+  for(const idea of selected){idea.state='staged';noteLongtermSuggestion(input.project_id,input.session_id,idea,'staged')}
   save(value)
   return {suggestions:value,detail:'任务单已更新，等待你确认后才制作新增功能。'}
 }

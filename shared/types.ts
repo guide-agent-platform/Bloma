@@ -97,6 +97,7 @@ export const IPC_CHANNELS = {
   PROJECT_DELIVERABLES: 'project:deliverables',
   PROJECT_LAUNCH_APP: 'project:launch-app',
   SOFTWARE_SUGGESTIONS_DECIDE: 'software:suggestions-decide',
+  SOFTWARE_LONGTERM_ACTION: 'software:longterm-action',
   /** 点选纠错会话（批11 MVP-E，2026-10-08）：修改预览实例拉起/选区轮询/收口 */
   CORRECTION_START: 'correction:start',
   CORRECTION_PICKS: 'correction:picks',
@@ -436,6 +437,8 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface ProjectDeliverablesResult {
+  longterm?:LongtermProjectState
+  longterm_error?:string
   improvement_suggestions?: SoftwareSuggestions
   trial?: SoftwareTrial
   can_trial?: boolean
@@ -475,7 +478,7 @@ export interface ProjectLaunchAppInput extends RequestEnvelope {
 }
 export interface SoftwareTrial {
   release_id: string; source: string; process_id: string; pid?: number; state: string; data_dir: string; url?: string
-  qualification: 'unverified_test_data'; at: string
+  qualification: 'unverified_test_data'|'host_verified_test_data'; at: string; last_output?:string
 }
 export interface SoftwareSuggestions {
   version:1; id:string; project_id:string; session_id:string; scope:string; operation:string
@@ -483,6 +486,17 @@ export interface SoftwareSuggestions {
 }
 export interface SoftwareSuggestionDecisionInput extends RequestEnvelope {
   project_id:string;session_id:string;set_id:string;suggestion_id:string;action:'adopt'|'defer'|'reject'
+}
+export interface LongtermProjectState {
+  version:1;project_id:string;revision:number;current_id?:string;archived_at?:string
+  milestones:Array<{id:string;title:string;scope_hash:string;session_id:string;operation_id:string;status:'building'|'awaiting_confirmation'|'confirming'|'delivered'|'superseded';
+    features:Array<{id:string;description:string;expected:string}>;candidate_id?:string;source_digest?:string;request_id?:string;created_at:string;verified_at?:string;confirmed_at?:string;deferred_at?:string;
+    confirmation_requested_at?:string;versions?:Array<{candidate_id:string;source_digest:string;at:string}>}>
+  backlog:Array<LeanScopeSuggestion&{state:'deferred'|'rejected'|'adopt_requested'|'staged';origin_scope:string;at:string}>
+  decisions:Array<{id:string;decision:string;reason:string;author:'agent'|'user';at:string;scope:string}>
+}
+export interface LongtermActionInput extends RequestEnvelope {
+  project_id:string;session_id:string;revision:number;action:'confirm'|'later'|'adopt_backlog'|'archive';backlog_id?:string
 }
 
 /** 启动程序结果。 */
@@ -1236,6 +1250,7 @@ export interface AgentEvent {
     | 'ux_sketch_ready'
     | 'software_preview_changed'
     | 'software_suggestions_changed'
+    | 'longterm_changed'
     | 'ux_sketch_closed'
     | 'mvp_review_ready'
     | 'mvp_review_closed'
@@ -1302,6 +1317,7 @@ export interface RepairLedgerEntry {
 }
 
 export interface Project {
+  longterm_summary?:{status:'planning'|'building'|'awaiting_confirmation'|'milestone_delivered'|'backlog_pending'|'archived';pending_items:number;milestone?:string}
   imported_source?: { path: string; head?: string; branch?: string; dirty: boolean; baseline_digest: string }
   /** Host-selected production workflow. Missing = historical compatibility. */
   workflow_version?: import('./workflow-version').ModernWorkflowVersion
@@ -1888,6 +1904,7 @@ export type ElectronAPI = {
     onArtifactEvent(listener: (payload: DesktopArtifactEventPayload) => void): () => void
   }
   projectDeliverables: {
+    longtermAction(input:LongtermActionInput):Promise<ApiResult<{state:LongtermProjectState;detail:string}>>
     decideSuggestion(input: SoftwareSuggestionDecisionInput): Promise<ApiResult<{suggestions:SoftwareSuggestions;detail:string}>>
     /** 交付面板（2026-10-04）：项目文件清单 + DELIVERY.md + 启动声明快照 */
     get(input: ProjectDeliverablesInput): Promise<ApiResult<ProjectDeliverablesResult>>

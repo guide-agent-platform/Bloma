@@ -38,6 +38,12 @@ it.each(['quick', 'longterm'] as const)('real Pi software loop writes JS, builds
   }
   const deps: DesktopRouteDeps = { publish: (_target, type, payload) => events.push({ type, payload }), persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} }
   expect(await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '直接实现', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, query, {}, deps)).toBe(true)
+  if(mode==='longterm'){
+    expect(findProject(project.project_id)).toMatchObject({status:'active',current_stage:'blocked_for_user_decision',longterm_summary:{status:'awaiting_confirmation'}})
+    expect(await activeSoftwareRelease(project.project_id)).toBeUndefined()
+    expect(events.some(event=>event.type==='user_decision_required'&&event.payload.kind==='longterm_milestone')).toBe(true)
+    await enterDesktopLine({projectId:project.project_id,sessionId:'s',requestId:'user-confirm',content:'确认本阶段',maxTokens:4096,signal:AbortSignal.timeout(90000)},query,{},deps)
+  }
   expect(findProject(project.project_id)).toMatchObject({ status: 'completed', desktop_phase: 'delivered' })
   expect(readFileSync(join(project.root_path, 'dist/app.cjs'), 'utf8')).toContain('console.log')
   expect(existsSync(join(project.root_path, 'app.py'))).toBe(false)

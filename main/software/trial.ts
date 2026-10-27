@@ -7,11 +7,13 @@ import { writeTextFileAtomic } from '../../storage/json-store'
 import { findProject } from '../project/project-service'
 import { readPrdBackplane } from '../project/prd-store'
 import { prdScopeFingerprint } from '../project/requirement-contract'
-import { prepareSoftwareRelease, validateSoftwareRelease } from './release-store'
-import { startSoftwareProcess, stopSoftwareProcess, softwareProcess } from './process-manager'
+import { prepareSoftwareRelease, validateSoftwareRelease, loadSoftwareRelease, verifyReleaseSource } from './release-store'
+import { startSoftwareProcess, stopSoftwareProcess, softwareProcess, recordCompletedSoftwareCommand } from './process-manager'
 import { runSecurityScan } from '../verification/security-scan'
 import type { SoftwareTrial, ProjectLaunchAppResult } from '../../shared/types'
 import { recordEvaluationEvent } from './harness-evaluation'
+import { isLongtermSoftware, readLongtermState } from './longterm-state'
+import { executeSoftwareCommand } from './command-runtime'
 
 const live = new Map<string, SoftwareTrial>(), busy = new Set<string>()
 function directory(projectId: string) {
@@ -23,7 +25,7 @@ export function softwareTrial(projectId: string): SoftwareTrial | undefined {
   const current = live.get(projectId) ?? (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) as SoftwareTrial : undefined)
   if (!current) return
   const state = softwareProcess(projectId, current.process_id, 'user-trial').state
-  return { ...current, state: live.has(projectId) ? state : 'interrupted' }
+  return { ...current, state }
 }
 async function freePort(): Promise<number> {
   const server = createServer()
@@ -50,13 +52,25 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
     if (restart && expectedVersion !== previous?.release_id) throw Error('TRIAL_VERSION_CHANGED')
     const project = findProject(projectId), brief = readPrdBackplane(projectId), scope = prdScopeFingerprint(brief)
     if (!brief.user_confirmed_at || project.ux_confirmation?.prd_fingerprint !== scope) throw Error('TRIAL_CONFIRMED_SCOPE_REQUIRED')
-    const release = await prepareSoftwareRelease(projectId, project.root_path)
+    const longterm=isLongtermSoftware(projectId)?readLongtermState(projectId):undefined,current=longterm?.milestones.find(item=>item.id===longterm.current_id)
+    const sealed=current&&['awaiting_confirmation','confirming'].includes(current.status)&&current.candidate_id?await loadSoftwareRelease(projectId,current.candidate_id):undefined
+    if(sealed)await verifyReleaseSource(sealed)
+    const release = sealed??await prepareSoftwareRelease(projectId, project.root_path)
     const target = release.launch.mode === 'command' ? 'command' : release.launch.ui === 'browser' ? 'browser' : 'desktop'
     if (brief.lean_brief?.delivery && brief.lean_brief.delivery !== target) throw Error('SOFTWARE_DELIVERY_TARGET_MISMATCH: 试用形态必须与已确认目标一致')
-    if (!['browser', 'electron'].includes(release.launch.ui ?? '')) throw Error('TRIAL_RUNTIME_UNSUPPORTED: 当前独立试用支持Electron/浏览器')
+    if (!['browser', 'electron'].includes(release.launch.ui ?? '')&&release.launch.mode!=='command') throw Error('TRIAL_RUNTIME_UNSUPPORTED: 当前独立试用支持Electron/浏览器及一次性命令')
     const scan = runSecurityScan({ project_id: projectId, root_path: release.root, profile: 'local-software' })
     if (!scan.passed) throw Error('TRIAL_SECURITY_FAILED: 修复安全扫描问题后再试用')
     const data = join(directory(projectId), release.id, 'data'); mkdirSync(data, { recursive: true })
+    if(release.launch.mode==='command'){
+      const result=await executeSoftwareCommand({projectId,root:release.root,command:release.launch.command,dataDir:data,timeoutMs:120000})
+      await validateSoftwareRelease(projectId,release)
+      const observed=recordCompletedSoftwareCommand({projectId,sessionId:'user-trial',root:release.root,dataDir:data,source:release.source.digest,...result})
+      const trial:SoftwareTrial={release_id:release.id,source:release.source.digest,process_id:observed.id,state:observed.state,data_dir:data,qualification:sealed?'host_verified_test_data':'unverified_test_data',at:new Date().toISOString(),last_output:(result.code===0?observed.stdout:observed.stderr||observed.stdout).slice(-2000)}
+      writeTextFileAtomic(join(directory(projectId),`${release.id}.json`),JSON.stringify(trial));writeTextFileAtomic(join(directory(projectId),'current.json'),JSON.stringify(trial));live.set(projectId,trial)
+      recordEvaluationEvent(projectId,result.code===0?'trial_ready':'trial_failed',{release_id:release.id,exit_code:result.code})
+      return{started:result.code===0,trial,detail:`测试数据命令试用 · 版本 ${release.id.slice(0,12)}\n${trial.last_output||'无输出'}${result.code!==0?`\n退出码 ${result.code}`:''}`}
+    }
     let url = release.launch.url, command = [...release.launch.command]
     if (release.launch.ui === 'browser' && url) {
       const original = new URL(url), port = await freePort(), oldPort = original.port || '80'
@@ -74,7 +88,7 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
     if (softwareProcess(projectId, instance.id, 'user-trial').state !== 'running') throw Error('TRIAL_EXITED')
     await validateSoftwareRelease(projectId, release)
     const trial: SoftwareTrial = { release_id: release.id, source: release.source.digest, process_id: instance.id, pid: instance.pid, state: instance.state,
-      data_dir: data, url, qualification: 'unverified_test_data', at: new Date().toISOString() }
+      data_dir: data, url, qualification: sealed?'host_verified_test_data':'unverified_test_data', at: new Date().toISOString() }
     writeTextFileAtomic(join(directory(projectId), `${release.id}.json`), JSON.stringify(trial))
     writeTextFileAtomic(join(directory(projectId), 'current.json'), JSON.stringify(trial))
     live.set(projectId, trial)
@@ -92,9 +106,9 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
 export function trialFeedbackText(projectId: string, version: string, content: string, messageId?:string): string {
   if (!/^[a-f0-9]{64}$/.test(version)) throw Error('TRIAL_FEEDBACK_VERSION_INVALID')
   const record = JSON.parse(readFileSync(join(directory(projectId), `${version}.json`), 'utf8')) as SoftwareTrial
-  if (record.release_id !== version || record.qualification !== 'unverified_test_data') throw Error('TRIAL_FEEDBACK_VERSION_INVALID')
+  if (record.release_id !== version || !['unverified_test_data','host_verified_test_data'].includes(record.qualification)) throw Error('TRIAL_FEEDBACK_VERSION_INVALID')
   if(messageId)recordEvaluationEvent(projectId,'user_intervention',{message_id:messageId,observed_version:version,content_sha256:createHash('sha256').update(content).digest('hex')})
-  return `【用户所见试用版本 ${version}；测试数据，尚未验收】\n${content}`
+  return `【用户所见试用版本 ${version}；测试数据，${record.qualification==='host_verified_test_data'?'已有宿主检查，待阶段确认':'尚未验收'}】\n${content}`
 }
 export async function closeSoftwareTrial(projectId: string, version?: string): Promise<ProjectLaunchAppResult> {
   const trial = softwareTrial(projectId)

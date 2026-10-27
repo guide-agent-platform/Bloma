@@ -7,6 +7,7 @@ import type { Project } from '../../shared/types'
 import { desktopPhaseFullLabel } from '../lib/desktop-stages'
 import { STAGE_LABEL_MAP } from './atoms'
 import { projectModeAtom, modeSelectedAtom, currentProjectAtom } from './atoms'
+import { longtermStatusLabel } from '../lib/project-status'
 import '../styles/theatre.css'
 
 export interface ModeSelectionPageProps {
@@ -79,9 +80,9 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({ onBackToHi
       </div>
       {error && <p role="alert" style={{color:'var(--color-danger)'}}>{error}</p>}
       <div><button type="button" className="theatre-tool" disabled={selecting} onClick={() => void openExisting()}>打开已有工程</button><small>在独立副本中修改，保留原目录与未提交内容。</small></div>
-      <p className="studio-mode-help" aria-live="polite">{selectedMode === 'quick' ? <>先做一个能用的版本，再慢慢调整。<span>以后也能转为长期维护</span></> : '关键节点一起确认，从需求、界面到试用，一步步认真打磨。'}</p>
+      <p className="studio-mode-help" aria-live="polite">{selectedMode === 'quick' ? <>先做一个能用的版本，再慢慢调整。<span>以后也能转为长期维护</span></> : '按里程碑打磨，每阶段核对当前版本；保存待办、决策与版本记录，下一轮由你选择。'}</p>
       <div className="studio-idea-examples">{[{ label: '专注计时器', text: '一个安静的专注计时器，能记住我今天专注了多久。' }, { label: '日常记账本', text: '一个简单的日常记账本，可以记录开销，查看每月花费。' }, { label: '课程规划', text: '一个课程规划工具，可以安排每周的课程和作业。' }].map(example => <button key={example.label} type="button" className="theatre-tool" disabled={selecting} onClick={() => setIdea(example.text)}>{example.label}</button>)}</div>
-      {recent.length > 0 && onResumeProject && <section className="studio-recent-projects" aria-label="最近项目"><div className="studio-recent-heading"><h2>继续上次的想法</h2><button type="button" className="theatre-tool" onClick={onBackToHistory}>查看全部<ArrowRight size={13} /></button></div><div className="studio-recent-grid">{recent.map(project => <button type="button" key={project.project_id} className="studio-recent-project" onClick={() => onResumeProject(project)}><span className="studio-recent-icon"><FileText size={23} /></span><span><strong>{project.name}</strong><small>{project.mode === 'quick' ? '快速型' : '长期型'} · {project.desktop_phase ? desktopPhaseFullLabel(project.desktop_phase) : STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage}</small></span><ArrowRight size={14} /></button>)}</div></section>}
+      {recent.length > 0 && onResumeProject && <section className="studio-recent-projects" aria-label="最近项目"><div className="studio-recent-heading"><h2>继续上次的想法</h2><button type="button" className="theatre-tool" onClick={onBackToHistory}>查看全部<ArrowRight size={13} /></button></div><div className="studio-recent-grid">{recent.map(project => <button type="button" key={project.project_id} className="studio-recent-project" onClick={() => onResumeProject(project)}><span className="studio-recent-icon"><FileText size={23} /></span><span><strong>{project.name}</strong><small>{project.mode === 'quick' ? '快速型' : '长期型'} · {longtermStatusLabel(project)??(project.desktop_phase ? desktopPhaseFullLabel(project.desktop_phase) : STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage)}</small></span><ArrowRight size={14} /></button>)}</div></section>}
     </section>
   </main></StudioPageFrame>
 }

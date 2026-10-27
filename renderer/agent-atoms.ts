@@ -517,6 +517,14 @@ export function setupGlobalAgentListeners(): () => void {
       store.set(softwarePreviewsAtom, previous => { const next = { ...previous }; if (url) next[event.project_id!] = url; else delete next[event.project_id!]; return next })
     }
     if (event.type === 'software_suggestions_changed') store.set(softwareSuggestionsVersionAtom, value=>value+1)
+    if(event.type==='longterm_changed'&&event.project_id){
+      store.set(longtermVersionAtom,value=>value+1)
+      if(isEventForCurrentProject()){
+        const summary=event.payload.summary as Project['longterm_summary']
+        if(summary&&['planning','building','awaiting_confirmation','milestone_delivered','backlog_pending','archived'].includes(summary.status)&&Number.isSafeInteger(summary.pending_items))store.set(currentProjectAtom,project=>project?{...project,longterm_summary:summary,...(summary.status==='archived'?{status:'archived' as const}:{})}:project)
+        void refreshCurrentProjectFromStore(store,event.project_id)
+      }
+    }
     if (event.type === 'rollback_done' || event.type === 'ux_sketch_ready' || event.type === 'mvp_review_ready') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
@@ -1021,6 +1029,7 @@ export const softwarePreviewsAtom = atom<Record<string, string>>({})
 /** User trials are versioned independently of transient Agent debug URLs. */
 export const softwareTrialsAtom = atom<Record<string, import('../shared/types').SoftwareTrial>>({})
 export const softwareSuggestionsVersionAtom = atom(0)
+export const longtermVersionAtom = atom(0)
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)
@@ -1106,7 +1115,7 @@ export const hasActiveStreamAtom = atom((get) => {
 
 export const canUpgradeAtom = atom((get) => {
   const project = get(currentProjectAtom)
-  return !isModernWorkflowVersion(project?.workflow_version) && project?.mode === 'quick' && project?.status === 'completed'
+  return (!isModernWorkflowVersion(project?.workflow_version)||project?.workflow_version==='software-v1') && project?.mode === 'quick' && project?.status === 'completed'
 })
 
 // =========================================================================

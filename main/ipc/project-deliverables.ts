@@ -30,8 +30,10 @@ import { listSoftwareDataSnapshots, softwareFallbackReleaseId } from '../softwar
 import { launchSoftwareTrial, softwareTrial, closeSoftwareTrial } from '../software/trial'
 import { readPrdBackplane } from '../project/prd-store'
 import { readSoftwareSuggestions, decideSoftwareSuggestion } from '../software/improvement-suggestions'
-import { hasRunForProject } from '../orchestration/stages/run-registry'
+import { hasRunForProject, registerBackgroundRun, unregisterBackgroundRun, backgroundRuns } from '../orchestration/stages/run-registry'
 import { randomUUID } from 'node:crypto'
+import { isLongtermSoftware, readLongtermState } from '../software/longterm-state'
+import { performLongtermAction } from '../software/longterm-control'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -72,6 +74,20 @@ function listFiles(rootPath: string): string[] {
 }
 
 export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: BrowserWindow): void {
+  ipcMain.handle(IPC_CHANNELS.SOFTWARE_LONGTERM_ACTION,(_event,payload:unknown)=>safeInvoke(extractRequestId(payload),async()=>{
+    const input=requireFields<import('../../shared/types').LongtermActionInput>(payload,['request_id','project_id','session_id','revision','action'])
+    const emit=(type:import('../../shared/types').AgentEvent['type'],data:Record<string,unknown>)=>_mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT,{event_id:randomUUID(),project_id:input.project_id,session_id:input.session_id,type,payload:data,created_at:new Date().toISOString()})
+    const controller=new AbortController(),busy=hasRunForProject(input.project_id)
+    let runId:string|undefined,completed=false
+    if(input.action==='confirm'&&!busy)runId=registerBackgroundRun(input.session_id,controller,input.project_id,event=>_mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT,event))
+    try{
+      if(runId)emit('message_delta',{text:'正在核对当前里程碑版本；不会发起模型请求。'})
+      const result=await performLongtermAction(input,AbortSignal.any([controller.signal,AbortSignal.timeout(180000)]),{busy,emit})
+      emit('message_delta',{text:result.detail});completed=true;return result
+    }finally{
+      if(runId&&backgroundRuns.get(input.session_id)?.runId===runId){emit('completed',{subtype:completed&&!controller.signal.aborted?'success':'incomplete'});unregisterBackgroundRun(input.session_id,runId)}
+    }
+  }))
   ipcMain.handle(IPC_CHANNELS.SOFTWARE_SUGGESTIONS_DECIDE, (_event,payload:unknown)=>safeInvoke(extractRequestId(payload),async()=>{
     const input=requireFields<import('../../shared/types').SoftwareSuggestionDecisionInput>(payload,['request_id','project_id','session_id','set_id','suggestion_id','action'])
     return decideSoftwareSuggestion(input,hasRunForProject(input.project_id),(type,data)=>_mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT,{
@@ -119,6 +135,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       }
       result.can_launch = (project.current_stage === 'completed' || Boolean(stable)) && result.launch.parse_ok
       if (isSoftwareProject(project.project_id)) {
+        if(isLongtermSoftware(project.project_id))try{result.longterm=readLongtermState(project.project_id)}catch(error){result.longterm_error=String(error)}
         result.improvement_suggestions = readSoftwareSuggestions(project.project_id)
         result.trial = softwareTrial(project.project_id)
         result.can_trial = Boolean(readPrdBackplane(project.project_id).user_confirmed_at && readLaunchDeclaration(project.root_path)?.ok)

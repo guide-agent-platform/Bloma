@@ -1,6 +1,9 @@
 import type { Project, WorkflowStage } from '../../shared/types'
 
 export function workspaceScene(project: Project | null, stage: WorkflowStage, phase: string | null, sketchVisible: boolean, running = false) {
+  if(project?.mode==='longterm'&&project.status==='archived')return{chapter:4,title:'长期项目已归档',description:'版本与记录保留 · 恢复项目后可继续维护'}
+  if(project?.longterm_summary?.status==='awaiting_confirmation')return{chapter:4,title:'本阶段待你核对',description:'宿主检查已通过 · 核对当前版本后确认里程碑'}
+  if(project?.mode==='longterm'&&stage==='completed'&&project.longterm_summary)return{chapter:4,title:'本阶段已交付',description:`长期维护保留 · 待办 ${project.longterm_summary.pending_items} 项未自动开工`}
   if (project?.status === 'completed' && stage === 'completed') return { chapter: 4, title: '你的软件', description: '已交付 · 启动或继续改进' }
   if (project?.desktop_blocked && !running) return { chapter: 3, title: '制作暂时停止', description: '工作已保留 · 继续制作或调整要求' }
   if (phase && phase !== 'delivered') return { chapter: 3, title: '制作', description: '按已确认的需求与界面继续制作' }

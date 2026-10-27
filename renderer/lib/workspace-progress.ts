@@ -42,6 +42,7 @@ export function deriveWorkspaceProgress(input: {
   else if (['testing', 'judge_review'].includes(stage)) current = 3
   else if (['ready', 'completed'].includes(stage)) current = 4
   else if (['generating_mvp', 'repairing', 'iterating'].includes(stage)) current = 2
+  if(project?.longterm_summary?.status==='awaiting_confirmation')current=4
 
   const blocked = !busy && !decision ? project?.desktop_blocked : undefined
   const error = !busy && !decision ? input.error : undefined
@@ -49,6 +50,9 @@ export function deriveWorkspaceProgress(input: {
   return definitions.map((definition, index) => {
     let state: ProgressState = unknown ? 'pending' : complete || index < current ? 'done' : index === current ? 'active' : 'pending'
     let detail: string = definition.detail
+    if(index===4&&project?.longterm_summary){
+      detail=project.longterm_summary.status==='awaiting_confirmation'?'本阶段已通过宿主检查，等待你核对当前版本。':`本阶段状态已保留，待办 ${project.longterm_summary.pending_items} 项不自动开工。`
+    }
     if (unknown) detail = `阶段 ${phase} 尚未识别，请在工作记录中核对。`
     else if (index < current) detail = '已进入后续阶段，可在项目资料中回看。'
     else if (index === current) {
@@ -58,6 +62,10 @@ export function deriveWorkspaceProgress(input: {
           : blocked?.note || error || '制作需要处理，请查看原因后继续。'
       } else if (decision || stage === 'sketch_ready') detail = '等待你确认，可查看内容或提出调整。'
       else if (!busy) detail = '当前停在这一步，可查看已有内容。'
+    }
+    if(index===4&&project?.longterm_summary&&!blocked&&!error){
+      detail=project.longterm_summary.status==='awaiting_confirmation'?'本阶段已通过宿主检查，等待你核对当前版本。':`本阶段状态已保留，待办 ${project.longterm_summary.pending_items} 项不自动开工。`
+      if(project.longterm_summary.status==='awaiting_confirmation')state='attention'
     }
     // Imported/skip-sketch paths must not turn an absent design into a green approval.
     if (index === 1 && current > 1 && !input.hasSketch && !project?.ux_confirmation && !project?.sketch_generated_at) {

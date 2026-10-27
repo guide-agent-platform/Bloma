@@ -9,6 +9,7 @@ import { desktopPhaseFullLabel } from '../lib/desktop-stages'
 import type { Project, ProjectMode, WorkflowStage } from './atoms'
 import { StudioPageFrame } from './StudioPageFrame'
 import { StudioFumoEmpty } from './StudioCompanion'
+import { longtermStatusLabel } from '../lib/project-status'
 
 export interface ProjectHistoryPageProps {
   /** 缓存的本地项目列表（演示/开发模式下为手动维护的列表） */
@@ -779,7 +780,7 @@ const ProjectRow: React.FC<{
   const modeLabel = modeLabelMap[project.mode] ?? project.mode
   const modeColor = modeColorMap[project.mode] ?? 'var(--color-text-muted)'
   const modeBg = modeBgMap[project.mode] ?? 'var(--glass-bg-soft)'
-  const statusLabel = statusLabelMap[project.status] ?? project.status
+  const statusLabel = longtermStatusLabel(project)??statusLabelMap[project.status] ?? project.status
 
   const formattedDate = React.useMemo(() => {
     try {

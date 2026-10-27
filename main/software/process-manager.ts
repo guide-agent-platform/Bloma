@@ -31,6 +31,12 @@ export function redactSoftwareOutput(text: string): string {
   return text.replace(/((?:api[_-]?key|authorization|password|access[_-]?token|refresh[_-]?token|token|secret)\s*["']?\s*[:=]\s*["']?)[^\s"',};&]+/gi, '$1[REDACTED]')
 }
 function persist(entry: OwnedProcess) { writeJsonFile(entry.file, { ...entry.snapshot, stdout: redactSoftwareOutput(entry.snapshot.stdout), stderr: redactSoftwareOutput(entry.snapshot.stderr) }) }
+/** Completed one-shot commands have no adoptable PID/handle. */
+export function recordCompletedSoftwareCommand(input:{projectId:string;sessionId:string;root:string;dataDir:string;source:string;code:number;stdout:string;stderr:string}):SoftwareProcessSnapshot{
+  const snapshot:SoftwareProcessSnapshot={id:randomUUID(),projectId:input.projectId,sessionId:input.sessionId,root:input.root,data_dir:input.dataDir,source:input.source,purpose:'trial',
+    state:input.code===0?'exited':'failed',code:input.code,stdout:redactSoftwareOutput(input.stdout).slice(-TAIL),stderr:redactSoftwareOutput(input.stderr).slice(-TAIL),startedAt:new Date().toISOString()}
+  writeJsonFile(pathFor(snapshot.id),snapshot);return snapshot
+}
 
 export function loopbackUrl(value: string): string {
   const url = new URL(value)

@@ -94,10 +94,11 @@ export function canRepairUnexecutedNativePlan(projectId:string,suiteHash:string)
     return gui.native_evidence?.assertions===0&&gui.error?.startsWith('GUI_NATIVE_ASSERTIONS_MISSING')===true
   }catch{return false}
 }
-export async function verifySoftwareCandidate(projectId: string, requestId: string, signal?: AbortSignal, force = false): Promise<SoftwareVerification> {
+export async function verifySoftwareCandidate(projectId: string, requestId: string, signal?: AbortSignal, force = false, ownedCandidate?:SoftwareRelease): Promise<SoftwareVerification> {
   const file = receiptPath(projectId)
+  if(ownedCandidate&&ownedCandidate.projectId!==projectId)throw Error('SOFTWARE_VERIFY_CANDIDATE_OWNER_MISMATCH')
   if (active.has(file)) throw Error('SOFTWARE_VERIFY_ALREADY_RUNNING')
-  if (!force) { const previous = await recentSoftwareVerification(projectId, requestId, signal); if (previous) {recordEvaluationEvent(projectId,'verification_result',{status:'reused',candidate_id:previous.candidate?.id});return previous} }
+  if (!force) { const previous = await recentSoftwareVerification(projectId, requestId, signal); if (previous&&(!ownedCandidate||previous.candidate?.id===ownedCandidate.id)) {recordEvaluationEvent(projectId,'verification_result',{status:'reused',candidate_id:previous.candidate?.id});return previous} }
   if (active.has(file)) throw Error('SOFTWARE_VERIFY_ALREADY_RUNNING')
   active.add(file); poisoned.add(file)
   recordEvaluationEvent(projectId,'verification_started',{request_id:requestId})
@@ -107,7 +108,8 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     writeTextFileAtomic(file, JSON.stringify({ version: 1, state: 'running', key: '', at: Date.now() } satisfies Receipt))
     version = await inputs(projectId, requestId, signal)
     writeTextFileAtomic(file, JSON.stringify({ version: 1, state: 'running', key: version.key, at: Date.now() } satisfies Receipt))
-    const candidate = result.candidate = await prepareSoftwareRelease(projectId, findProject(projectId).root_path, signal)
+    if(ownedCandidate){if(ownedCandidate.projectId!==projectId)throw Error('SOFTWARE_VERIFY_CANDIDATE_OWNER_MISMATCH');await verifyReleaseSource(ownedCandidate,signal)}
+    const candidate = result.candidate = ownedCandidate??await prepareSoftwareRelease(projectId, findProject(projectId).root_path, signal)
     const security = result.security = runSecurityScan({ project_id: projectId, root_path: candidate.root, profile: 'local-software' })
     writeTextFileAtomic(join(candidate.root, '00_VERIFY/security-scan.json'), JSON.stringify(security))
     if (!security.passed) { result.status = 'failed'; result.summary = security.issues.filter(issue => ['high', 'critical'].includes(issue.severity)).map(issue => `${issue.file}:${issue.line} ${issue.user_visible_summary}`).join('\n'); return result }
