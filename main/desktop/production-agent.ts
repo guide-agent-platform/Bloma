@@ -14,10 +14,6 @@ export function productionTurns(phase: string): number {
   return phase === 'desktop-implement' ? 96 : phase === 'desktop-scaffold' ? 24 : 32
 }
 
-export function productionAgentTools(executorTools: AgentLoopTool[], extraTools: AgentLoopTool[]): AgentLoopTool[] {
-  const tools = [...executorTools.filter(tool => tool.name !== 'ask_delegation_question'), ...buildDelegationTools('parent'), ...extraTools]
-  return [...new Map(tools.map(tool => [tool.name, tool])).values()]
-}
 
 export function buildProductionAgentPrompt(node: PhaseNode, ctx: DispatcherPromptContext): string {
   const adapt = (constraints: readonly string[]) => constraints.map(text => text
@@ -43,3 +39,5 @@ export function buildProductionAgentPrompt(node: PhaseNode, ctx: DispatcherPromp
     '阶段推进仍由宿主核对产物与验证；执行结束不等于交付成功。未完成时给出已改文件、最新验证和可直接继续的缺口，不能输出成功推进标记。向用户用简短中文报告结果与下一步。',
   ].filter(Boolean).join('\n\n')
 }
+
+export {productionAgentTools} from './production-tool-assembly'

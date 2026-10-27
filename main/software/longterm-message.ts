@@ -1,4 +1,4 @@
-import type { DesktopRouteInput, DesktopRouteDeps } from '../desktop/desktop-route'
+import type { DesktopRouteInput, DesktopRouteDeps } from '../desktop/production-contracts'
 import { findProject, updateProject } from '../project/project-service'
 import { isLongtermSoftware, readLongtermState, saveLongtermState, longtermPendingDecision } from './longterm-state'
 import { currentMilestoneAction, performLongtermAction } from './longterm-control'

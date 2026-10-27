@@ -1,6 +1,12 @@
 {
-  "version": 3,
+  "version": 4,
   "groups": [
+    {
+      "id": "production_shared_extracted",
+      "action": "keep",
+      "reason": "Shared tools, completion and host gates extracted from legacy orchestrators before retirement.",
+      "paths": ["main/desktop/production-runtime-tools.ts", "main/desktop/production-tool-assembly.ts", "main/desktop/production-completion.ts", "main/desktop/production-contracts.ts"]
+    },
     {
       "id": "longterm_milestones_keep",
       "action": "keep",

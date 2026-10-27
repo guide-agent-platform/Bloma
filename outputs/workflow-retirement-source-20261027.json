@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "7880a802621fddb7f7f8f506d984d40347f44d5f",
-  "scope_version": 3,
+  "source_revision": "ab4afab0d825a9566732f95558844d51cbd9b48f",
+  "scope_version": 4,
   "scanner_sha256": "dd3867909d61517debd2133b53edc4347ee9076af25c0a9214817ed873b2c841",
-  "scope_sha256": "4bfedbc19d0e81530eeba9dd2f168550bde9d43682f098c5bc7dbd22c01e4025",
-  "source_input_digest": "fc37d1b344f5aa6eeea10a57bc7f44ee6d92fbe9648b0e9783440e30db7173fa",
+  "scope_sha256": "66844c59a248ad58bc8ba1976f78f40ba937f3b4cfee83b246bd81e62df42ecd",
+  "source_input_digest": "e5a287d03fa5b67746efc546b7eb94c6c120c442c1a04b39b1d6dbddba4a4a50",
   "method": "tracked files + TypeScript AST static/type/reexport/literal dynamic/require imports; no app execution; no symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,11 +19,12 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 900,
-    "module_edges": 3728,
+    "scanned_sources": 904,
+    "module_edges": 3755,
     "asset_edges": 38,
-    "scoped_modules": 110,
+    "scoped_modules": 114,
     "groups": {
+      "production_shared_extracted": 4,
       "longterm_milestones_keep": 5,
       "modern_workflow_keep": 14,
       "mixed_bridges_split_first": 14,
@@ -36,6 +37,17 @@
     }
   },
   "groups": [
+    {
+      "id": "production_shared_extracted",
+      "action": "keep",
+      "reason": "Shared tools, completion and host gates extracted from legacy orchestrators before retirement.",
+      "paths": [
+        "main/desktop/production-runtime-tools.ts",
+        "main/desktop/production-tool-assembly.ts",
+        "main/desktop/production-completion.ts",
+        "main/desktop/production-contracts.ts"
+      ]
+    },
     {
       "id": "longterm_milestones_keep",
       "action": "keep",
@@ -229,7 +241,7 @@
           "resolution": "module",
           "specifier": "./advance-rejection-loop",
           "kind": "static_runtime",
-          "line": 42
+          "line": 44
         }
       ],
       "type_importers": [],
@@ -473,7 +485,7 @@
           "resolution": "module",
           "specifier": "./core-delivery",
           "kind": "static_runtime",
-          "line": 78
+          "line": 64
         }
       ],
       "type_importers": [],
@@ -623,7 +635,15 @@
           "resolution": "module",
           "specifier": "./core-verification",
           "kind": "type",
-          "line": 80
+          "line": 66
+        },
+        {
+          "from": "main/desktop/production-contracts.ts",
+          "to": "main/desktop/core-verification.ts",
+          "resolution": "module",
+          "specifier": "./core-verification",
+          "kind": "type",
+          "line": 4
         }
       ],
       "test_importers": [
@@ -717,7 +737,7 @@
           "resolution": "module",
           "specifier": "./delivered-notice",
           "kind": "static_runtime",
-          "line": 44
+          "line": 46
         }
       ],
       "type_importers": [],
@@ -750,7 +770,7 @@
           "resolution": "module",
           "specifier": "./delivery-policy",
           "kind": "static_runtime",
-          "line": 2
+          "line": 4
         },
         {
           "from": "main/desktop/quick-production-review.ts",
@@ -789,7 +809,7 @@
           "resolution": "module",
           "specifier": "./delivery-state",
           "kind": "static_runtime",
-          "line": 3
+          "line": 5
         },
         {
           "from": "main/desktop/lean-production.ts",
@@ -826,17 +846,9 @@
     {
       "path": "main/desktop/desktop-route.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "c1d29226730a682a01239779d0af89af1d55d939d327092a2960753e26894d28",
+      "sha256": "4f6ac869639045192389eca0dee2b94e6832cb75c18142b2c19ec8e00b3d531a",
       "module_load_reachable": true,
       "runtime_importers": [
-        {
-          "from": "main/desktop/lean-production.ts",
-          "to": "main/desktop/desktop-route.ts",
-          "resolution": "module",
-          "specifier": "./desktop-route",
-          "kind": "static_runtime",
-          "line": 19
-        },
         {
           "from": "main/guide/lean-guide.ts",
           "to": "main/desktop/desktop-route.ts",
@@ -894,14 +906,6 @@
           "specifier": "./desktop-route",
           "kind": "type",
           "line": 16
-        },
-        {
-          "from": "main/software/longterm-message.ts",
-          "to": "main/desktop/desktop-route.ts",
-          "resolution": "module",
-          "specifier": "../desktop/desktop-route",
-          "kind": "type",
-          "line": 1
         }
       ],
       "test_importers": [
@@ -1264,7 +1268,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment-models",
           "kind": "static_runtime",
-          "line": 38
+          "line": 40
         },
         {
           "from": "main/desktop/dispatch-experiment-policy.ts",
@@ -1311,7 +1315,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment-policy",
           "kind": "static_runtime",
-          "line": 61
+          "line": 62
         }
       ],
       "type_importers": [],
@@ -1414,7 +1418,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment-records",
           "kind": "static_runtime",
-          "line": 64
+          "line": 65
         },
         {
           "from": "scripts/dispatch-experiment-entry.ts",
@@ -1547,7 +1551,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment-runtime",
           "kind": "static_runtime",
-          "line": 62
+          "line": 63
         },
         {
           "from": "main/desktop/quick-production-review.ts",
@@ -1651,7 +1655,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment",
           "kind": "static_runtime",
-          "line": 35
+          "line": 37
         },
         {
           "from": "main/desktop/dispatch-experiment-aggregate.ts",
@@ -1739,7 +1743,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment",
           "kind": "static_runtime",
-          "line": 60
+          "line": 61
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -1747,7 +1751,7 @@
           "resolution": "module",
           "specifier": "./dispatch-experiment",
           "kind": "static_runtime",
-          "line": 63
+          "line": 64
         },
         {
           "from": "main/desktop/quick-production-review.ts",
@@ -1882,7 +1886,7 @@
     {
       "path": "main/desktop/dispatcher-completion.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "05bf328458f0055f90a6140b382d3d3c8b0633dbe199aee96b11ac52d3ef4510",
+      "sha256": "b03a411d5dc5406f38be1a7ca795ec03b757f5820e46c8df114d3f98d34b6423",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -1891,15 +1895,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-completion",
           "kind": "static_runtime",
-          "line": 66
-        },
-        {
-          "from": "main/desktop/lean-production.ts",
-          "to": "main/desktop/dispatcher-completion.ts",
-          "resolution": "module",
-          "specifier": "./dispatcher-completion",
-          "kind": "static_runtime",
-          "line": 13
+          "line": 67
         }
       ],
       "type_importers": [],
@@ -1930,7 +1926,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-finalize",
           "kind": "static_runtime",
-          "line": 58
+          "line": 59
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -1938,7 +1934,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-finalize",
           "kind": "reexport_runtime",
-          "line": 74
+          "line": 75
         }
       ],
       "type_importers": [],
@@ -1996,7 +1992,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-gate",
           "kind": "static_runtime",
-          "line": 46
+          "line": 47
         },
         {
           "from": "main/desktop/dispatcher-prompt.ts",
@@ -2069,7 +2065,7 @@
     {
       "path": "main/desktop/dispatcher-loop.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "d789a9c630f9863f50b1459f33e0b6f9b66b8cc53be361502640397fb9e268ba",
+      "sha256": "3364b2babade41660d657acb3028769a2ee8ebf8a114d43a7ae7324ca3ec7c2a",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2078,15 +2074,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-loop",
           "kind": "static_runtime",
-          "line": 41
-        },
-        {
-          "from": "main/desktop/lean-production.ts",
-          "to": "main/desktop/dispatcher-loop.ts",
-          "resolution": "module",
-          "specifier": "./dispatcher-loop",
-          "kind": "static_runtime",
-          "line": 10
+          "line": 43
         }
       ],
       "type_importers": [
@@ -2272,7 +2260,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-phases",
           "kind": "static_runtime",
-          "line": 39
+          "line": 41
         },
         {
           "from": "main/desktop/dispatcher-gate.ts",
@@ -2288,7 +2276,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-phases",
           "kind": "static_runtime",
-          "line": 45
+          "line": 46
         },
         {
           "from": "main/desktop/phase-checkpoint.ts",
@@ -2476,7 +2464,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-prompt",
           "kind": "static_runtime",
-          "line": 47
+          "line": 48
         },
         {
           "from": "main/desktop/production-agent.ts",
@@ -2534,7 +2522,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-switch",
           "kind": "static_runtime",
-          "line": 40
+          "line": 42
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -2542,7 +2530,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-switch",
           "kind": "static_runtime",
-          "line": 48
+          "line": 49
         }
       ],
       "type_importers": [],
@@ -2573,7 +2561,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-telemetry",
           "kind": "static_runtime",
-          "line": 46
+          "line": 48
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -2581,7 +2569,7 @@
           "resolution": "module",
           "specifier": "./dispatcher-telemetry",
           "kind": "static_runtime",
-          "line": 43
+          "line": 44
         },
         {
           "from": "main/desktop/mvp-confirm.ts",
@@ -3049,7 +3037,15 @@
           "resolution": "module",
           "specifier": "./install-packages-tool",
           "kind": "static_runtime",
-          "line": 53
+          "line": 54
+        },
+        {
+          "from": "main/desktop/production-runtime-tools.ts",
+          "to": "main/desktop/install-packages-tool.ts",
+          "resolution": "module",
+          "specifier": "./install-packages-tool",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "scripts/prepare-experiment-environment.ts",
@@ -3123,7 +3119,7 @@
           "resolution": "module",
           "specifier": "./launch-smoke",
           "kind": "static_runtime",
-          "line": 45
+          "line": 47
         },
         {
           "from": "main/desktop/drive-app-session.ts",
@@ -3180,6 +3176,14 @@
           "specifier": "./launch-smoke",
           "kind": "static_runtime",
           "line": 16
+        },
+        {
+          "from": "main/desktop/production-contracts.ts",
+          "to": "main/desktop/launch-smoke.ts",
+          "resolution": "module",
+          "specifier": "./launch-smoke",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "main/ipc/project-deliverables.ts",
@@ -3465,7 +3469,7 @@
     {
       "path": "main/desktop/lean-production.ts",
       "group": "modern_workflow_keep",
-      "sha256": "1349b9c56553ab0df1907ace6bf3e6a2a73e0ed7539dbae15e1a06451b3cca4d",
+      "sha256": "46006db0ce221d419e3272374f2480fd277379af35fa029b65cee77be61f57a0",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -3474,7 +3478,7 @@
           "resolution": "module",
           "specifier": "./lean-production",
           "kind": "dynamic_runtime",
-          "line": 242
+          "line": 167
         },
         {
           "from": "main/desktop/desktop-route.ts",
@@ -3482,7 +3486,7 @@
           "resolution": "module",
           "specifier": "./lean-production",
           "kind": "dynamic_runtime",
-          "line": 326
+          "line": 229
         }
       ],
       "type_importers": [],
@@ -3568,7 +3572,7 @@
           "resolution": "module",
           "specifier": "./mvp-confirm",
           "kind": "static_runtime",
-          "line": 66
+          "line": 52
         }
       ],
       "type_importers": [],
@@ -3623,7 +3627,7 @@
           "resolution": "module",
           "specifier": "./notice-cards",
           "kind": "static_runtime",
-          "line": 43
+          "line": 45
         },
         {
           "from": "main/desktop/mvp-confirm.ts",
@@ -3704,7 +3708,7 @@
           "resolution": "module",
           "specifier": "./phase-checkpoint",
           "kind": "static_runtime",
-          "line": 76
+          "line": 62
         },
         {
           "from": "main/desktop/dispatcher-finalize.ts",
@@ -3720,7 +3724,7 @@
           "resolution": "module",
           "specifier": "./phase-checkpoint",
           "kind": "static_runtime",
-          "line": 57
+          "line": 58
         }
       ],
       "type_importers": [],
@@ -3937,7 +3941,15 @@
           "resolution": "module",
           "specifier": "./process-driver",
           "kind": "type",
-          "line": 50
+          "line": 51
+        },
+        {
+          "from": "main/desktop/production-contracts.ts",
+          "to": "main/desktop/process-driver.ts",
+          "resolution": "module",
+          "specifier": "./process-driver",
+          "kind": "type",
+          "line": 5
         },
         {
           "from": "main/desktop/script-execution-facts.ts",
@@ -4044,7 +4056,7 @@
     {
       "path": "main/desktop/production-agent.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "85dff70bbabe0b13c8e2c708e655f2eb702bcb7426dd4faa2e5d43120dd44fb6",
+      "sha256": "d610e3b838f38e6bf2a878684e2c374cb54a4dd9b49b13cbfd96ee2cd2940e17",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -4053,15 +4065,7 @@
           "resolution": "module",
           "specifier": "./production-agent",
           "kind": "static_runtime",
-          "line": 68
-        },
-        {
-          "from": "main/desktop/lean-production.ts",
-          "to": "main/desktop/production-agent.ts",
-          "resolution": "module",
-          "specifier": "./production-agent",
-          "kind": "static_runtime",
-          "line": 11
+          "line": 69
         }
       ],
       "type_importers": [],
@@ -4094,7 +4098,7 @@
           "resolution": "module",
           "specifier": "./production-budget",
           "kind": "static_runtime",
-          "line": 69
+          "line": 70
         },
         {
           "from": "main/desktop/lean-budget.ts",
@@ -4172,6 +4176,36 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/desktop/production-completion.ts",
+      "group": "production_shared_extracted",
+      "sha256": "05bf328458f0055f90a6140b382d3d3c8b0633dbe199aee96b11ac52d3ef4510",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/dispatcher-completion.ts",
+          "to": "main/desktop/production-completion.ts",
+          "resolution": "module",
+          "specifier": "./production-completion",
+          "kind": "reexport_runtime",
+          "line": 2
+        },
+        {
+          "from": "main/desktop/lean-production.ts",
+          "to": "main/desktop/production-completion.ts",
+          "resolution": "module",
+          "specifier": "./production-completion",
+          "kind": "static_runtime",
+          "line": 13
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/desktop/production-context.ts",
       "group": "shared_capability_keep_migrate",
       "sha256": "312c666494533c4d160f7519293609e444e01a8d298df4467f6816fc5da36db1",
@@ -4183,7 +4217,7 @@
           "resolution": "module",
           "specifier": "./production-context",
           "kind": "static_runtime",
-          "line": 83
+          "line": 69
         },
         {
           "from": "main/desktop/dispatcher-loop.ts",
@@ -4191,7 +4225,15 @@
           "resolution": "module",
           "specifier": "./production-context",
           "kind": "static_runtime",
-          "line": 67
+          "line": 68
+        },
+        {
+          "from": "main/desktop/production-runtime-tools.ts",
+          "to": "main/desktop/production-context.ts",
+          "resolution": "module",
+          "specifier": "./production-context",
+          "kind": "static_runtime",
+          "line": 7
         },
         {
           "from": "main/desktop/quick-production-review.ts",
@@ -4237,6 +4279,123 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/desktop/production-contracts.ts",
+      "group": "production_shared_extracted",
+      "sha256": "3b9626ea69f5eca65de3b07d49146803f7d712a981538e8e9a15734055392e04",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/desktop-route.ts",
+          "to": "main/desktop/production-contracts.ts",
+          "resolution": "module",
+          "specifier": "./production-contracts",
+          "kind": "static_runtime",
+          "line": 1
+        },
+        {
+          "from": "main/desktop/desktop-route.ts",
+          "to": "main/desktop/production-contracts.ts",
+          "resolution": "module",
+          "specifier": "./production-contracts",
+          "kind": "reexport_runtime",
+          "line": 2
+        },
+        {
+          "from": "main/desktop/lean-production.ts",
+          "to": "main/desktop/production-contracts.ts",
+          "resolution": "module",
+          "specifier": "./production-contracts",
+          "kind": "static_runtime",
+          "line": 19
+        }
+      ],
+      "type_importers": [
+        {
+          "from": "main/software/longterm-message.ts",
+          "to": "main/desktop/production-contracts.ts",
+          "resolution": "module",
+          "specifier": "../desktop/production-contracts",
+          "kind": "type",
+          "line": 1
+        }
+      ],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/desktop/production-runtime-tools.ts",
+      "group": "production_shared_extracted",
+      "sha256": "45239b44ad6cab1b6c0585244e69d724b3536cab57f8af7f1a81800882fffba6",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/dispatcher-loop.ts",
+          "to": "main/desktop/production-runtime-tools.ts",
+          "resolution": "module",
+          "specifier": "./production-runtime-tools",
+          "kind": "static_runtime",
+          "line": 1
+        },
+        {
+          "from": "main/desktop/dispatcher-loop.ts",
+          "to": "main/desktop/production-runtime-tools.ts",
+          "resolution": "module",
+          "specifier": "./production-runtime-tools",
+          "kind": "reexport_runtime",
+          "line": 543
+        },
+        {
+          "from": "main/desktop/lean-production.ts",
+          "to": "main/desktop/production-runtime-tools.ts",
+          "resolution": "module",
+          "specifier": "./production-runtime-tools",
+          "kind": "static_runtime",
+          "line": 10
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [
+        "desktop-arch"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/desktop/production-tool-assembly.ts",
+      "group": "production_shared_extracted",
+      "sha256": "07a7729af09e88765d4466465cbc4ee2e094e489c143540f957b8185e9ddbcda",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/lean-production.ts",
+          "to": "main/desktop/production-tool-assembly.ts",
+          "resolution": "module",
+          "specifier": "./production-tool-assembly",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
+          "from": "main/desktop/production-agent.ts",
+          "to": "main/desktop/production-tool-assembly.ts",
+          "resolution": "module",
+          "specifier": "./production-tool-assembly",
+          "kind": "reexport_runtime",
+          "line": 43
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/desktop/quick-production-review.ts",
       "group": "legacy_desktop_candidate",
       "sha256": "067e1b6b52302acce34555dfa55f946d9d22af4574b6b77ac5167d18aff42a11",
@@ -4248,7 +4407,7 @@
           "resolution": "module",
           "specifier": "./quick-production-review",
           "kind": "static_runtime",
-          "line": 84
+          "line": 70
         }
       ],
       "type_importers": [],
@@ -4303,7 +4462,15 @@
           "resolution": "module",
           "specifier": "./resource-discovery",
           "kind": "static_runtime",
-          "line": 59
+          "line": 60
+        },
+        {
+          "from": "main/desktop/production-runtime-tools.ts",
+          "to": "main/desktop/resource-discovery.ts",
+          "resolution": "module",
+          "specifier": "./resource-discovery",
+          "kind": "static_runtime",
+          "line": 6
         }
       ],
       "type_importers": [],
@@ -4337,7 +4504,7 @@
           "resolution": "module",
           "specifier": "./skeleton-provision",
           "kind": "static_runtime",
-          "line": 54
+          "line": 55
         },
         {
           "from": "main/desktop/lean-production.ts",
@@ -4485,7 +4652,7 @@
           "resolution": "module",
           "specifier": "./verification-fingerprint",
           "kind": "static_runtime",
-          "line": 77
+          "line": 63
         },
         {
           "from": "main/desktop/file-verification.ts",
@@ -4746,7 +4913,7 @@
           "resolution": "module",
           "specifier": "./workflow-policy",
           "kind": "static_runtime",
-          "line": 4
+          "line": 6
         },
         {
           "from": "main/desktop/gui-acceptance.ts",
@@ -7957,7 +8124,7 @@
           "resolution": "module",
           "specifier": "../project/prd-store",
           "kind": "static_runtime",
-          "line": 36
+          "line": 38
         },
         {
           "from": "main/desktop/dispatch-experiment-autonomous.ts",
@@ -8612,7 +8779,7 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
-          "line": 33
+          "line": 35
         },
         {
           "from": "main/desktop/dispatch-experiment-runtime.ts",
@@ -8636,7 +8803,7 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
-          "line": 55
+          "line": 56
         },
         {
           "from": "main/desktop/dispatcher-telemetry.ts",
@@ -8725,6 +8892,14 @@
           "specifier": "../project/project-service",
           "kind": "static_runtime",
           "line": 22
+        },
+        {
+          "from": "main/desktop/production-contracts.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 7
         },
         {
           "from": "main/desktop/resource-discovery.ts",
@@ -10209,7 +10384,7 @@
           "resolution": "module",
           "specifier": "../project/requirement-contract",
           "kind": "static_runtime",
-          "line": 37
+          "line": 39
         },
         {
           "from": "main/desktop/early-artifacts.ts",
@@ -11122,7 +11297,7 @@
     {
       "path": "main/software/longterm-message.ts",
       "group": "longterm_milestones_keep",
-      "sha256": "023ca2d89a447789c66b363004cad1a18533dc93e77264cf5e1f641833c5337a",
+      "sha256": "7cad56ecfdd16852a4ab3f127498a65d20856ae2767386adeb293bfa1fe56f8a",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -11791,7 +11966,7 @@
           "resolution": "module",
           "specifier": "../../shared/workflow-version",
           "kind": "static_runtime",
-          "line": 1
+          "line": 3
         },
         {
           "from": "main/desktop/workflow-policy.ts",
@@ -13137,14 +13312,14 @@
       "path": "main/desktop/desktop-route.ts",
       "needle": "await runLeanProduction({ ...input, query, env",
       "meaning": "Modern projects use the shared Pi production loop.",
-      "line": 243
+      "line": 168
     },
     {
       "id": "old_dispatcher_entry",
       "path": "main/desktop/desktop-route.ts",
       "needle": "runDesktopDispatcherLoop(loopInput)",
       "meaning": "Legacy executor is still called after the modern early return.",
-      "line": 617
+      "line": 520
     },
     {
       "id": "shared_production_tools",
@@ -13188,22 +13363,22 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 109,
+          "line": 95,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 119,
+          "line": 105,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 241,
+          "line": 166,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 325,
+          "line": 228,
           "kind": "source"
         },
         {
@@ -13423,12 +13598,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 572,
+          "line": 475,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 620,
+          "line": 523,
           "kind": "source"
         },
         {
@@ -13448,42 +13623,42 @@
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 300,
+          "line": 246,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 514,
+          "line": 460,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 516,
+          "line": 462,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 529,
+          "line": 475,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 536,
+          "line": 482,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 539,
+          "line": 485,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 543,
+          "line": 489,
           "kind": "source"
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 565,
+          "line": 511,
           "kind": "source"
         },
         {
@@ -14043,12 +14218,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 243,
+          "line": 168,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 327,
+          "line": 230,
           "kind": "source"
         }
       ]
@@ -14058,7 +14233,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 617,
+          "line": 520,
           "kind": "source"
         },
         {
@@ -14278,7 +14453,7 @@
       "sites": [
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 321,
+          "line": 267,
           "kind": "source"
         },
         {
@@ -14338,7 +14513,7 @@
       "sites": [
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 353,
+          "line": 299,
           "kind": "source"
         },
         {
@@ -14353,7 +14528,7 @@
       "sites": [
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 541,
+          "line": 487,
           "kind": "source"
         },
         {
@@ -14398,47 +14573,47 @@
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 113,
+          "line": 99,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 453,
+          "line": 356,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 479,
+          "line": 382,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 511,
+          "line": 414,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 684,
+          "line": 587,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 710,
+          "line": 613,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 752,
+          "line": 655,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 769,
+          "line": 672,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 836,
+          "line": 739,
           "kind": "source"
         },
         {
@@ -14458,7 +14633,7 @@
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 296,
+          "line": 242,
           "kind": "source"
         },
         {
@@ -14678,12 +14853,12 @@
       "sites": [
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 174,
+          "line": 175,
           "kind": "source"
         },
         {
-          "path": "main/desktop/dispatcher-loop.ts",
-          "line": 191,
+          "path": "main/desktop/production-runtime-tools.ts",
+          "line": 29,
           "kind": "source"
         },
         {
@@ -14697,8 +14872,8 @@
       "name": "buildInstallPackagesTool",
       "sites": [
         {
-          "path": "main/desktop/dispatcher-loop.ts",
-          "line": 199,
+          "path": "main/desktop/production-runtime-tools.ts",
+          "line": 37,
           "kind": "source"
         },
         {
@@ -14773,7 +14948,7 @@
       "sites": [
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 330,
+          "line": 276,
           "kind": "source"
         },
         {
@@ -14988,7 +15163,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 720,
+          "line": 623,
           "kind": "source"
         },
         {
@@ -15093,7 +15268,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 371,
+          "line": 274,
           "kind": "source"
         },
         {
@@ -15560,7 +15735,7 @@
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 603,
+          "line": 506,
           "value": "contract.json"
         },
         {
@@ -16245,12 +16420,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 255,
+          "line": 180,
           "value": "desktop-arch"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 333,
+          "line": 236,
           "value": "desktop-arch"
         },
         {
@@ -16260,12 +16435,7 @@
         },
         {
           "path": "main/desktop/dispatcher-loop.ts",
-          "line": 219,
-          "value": "desktop-arch 环境清单与选型结论的 [实证] 来源；失败项按分类如实报告，不要编造。"
-        },
-        {
-          "path": "main/desktop/dispatcher-loop.ts",
-          "line": 326,
+          "line": 272,
           "value": "desktop-arch"
         },
         {
@@ -16320,7 +16490,7 @@
         },
         {
           "path": "main/desktop/production-agent.ts",
-          "line": 29,
+          "line": 25,
           "value": "desktop-arch"
         },
         {
@@ -16332,6 +16502,11 @@
           "path": "main/desktop/production-budget.ts",
           "line": 27,
           "value": "desktop-arch"
+        },
+        {
+          "path": "main/desktop/production-runtime-tools.ts",
+          "line": 58,
+          "value": "desktop-arch 环境清单与选型结论的 [实证] 来源；失败项按分类如实报告，不要编造。"
         },
         {
           "path": "renderer/components/DesktopStageBar.tsx",
