@@ -63,6 +63,11 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
         if(input.topic==='independent-design')return{output:JSON.stringify({enabled:readIndependentPolicy()?.enabled??false,design:readIndependentDesign(projectId)??{status:'disabled',reason:'未启用第二模型验收设计；当前为单模型验收。'},
           adapter:'启用时，在项目根INDEPENDENT_ADAPTER.json提供{version:1,design_digest:冻结设计digest,controls:{逻辑控件名:静态CSS选择器}}。不得包含输入、预期或脚本；宿主按冻结业务设计编排并执行，B的文字不能签发PASS。'})}
+        if(input.topic==='verification-speech'&&isSoftwareProject(projectId))return{output:JSON.stringify({protocol:SPEECH_VERIFICATION_BRIEF,
+          prepare:'先inspect_software_capabilities；准备用prepare_software_capability({capability:"speech"})，缺资源可显式download_models:true下载固定公开资产；普通pip不会物化平台组件。',
+          python:'from speech_runtime import SpeechEngine；CORE_CHECK.json speech:{module:"speech_runtime",factory:"SpeechEngine",method:"transcribe",rate_argument:true}，指向产品实际使用入口。',
+          node:'const {transcribeWav}=require("./speech_bridge.cjs"); await transcribeWav(APP_DATA_DIR内PCM16 WAV绝对路径,{signal,timeoutMs:90000})；由宿主BLOMA_SPEECH_PYTHON绑定项目.venv，不要求用户安装Python或借用平台语音IPC。',
+          verification:'固定音频/真实解码、GUI产品路径、真实麦克风和独立机器交付分开报告；未授权不录音，缺能力不能文本模拟过关。'})}
         if (input.topic === 'data-update' && isSoftwareProject(projectId)) return { output: SOFTWARE_DATA_UPDATE_GUIDANCE }
         if (input.topic === 'delivery' && isSoftwareProject(projectId)) return { output: SOFTWARE_LAUNCH_GUIDANCE + '\n' + SOFTWARE_DELIVERY_GUIDANCE }
         if (input.topic === 'resume' && isSoftwareProject(projectId)) return { output: JSON.stringify(softwareResumeContext(projectId)) }

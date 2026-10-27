@@ -6,6 +6,8 @@ import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { readLaunchDeclaration, type LaunchDeclaration } from '../desktop/launch-smoke'
 import { resolveSoftwareCommand, softwareEnvironment } from './command-runtime'
+import { CAPABILITY_CAPSULE, executionSpeechBinding } from './capability-bindings'
+import { snapshotSpeechResources, validateSpeechResources, type SpeechResourceSnapshot } from './capability-resources'
 
 // Runtime archives are physical files. Electron's virtual fs otherwise expands
 // dependency *.asar files into directories while creating release snapshots.
@@ -33,6 +35,7 @@ export class ReleaseIntegrityError extends Error {
   }
 }
 export interface SoftwareRelease { version: 1; id: string; projectId: string; sourceRoot: string; root: string;
+  speech_resources?:SpeechResourceSnapshot
   source: RuntimeInventory; runtime: RuntimeInventory; launch: LaunchDeclaration; dependencies: Record<string, string>;
   external_files?: Array<{ path: string; sha256: string }>
   verified?: { version: string; scope: string; at: string } }
@@ -96,6 +99,7 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
   const { readDataPolicy } = await import('./data-update')
   readDataPolicy(sourceRoot)
   sourceRoot = await realpath(sourceRoot)
+  const speech_resources=await snapshotSpeechResources(projectId,sourceRoot,signal),speech=executionSpeechBinding(projectId,sourceRoot)
   const source = await runtimeInventory(sourceRoot, signal), id = hash(source.digest + randomUUID()), directory = join(base(projectId), id), root = join(directory, 'app')
   await mkdir(directory, { recursive: true })
   const dependencies: Record<string, string> = {}
@@ -120,7 +124,8 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
   await copyEntries(sourceRoot, root, source.files.filter(entry => !DEPENDENCIES.has(entry.path.split('/')[0])), signal)
   for (const [name, cache] of Object.entries(dependencies)) await symlink(cache, join(root, name), process.platform === 'win32' ? 'junction' : 'dir')
   const relocated = relocatedLaunch(parsed.launch, sourceRoot, root)
-  const resolved = resolveSoftwareCommand(root, relocated.command, softwareEnvironment(projectId))
+  if(speech)await writeFile(join(root,CAPABILITY_CAPSULE),JSON.stringify({version:1,speech}))
+  const resolved = resolveSoftwareCommand(root, relocated.command, softwareEnvironment(projectId,undefined,root))
   const launch = { ...relocated, command: resolved.command }
   const external_files: NonNullable<SoftwareRelease['external_files']> = []
   for (const file of [...new Set(launch.command.filter(isAbsolute))]) {
@@ -132,7 +137,7 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
   await writeFile(join(root, 'LAUNCH.json'), JSON.stringify(launch, null, 2))
   if ((await runtimeInventory(sourceRoot, signal)).digest !== source.digest) throw Error('RELEASE_SOURCE_CHANGED_DURING_COPY')
   const runtime = await runtimeInventory(root, signal, dependencies)
-  const release: SoftwareRelease = { version: 1, id, projectId, sourceRoot, root, source, runtime, launch, dependencies, external_files }
+  const release: SoftwareRelease = { version: 1, id, projectId, sourceRoot, root, source, runtime, launch, dependencies, external_files,...(speech_resources?{speech_resources}:{}) }
   writeTextFileAtomic(join(directory, 'release.json'), JSON.stringify(release))
   return release
 }
@@ -143,6 +148,7 @@ export async function validateSoftwareRelease(projectId: string, release: Softwa
     if (rel.includes(sep) || !/^[a-f0-9]{64}$/.test(rel)) throw Error('RELEASE_CACHE_PATH_INVALID')
   }
   const runtime = await runtimeInventory(release.root, signal, release.dependencies)
+  if(release.speech_resources)await validateSpeechResources(release.speech_resources,signal)
   if (runtime.digest !== release.runtime.digest) throw new ReleaseIntegrityError('RELEASE_BYTES_CHANGED', release.runtime, runtime)
   for (const file of release.external_files ?? []) if (await fileDigest(file.path, signal) !== file.sha256) throw Error('RELEASE_EXTERNAL_RUNTIME_CHANGED')
 }

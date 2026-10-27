@@ -91,7 +91,7 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
     probe.once('error', () => reject(new Error('PREVIEW_PORT_ALREADY_IN_USE: 请复用已知进程或选择空闲端口，不能把其它服务当成本次启动成功')))
     probe.listen(Number(address.port || 80), address.hostname.replace(/^\[|\]$/g, ''), () => probe.close(() => resolve()))
   })
-  const environment = softwareEnvironment(input.projectId, input.dataDir)
+  const environment = softwareEnvironment(input.projectId, input.dataDir,input.root)
   if (url && input.purpose === 'trial') { environment.PORT = new URL(url).port; environment.APP_PORT = new URL(url).port }
   const resolved = resolveSoftwareCommand(input.root, input.command, environment)
   resolved.command=bindSoftwareProfile(resolved.command,resolved.env)

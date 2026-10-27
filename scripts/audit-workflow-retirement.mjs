@@ -107,16 +107,19 @@ const references=(scope.asset_terms??[]).map(term=>({
     .filter(item=>item.value.includes(term))
     .map(item=>({path,line:item.line,value:item.value.slice(0,240)})))
 }))
+const templateAssets=(scope.asset_files??[]).map(path=>({path,sha256:sha(readFileSync(join(root,path))),
+  references:[...records].flatMap(([from,record])=>record.strings.filter(item=>item.value.includes(path)||item.value.includes(basename(path))).map(item=>({from,line:item.line})))}))
 const report={version:1,source_revision:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),scope_version:scope.version,
   scanner_sha256:sha(readFileSync(join(root,'scripts/audit-workflow-retirement.mjs'))),scope_sha256:sha(readFileSync(resolve(root,arg('--scope')??'docs/05_PROJECT_PLAN/workflow-retirement-scope-20261027.json'))),
   source_input_digest:sha(JSON.stringify([...inputHashes])),
   method:'tracked files + TypeScript AST static/type/reexport/literal dynamic/require imports; no app execution; no symbol-level dead-code proof',
-  limits:['module loading is not branch execution','symbol call index matches syntax names and does not resolve aliases or prove control flow','computed imports and dynamic asset composition need manual inspection','zero direct importers is not deletion approval','working source hashes are the authoritative scan inputs'],
+  limits:['module loading is not branch execution','symbol call index matches syntax names and does not resolve aliases or prove control flow','computed imports, embedded source and dynamic asset composition need manual inspection; string index excludes literals of 1024 or more characters','zero direct importers is not deletion approval','working source hashes are the authoritative scan inputs'],
   entrypoints,counts:{scanned_sources:sourcePaths.length,module_edges:graph.filter(edge=>edge.resolution==='module').length,asset_edges:graph.filter(edge=>edge.resolution==='asset').length,scoped_modules:modules.length,groups:Object.fromEntries(scope.groups.map(group=>[group.id,modules.filter(item=>item.group===group.id).length]))},
-  groups:scope.groups,modules,anchors,symbols,asset_references:references,
+  groups:scope.groups,modules,anchors,symbols,asset_references:references,template_assets:templateAssets,
   unresolved_relative_imports:graph.filter(edge=>!edge.to),computed_imports:[...records].flatMap(([path,record])=>record.dynamic.map(item=>({path,...item}))),
   zero_runtime_importers:modules.filter(item=>!item.runtime_importers.length).map(item=>({path:item.path,group:item.group,type_importers:item.type_importers.length,test_importers:item.test_importers.length,module_load_reachable:item.module_load_reachable}))}
 for(const[path,digest]of inputHashes)if(sha(readFileSync(join(root,path)))!==digest)throw Error(`AUDIT_SOURCE_CHANGED_DURING_SCAN: ${path}`)
+for(const asset of templateAssets)if(sha(readFileSync(join(root,asset.path)))!==asset.sha256)throw Error(`AUDIT_ASSET_CHANGED_DURING_SCAN: ${asset.path}`)
 if(arg('--verify')){
   const saved=JSON.parse(readFileSync(resolve(root,arg('--verify')),'utf8'))
   const comparable=value=>{const{source_revision,...rest}=value;return rest}

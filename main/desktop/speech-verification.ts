@@ -6,8 +6,11 @@ import { speechModelRoot } from '../platform/speech/model-manifest'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
 import { verificationFingerprint, declaredVerificationPolicy } from './verification-fingerprint'
 import { createHash } from 'node:crypto'
+import { isSoftwareProject } from './workflow-policy'
+import { resolveSoftwareCommand, softwareEnvironment } from '../software/command-runtime'
+import { executionSpeechBinding } from '../software/capability-bindings'
 
-export interface SpeechVerificationSpec { module: string; factory: string; method: string; rate_argument?: boolean }
+export interface SpeechVerificationSpec { module: string; factory: string; method: string; rate_argument?: boolean; runtime?:'python' }
 export interface SpeechVerificationResult {
   status: 'passed' | 'failed' | 'environment_blocked'
   probe_version: number
@@ -58,6 +61,7 @@ export async function runHostSpeechProbe(options: { projectId: string; root: str
   const { root, speech } = options
   try {
     options.signal?.throwIfAborted()
+    if(speech.runtime!==undefined&&speech.runtime!=='python')throw Error('ASR_RUNTIME_UNSUPPORTED: 当前支持Python provider；Node产品可用已准备的文件转写桥')
     if (!speech || !/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(speech.module) ||
         !/^[A-Za-z_]\w*$/.test(speech.factory) || !/^[A-Za-z_]\w*$/.test(speech.method) ||
         !existsSync(join(root, ...speech.module.split('.'))) && !existsSync(join(root, `${speech.module.replace(/\./g, '/')}.py`))) {
@@ -66,12 +70,16 @@ export async function runHostSpeechProbe(options: { projectId: string; root: str
     const policy = declaredVerificationPolicy(root), fingerprint = verificationFingerprint(root, null, policy)
     if (!fingerprint) throw new Error('语音源码版本不可确认')
     const tools = join(mainRootDir(), 'templates/tools')
-    const command = resolveDriverVenvCommand(['python', '-B', '-X', 'utf8', join(tools, 'speech_probe.py'),
+    const arguments_ = ['python', '-I', '-B', '-X', 'utf8', join(tools, 'speech_probe.py'),
       '--root', root, '--module', speech.module, '--factory', speech.factory, '--method', speech.method,
       '--fixture', join(tools, 'voice-golden.wav'), ...(speech.rate_argument ? ['--rate-argument'] : []),
-      ...(options.microphone ? ['--microphone'] : [])], root)
-    const env = buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR'] } as never, process.env)
-    env.BLOMA_SPEECH_MODEL_DIR = process.env.BLOMA_SPEECH_MODEL_DIR || speechModelRoot()
+      ...(options.microphone ? ['--microphone'] : [])]
+    let software=false
+    try{software=isSoftwareProject(options.projectId)}catch{/* standalone/legacy probes retain their explicit environment */}
+    if(software&&!executionSpeechBinding(options.projectId,root))throw Error('ASR_CAPABILITY_PREPARATION_REQUIRED: 先prepare_software_capability绑定项目Python与模型资源')
+    const env = software?softwareEnvironment(options.projectId,undefined,root):buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR'] } as never, process.env)
+    const command=software?resolveSoftwareCommand(root,arguments_,env).command:resolveDriverVenvCommand(arguments_,root)
+    env.BLOMA_SPEECH_MODEL_DIR ||= speechModelRoot()
     env.BLOMA_SPEECH_OFFLINE = '1'
     const execution = await (options.spawn ?? execFileDriverSpawn)({ command, cwd: root, env, timeoutMs: 90000, signal: options.signal })
     options.signal?.throwIfAborted()

@@ -13,6 +13,7 @@ import { runtimeBindingVersion } from './runtime-bindings'
 import { buildRepositoryContextTool } from './repository-context'
 import { buildSoftwareVerifyTool } from './verification-tool'
 import { buildImprovementSuggestionTool } from './improvement-suggestions'
+import { buildCapabilityTools } from './capability-tools'
 
 type Policy = ReturnType<typeof createSoftwareCollaborationPolicy>
 const FILE_TOOLS = new Set(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file'])
@@ -20,7 +21,7 @@ export function buildSoftwareAgentTools(projectId: string, role: DelegationRunRo
   const readonly = ['review', 'research', 'explore'].includes(role)
   const files = buildAgentTools({ projectId, role: readonly ? 'research' : 'implement', realFullstackVariant: true, software: true,
     assertFileWrite: policy.assertFileWrite }).filter(tool => FILE_TOOLS.has(tool.name))
-  const tools = [...files, buildProductionContextTool(projectId), buildSoftwareImageTool(projectId), buildRepositoryContextTool(projectId)]
+  const tools = [...files, buildProductionContextTool(projectId), buildSoftwareImageTool(projectId), buildRepositoryContextTool(projectId),...buildCapabilityTools(projectId,policy,role==='parent')]
   if (role === 'parent') tools.push(...buildSoftwareExecutionTools(projectId, policy.assertCommand, previewChanged), environmentTool(projectId), prepareEnvironmentTool(projectId, policy), buildSoftwareInspectTool(projectId, policy, previewChanged), buildSoftwareVerifyTool(projectId, policy, previewChanged), buildImprovementSuggestionTool(projectId,suggestionsChanged,policy.assertCommand))
   return tools
 }
@@ -64,6 +65,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 }
 
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
+  '语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立交付分别验收。',
   '若宿主已启用第二模型验收设计，先用read_production_context(independent-design)读取冻结案例；实现这些已确认业务预期并在INDEPENDENT_ADAPTER.json只映射逻辑控件到静态CSS，不能改输入或断言。未启用时仍为单模型验收，不声称独立审阅。',
   '可用offer_suggestions留下制作中或交付后供参考的改进建议；它不改变范围、不暂停当前制作。未被用户明确选择并再次确认的建议，不能实现或列为验收义务；不要用propose_scope_change把自己的想法冒充用户新需求。',
   '你负责把已确认目标做成可用软件。自行选择成熟技术，优先沿用已有工程，先打通主路径再补齐承诺；不让零知识用户决定框架或安装开发环境。交付形态服从用户的桌面/浏览器/命令要求。',

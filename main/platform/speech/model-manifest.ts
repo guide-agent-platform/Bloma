@@ -12,8 +12,8 @@
  * 下载源双轨：huggingface.co（官方）+ hf-mirror.com（国内镜像，本机实测可达）。
  */
 
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
+import { getPromaHome } from '../../../storage/config-paths'
 
 /** 固定修订的可下载资产（URL 含 commit hash，内容不可变）。 */
 export interface SpeechAsset {
@@ -42,7 +42,9 @@ const VAD_SHA256 = 'a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5
 
 /** 模型缓存根目录（A/C 两生态共用的唯一真相源路径）。 */
 export function speechModelRoot(): string {
-  return join(homedir(), '.proma', 'speech-models', 'sensevoice-int8')
+  const explicit=process.env.BLOMA_SPEECH_MODEL_DIR?.trim()
+  if(explicit&&!isAbsolute(explicit))throw Error('SPEECH_MODEL_DIRECTORY_ABSOLUTE_REQUIRED')
+  return explicit?resolve(explicit):join(getPromaHome(), 'speech-models', 'sensevoice-int8')
 }
 
 /** 公开下载源（探测顺序无关，并发 HEAD 先回 2xx 者优先；显式指定则不回退）。 */

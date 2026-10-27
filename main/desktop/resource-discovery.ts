@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { readProjectAttempts } from '../platform/execution/project-attempts'
 import { matchesAsset } from '../platform/speech/model-downloader'
-import { SPEECH_MODEL_MANIFEST, type SpeechModelManifest } from '../platform/speech/model-manifest'
+import { SPEECH_MODEL_MANIFEST, speechModelRoot, type SpeechModelManifest } from '../platform/speech/model-manifest'
 import { findProject } from '../project/project-service'
 import { buildChildExecEnv, defaultResolvePython } from './child-exec-tool'
 import { execFileDriverSpawn, type DriverSpawn } from './process-driver'
@@ -41,7 +41,7 @@ export function buildResourceDiscoveryTool(projectId: string, deps: { spawn?: Dr
         const run = await (deps.spawn ?? execFileDriverSpawn)({ command: [python, '-c', code], cwd: root, env: buildChildExecEnv(process.env), timeoutMs: 30000, signal: ctx.signal })
         if (run.code !== 0) throw new Error(`解释器探针未完成：${run.stderr.slice(-200)}`)
         const environment = JSON.parse(run.stdout.trim().split(/\r?\n/).at(-1) ?? '')
-        const modelRoot = deps.modelRoot ?? process.env.BLOMA_SPEECH_MODEL_DIR ?? join(getPromaHome(), 'speech-models/sensevoice-int8')
+        const modelRoot = deps.modelRoot ?? speechModelRoot()
         const speech = await inspectSpeechResources(modelRoot, SPEECH_MODEL_MANIFEST, input.refresh === true, ctx.signal)
         const components = ['speech_runtime.py', 'speech_locator.py', 'record_store.py', 'file_plan_guard.py', 'file_transactions.py', 'llm_client.py'].map(name => ({ name, materialized: existsSync(join(root, name)) }))
         const attempts = readProjectAttempts(projectId)

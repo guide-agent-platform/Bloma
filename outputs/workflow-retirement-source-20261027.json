@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "source_revision": "607425a50a254ba735ba1f6831888cff0d297358",
-  "scope_version": 1,
-  "scanner_sha256": "91df1925920d4316202c0726a8b7ceed58111222a3bdcde947299b93a7151b3e",
-  "scope_sha256": "cc2e53a5f6f4ccbf88a3dee3b15023945d6dd5939745d0eb347c041c743c869f",
-  "source_input_digest": "8d64cbbe77109ba119ce4231bfeab72d4e96b6eedbac252e1c7081e22afb23e3",
+  "source_revision": "e380feeba7b9421bf1ce686c5f5cb98f85c5582e",
+  "scope_version": 2,
+  "scanner_sha256": "dd3867909d61517debd2133b53edc4347ee9076af25c0a9214817ed873b2c841",
+  "scope_sha256": "4f67f9b5ee2257e5394f4478e0991920572d070f0bbebb37f4de292cb4ddb1c9",
+  "source_input_digest": "5e6f6920dedf8af9cb22dd3b037da28647935b016c5035cb064f5323a4fc784b",
   "method": "tracked files + TypeScript AST static/type/reexport/literal dynamic/require imports; no app execution; no symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
     "symbol call index matches syntax names and does not resolve aliases or prove control flow",
-    "computed imports and dynamic asset composition need manual inspection",
+    "computed imports, embedded source and dynamic asset composition need manual inspection; string index excludes literals of 1024 or more characters",
     "zero direct importers is not deletion approval",
     "working source hashes are the authoritative scan inputs"
   ],
@@ -19,17 +19,17 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 885,
-    "module_edges": 3627,
+    "scanned_sources": 892,
+    "module_edges": 3666,
     "asset_edges": 38,
-    "scoped_modules": 101,
+    "scoped_modules": 105,
     "groups": {
       "modern_workflow_keep": 14,
       "mixed_bridges_split_first": 14,
       "legacy_guide_candidate": 11,
       "legacy_desktop_candidate": 14,
       "frozen_experiment_separate": 13,
-      "shared_capability_keep_migrate": 22,
+      "shared_capability_keep_migrate": 26,
       "history_data_and_user_access_keep": 12,
       "retired_web_guard_keep_until_compatibility_decided": 1
     }
@@ -121,7 +121,11 @@
         "main/desktop/contract-schema.ts",
         "main/model/requirement-capabilities.ts",
         "main/project/requirement-contract.ts",
-        "main/software/runtime-manager.ts"
+        "main/software/runtime-manager.ts",
+        "main/software/capability-bindings.ts",
+        "main/software/capability-resources.ts",
+        "main/software/capability-tools.ts",
+        "main/templates/tools/speech_bridge.cjs"
       ]
     },
     {
@@ -801,7 +805,7 @@
     {
       "path": "main/desktop/desktop-route.ts",
       "group": "mixed_bridges_split_first",
-      "sha256": "198023ea9e131c3bb638b57afa84e7da41107282fa8bbabf045d2d955866850a",
+      "sha256": "c1d29226730a682a01239779d0af89af1d55d939d327092a2960753e26894d28",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -3049,7 +3053,7 @@
     {
       "path": "main/desktop/launch-smoke.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "5b0b5978c60db56731d4f30380513fb656976eea938063a2f245715d8f163f47",
+      "sha256": "d85f583adfd38700ce8ced089be0e60a9c835f2c0e17670624b7a206780ae94c",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -4125,7 +4129,7 @@
     {
       "path": "main/desktop/production-context.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "f94b061f6bb2d2b590e431dfa8b37ace532c816cc81427482f66dea32fa429c7",
+      "sha256": "77185bf17c2cf0a0f833595e481054efebde3fa43cc74c36580d441d7a3462ce",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -4181,7 +4185,9 @@
         }
       ],
       "string_references": [],
-      "asset_terms": [],
+      "asset_terms": [
+        "speech_bridge.cjs"
+      ],
       "computed_imports": [],
       "deletion_authorized": false
     },
@@ -4243,7 +4249,7 @@
     {
       "path": "main/desktop/resource-discovery.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "1de24a5c435a070cf04f437f221be782d412124c69029864c7791efade23d055",
+      "sha256": "1060f3acef77b7931fa55c14752e1e9097abfc4ee1fa41bb25885f18bb368e7e",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -4335,7 +4341,7 @@
     {
       "path": "main/desktop/speech-verification.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "bec94f8c7a4cd0afc010ea72bc9981f19340f8045ce3ca29077b70754df2dadb",
+      "sha256": "67c5a9276001fab3e95cae0b996e2cd19330e793e5dced45c257137177f1aa98",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -4345,6 +4351,14 @@
           "specifier": "./speech-verification",
           "kind": "static_runtime",
           "line": 4
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "to": "main/desktop/speech-verification.ts",
+          "resolution": "module",
+          "specifier": "../desktop/speech-verification",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "scripts/record-speech-acceptance.ts",
@@ -4372,6 +4386,14 @@
           "specifier": "../../../main/desktop/speech-verification",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/desktop/speech-verification.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/speech-verification",
+          "kind": "static_runtime",
+          "line": 21
         }
       ],
       "string_references": [],
@@ -4728,6 +4750,14 @@
           "specifier": "./workflow-policy",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "main/desktop/speech-verification.ts",
+          "to": "main/desktop/workflow-policy.ts",
+          "resolution": "module",
+          "specifier": "./workflow-policy",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "main/guide/lean-guide.ts",
@@ -5116,7 +5146,7 @@
     {
       "path": "main/guide/lean-brief.ts",
       "group": "modern_workflow_keep",
-      "sha256": "6a98dc3c9b828c2c80d08de6555409d9b670cf4f9041bae78819fb31a0a3cc5e",
+      "sha256": "5c406df7a43cc1282048e8afa74b3ba7a531ebac885ff89ddded8468fd6f2243",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -5217,6 +5247,14 @@
           "specifier": "../../../main/guide/lean-brief",
           "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/guide/lean-brief.ts",
+          "resolution": "module",
+          "specifier": "../../../main/guide/lean-brief",
+          "kind": "static_runtime",
+          "line": 19
         },
         {
           "from": "tests/unit/software/distribution.test.ts",
@@ -6493,7 +6531,7 @@
     {
       "path": "main/model/requirement-capabilities.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "40abab1116894a79f7c0fb778004accd23e3a3443ce1f2afdd95de139f579c3b",
+      "sha256": "5b803e6543549add1e276f1116d266341e0f4f1bef75fd54f5e5b256b10941aa",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -6511,6 +6549,14 @@
           "specifier": "../model/requirement-capabilities",
           "kind": "static_runtime",
           "line": 9
+        },
+        {
+          "from": "main/guide/lean-brief.ts",
+          "to": "main/model/requirement-capabilities.ts",
+          "resolution": "module",
+          "specifier": "../model/requirement-capabilities",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "main/model/prd-backplane.ts",
@@ -8144,6 +8190,14 @@
           "line": 7
         },
         {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/project/prd-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/prd-store",
+          "kind": "static_runtime",
+          "line": 20
+        },
+        {
           "from": "tests/unit/software/distribution.test.ts",
           "to": "main/project/prd-store.ts",
           "resolution": "module",
@@ -8834,6 +8888,14 @@
           "specifier": "../project/project-service",
           "kind": "static_runtime",
           "line": 7
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 5
         },
         {
           "from": "main/software/debug-workspace.ts",
@@ -9687,6 +9749,14 @@
           "line": 5
         },
         {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
           "from": "tests/unit/software/collaboration.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -10476,7 +10546,7 @@
     {
       "path": "main/software/agent-tools.ts",
       "group": "modern_workflow_keep",
-      "sha256": "a38d0b79e7447559cec9f591abd6a41e0d4b525e5f9b869d5dbd63be72eac924",
+      "sha256": "38a96a03810e3102fbff1e4cbe7104ed7b599ba56f8154cad625971e31910f7c",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -10490,6 +10560,14 @@
       ],
       "type_importers": [],
       "test_importers": [
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/software/agent-tools.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/agent-tools",
+          "kind": "static_runtime",
+          "line": 15
+        },
         {
           "from": "tests/unit/software/collaboration.test.ts",
           "to": "main/software/agent-tools.ts",
@@ -10516,7 +10594,143 @@
         }
       ],
       "string_references": [],
+      "asset_terms": [
+        "speech_bridge.cjs"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/software/capability-bindings.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "2b5d5c5da3bf06c4090d4c250cf92cbde06e172f143f2c73bf6ee32fb754b0c7",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/speech-verification.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "../software/capability-bindings",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
+          "from": "main/software/capability-resources.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "./capability-bindings",
+          "kind": "static_runtime",
+          "line": 5
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "./capability-bindings",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
+          "from": "main/software/command-runtime.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "./capability-bindings",
+          "kind": "static_runtime",
+          "line": 8
+        },
+        {
+          "from": "main/software/release-store.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "./capability-bindings",
+          "kind": "static_runtime",
+          "line": 9
+        },
+        {
+          "from": "main/software/verification.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "./capability-bindings",
+          "kind": "static_runtime",
+          "line": 27
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/software/capability-bindings.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/capability-bindings",
+          "kind": "static_runtime",
+          "line": 13
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [
+        "speech_runtime.py",
+        "speech_locator.py",
+        "speech_worker.py",
+        "speech_bridge.cjs"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/software/capability-resources.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "ac9c4842c33bcd2e9fb3eef748f8b796c5ea3b4b42f27d62c11a6bef891f28b2",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/software/release-store.ts",
+          "to": "main/software/capability-resources.ts",
+          "resolution": "module",
+          "specifier": "./capability-resources",
+          "kind": "static_runtime",
+          "line": 10
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
       "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/software/capability-tools.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "c922d5c7c3ed0ad61e22155f1135dfb7441a47f599ee9b5784caff45d66aabe2",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/software/agent-tools.ts",
+          "to": "main/software/capability-tools.ts",
+          "resolution": "module",
+          "specifier": "./capability-tools",
+          "kind": "static_runtime",
+          "line": 16
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/software/capability-tools.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/capability-tools",
+          "kind": "static_runtime",
+          "line": 12
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [
+        "speech_runtime.py",
+        "speech_locator.py",
+        "speech_worker.py",
+        "speech_bridge.cjs"
+      ],
       "computed_imports": [],
       "deletion_authorized": false
     },
@@ -10680,7 +10894,7 @@
     {
       "path": "main/software/release-store.ts",
       "group": "modern_workflow_keep",
-      "sha256": "f8180ab963cead832a5f48074a3500c4b9542173f9384423939c9ec4d441d571",
+      "sha256": "7e654a56d7e5ae4e6d2b8bd23c54ebf777bddb8933952b4e8065a216ac3c13da",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -10808,6 +11022,14 @@
           "line": 10
         },
         {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "to": "main/software/release-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/release-store",
+          "kind": "static_runtime",
+          "line": 14
+        },
+        {
           "from": "tests/unit/software/distribution.test.ts",
           "to": "main/software/release-store.ts",
           "resolution": "module",
@@ -10870,7 +11092,7 @@
     {
       "path": "main/software/runtime-manager.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "c21a38f20fa35be5b45cf34fd845e212e56d4590aa74224dde6bb1cf4d6b76b7",
+      "sha256": "a1b2cf19d82d9fa75f2d4ebeccd8d3d907cd63a8f2a28c3fa856f14b2a7ca4fa",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -10880,6 +11102,14 @@
           "specifier": "./runtime-manager",
           "kind": "static_runtime",
           "line": 11
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "to": "main/software/runtime-manager.ts",
+          "resolution": "module",
+          "specifier": "./runtime-manager",
+          "kind": "static_runtime",
+          "line": 12
         }
       ],
       "type_importers": [],
@@ -10972,7 +11202,7 @@
     {
       "path": "main/software/verification.ts",
       "group": "modern_workflow_keep",
-      "sha256": "749afdcbdf7fcb5a547efc5e83894955d9108737a73b6210e5ebf7b820692c0f",
+      "sha256": "d1a8382632b6e500a631d173236bb5cb63fb805b8a282f72f4e88a0547176e51",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -11038,6 +11268,42 @@
       ],
       "string_references": [],
       "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/templates/tools/speech_bridge.cjs",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "e5186b0cdc419f95db9162b67544df285191d5348d4cd5295af962a1c080d084",
+      "module_load_reachable": false,
+      "runtime_importers": [],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [
+        {
+          "from": "main/software/capability-bindings.ts",
+          "line": 23,
+          "kind": "source_string"
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "line": 16,
+          "kind": "source_string"
+        },
+        {
+          "from": "tests/unit/software/speech-bridge.test.ts",
+          "line": 11,
+          "kind": "test_string"
+        },
+        {
+          "from": "tests/unit/software/speech-bridge.test.ts",
+          "line": 11,
+          "kind": "test_string"
+        }
+      ],
+      "asset_terms": [
+        "speech_worker.py"
+      ],
       "computed_imports": [],
       "deletion_authorized": false
     },
@@ -11646,6 +11912,14 @@
           "line": 17
         },
         {
+          "from": "main/platform/speech/model-manifest.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 16
+        },
+        {
           "from": "main/project/decision-log.ts",
           "to": "storage/config-paths.ts",
           "resolution": "module",
@@ -11695,6 +11969,14 @@
         },
         {
           "from": "main/project/project-templates.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 4
+        },
+        {
+          "from": "main/software/capability-bindings.ts",
           "to": "storage/config-paths.ts",
           "resolution": "module",
           "specifier": "../../storage/config-paths",
@@ -12403,7 +12685,7 @@
       "path": "main/software/agent-tools.ts",
       "needle": "const FILE_TOOLS = new Set",
       "meaning": "Old resource/installer tools are not exposed by this filtering path.",
-      "line": 18
+      "line": 19
     },
     {
       "id": "new_capability_verification",
@@ -12571,22 +12853,32 @@
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 67,
+          "line": 71,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 68,
+          "line": 72,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 69,
+          "line": 73,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 80,
+          "line": 74,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 85,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/speech-verification.ts",
+          "line": 78,
           "kind": "source"
         },
         {
@@ -14051,7 +14343,7 @@
         },
         {
           "path": "main/software/verification.ts",
-          "line": 113,
+          "line": 114,
           "kind": "source"
         },
         {
@@ -14373,7 +14665,17 @@
         },
         {
           "path": "main/desktop/speech-verification.ts",
-          "line": 40,
+          "line": 43,
+          "value": "speech_runtime.py"
+        },
+        {
+          "path": "main/software/capability-bindings.ts",
+          "line": 23,
+          "value": "speech_runtime.py"
+        },
+        {
+          "path": "main/software/capability-tools.ts",
+          "line": 16,
           "value": "speech_runtime.py"
         },
         {
@@ -14413,17 +14715,37 @@
         },
         {
           "path": "tests/unit/desktop/speech-verification.test.ts",
-          "line": 25,
+          "line": 30,
           "value": "speech_runtime.py"
         },
         {
           "path": "tests/unit/desktop/speech-verification.test.ts",
-          "line": 32,
+          "line": 37,
           "value": "speech_runtime.py"
         },
         {
           "path": "tests/unit/desktop/speech-verification.test.ts",
-          "line": 50,
+          "line": 55,
+          "value": "speech_runtime.py"
+        },
+        {
+          "path": "tests/unit/software/capability-tools.test.ts",
+          "line": 41,
+          "value": "speech_runtime.py"
+        },
+        {
+          "path": "tests/unit/software/capability-tools.test.ts",
+          "line": 43,
+          "value": "speech_runtime.py"
+        },
+        {
+          "path": "tests/unit/software/capability-tools.test.ts",
+          "line": 46,
+          "value": "speech_runtime.py"
+        },
+        {
+          "path": "tests/unit/software/capability-tools.test.ts",
+          "line": 48,
           "value": "speech_runtime.py"
         }
       ]
@@ -14453,7 +14775,17 @@
         },
         {
           "path": "main/desktop/speech-verification.ts",
-          "line": 40,
+          "line": 43,
+          "value": "speech_locator.py"
+        },
+        {
+          "path": "main/software/capability-bindings.ts",
+          "line": 23,
+          "value": "speech_locator.py"
+        },
+        {
+          "path": "main/software/capability-tools.ts",
+          "line": 16,
           "value": "speech_locator.py"
         },
         {
@@ -14483,13 +14815,98 @@
         },
         {
           "path": "tests/unit/desktop/speech-verification.test.ts",
-          "line": 24,
+          "line": 29,
           "value": "speech_locator.py"
         },
         {
           "path": "tests/unit/desktop/speech-verification.test.ts",
-          "line": 26,
+          "line": 31,
           "value": "speech_locator.py"
+        }
+      ]
+    },
+    {
+      "term": "speech_worker.py",
+      "sites": [
+        {
+          "path": "main/software/capability-bindings.ts",
+          "line": 23,
+          "value": "speech_worker.py"
+        },
+        {
+          "path": "main/software/capability-tools.ts",
+          "line": 16,
+          "value": "speech_worker.py"
+        },
+        {
+          "path": "main/templates/tools/speech_bridge.cjs",
+          "line": 14,
+          "value": "speech_worker.py"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 16,
+          "value": "speech_worker.py"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 25,
+          "value": "speech_worker.py"
+        }
+      ]
+    },
+    {
+      "term": "speech_bridge.cjs",
+      "sites": [
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 69,
+          "value": "const {transcribeWav}=require(\"./speech_bridge.cjs\"); await transcribeWav(APP_DATA_DIR内PCM16 WAV绝对路径,{signal,timeoutMs:90000})；由宿主BLOMA_SPEECH_PYTHON绑定项目.venv，不要求用户安装Python或借用平台语音IPC。"
+        },
+        {
+          "path": "main/software/agent-tools.ts",
+          "line": 68,
+          "value": "语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立"
+        },
+        {
+          "path": "main/software/capability-bindings.ts",
+          "line": 23,
+          "value": "speech_bridge.cjs"
+        },
+        {
+          "path": "main/software/capability-tools.ts",
+          "line": 16,
+          "value": "speech_bridge.cjs"
+        },
+        {
+          "path": "main/software/capability-tools.ts",
+          "line": 50,
+          "value": "speech_bridge.cjs exports transcribeWav(APP_DATA_DIR下的PCM16 WAV绝对路径)，使用宿主绑定的BLOMA_SPEECH_PYTHON；支持signal和有界timeoutMs，不录音。"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 11,
+          "value": "main/templates/tools/speech_bridge.cjs"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 11,
+          "value": "speech_bridge.cjs"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 17,
+          "value": "require('./speech_bridge.cjs').transcribeWav('fixture-only').then(text=>console.log(text),e=>{console.error(e);process.exit(1)})"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 21,
+          "value": "(async()=>{const b=require('./speech_bridge.cjs'),errors=[];for(let i=0;i<3;i++)try{await b.transcribeWav('fixture-only')}catch(e){errors.push(e.message)}console.log(JSON.stringify(errors))})()"
+        },
+        {
+          "path": "tests/unit/software/speech-bridge.test.ts",
+          "line": 26,
+          "value": "(async()=>{const b=require('./speech_bridge.cjs'),a=new AbortController();const jobs=[b.transcribeWav('fixture-only',{signal:a.signal}),b.transcribeWav('fixture-only',{signal:a.signal}),b.transcribeWav('fixture-only')];setTimeout(()=>a.abor"
         }
       ]
     },
@@ -16017,13 +16434,225 @@
         },
         {
           "path": "scripts/audit-workflow-retirement.mjs",
-          "line": 146,
+          "line": 149,
           "value": "pending-confirmations"
         },
         {
           "path": "tests/unit/guide/confirmation-recovery.test.ts",
           "line": 144,
           "value": "pending-confirmations/archive"
+        }
+      ]
+    }
+  ],
+  "template_assets": [
+    {
+      "path": "main/templates/tools/speech_runtime.py",
+      "sha256": "26ceb5a348a74ddb2eabdc24e15af3541f0096563d63c2cfbbe9218fe3f6f024",
+      "references": [
+        {
+          "from": "main/desktop/component-library.ts",
+          "line": 109
+        },
+        {
+          "from": "main/desktop/core-verification.ts",
+          "line": 285
+        },
+        {
+          "from": "main/desktop/install-packages-tool.ts",
+          "line": 243
+        },
+        {
+          "from": "main/desktop/install-packages-tool.ts",
+          "line": 247
+        },
+        {
+          "from": "main/desktop/install-packages-tool.ts",
+          "line": 250
+        },
+        {
+          "from": "main/desktop/resource-discovery.ts",
+          "line": 46
+        },
+        {
+          "from": "main/desktop/speech-verification.ts",
+          "line": 43
+        },
+        {
+          "from": "main/software/capability-bindings.ts",
+          "line": 23
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "line": 16
+        },
+        {
+          "from": "scripts/audit-workflow-retirement.mjs",
+          "line": 46
+        },
+        {
+          "from": "scripts/audit-workflow-retirement.mjs",
+          "line": 48
+        },
+        {
+          "from": "scripts/audit-workflow-retirement.mjs",
+          "line": 49
+        },
+        {
+          "from": "tests/unit/desktop/dispatcher-prompt.test.ts",
+          "line": 45
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 179
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 180
+        },
+        {
+          "from": "tests/unit/desktop/speech-verification.test.ts",
+          "line": 17
+        },
+        {
+          "from": "tests/unit/desktop/speech-verification.test.ts",
+          "line": 30
+        },
+        {
+          "from": "tests/unit/desktop/speech-verification.test.ts",
+          "line": 37
+        },
+        {
+          "from": "tests/unit/desktop/speech-verification.test.ts",
+          "line": 55
+        },
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "line": 41
+        },
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "line": 43
+        },
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "line": 46
+        },
+        {
+          "from": "tests/unit/software/capability-tools.test.ts",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/speech_locator.py",
+      "sha256": "8e4bcf4381145b63a777e205b4e9392a6651659810f9c6bfab8b3955fd109745",
+      "references": [
+        {
+          "from": "main/desktop/install-packages-tool.ts",
+          "line": 233
+        },
+        {
+          "from": "main/desktop/install-packages-tool.ts",
+          "line": 237
+        },
+        {
+          "from": "main/desktop/install-packages-tool.ts",
+          "line": 240
+        },
+        {
+          "from": "main/desktop/resource-discovery.ts",
+          "line": 46
+        },
+        {
+          "from": "main/desktop/speech-verification.ts",
+          "line": 43
+        },
+        {
+          "from": "main/software/capability-bindings.ts",
+          "line": 23
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "line": 16
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 170
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 175
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 178
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 185
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 188
+        },
+        {
+          "from": "tests/unit/desktop/speech-verification.test.ts",
+          "line": 29
+        },
+        {
+          "from": "tests/unit/desktop/speech-verification.test.ts",
+          "line": 31
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/speech_worker.py",
+      "sha256": "32e45c67f521177ed466ad6da4dbbaa40e884442c3af7657d2bed8e29e0182a1",
+      "references": [
+        {
+          "from": "main/software/capability-bindings.ts",
+          "line": 23
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "line": 16
+        },
+        {
+          "from": "main/templates/tools/speech_bridge.cjs",
+          "line": 14
+        },
+        {
+          "from": "tests/unit/software/speech-bridge.test.ts",
+          "line": 16
+        },
+        {
+          "from": "tests/unit/software/speech-bridge.test.ts",
+          "line": 25
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/speech_probe.py",
+      "sha256": "c3fad7e3ddc2889d3dcebff071adb2a4315aba7d2b259df82ac635436749a93e",
+      "references": [
+        {
+          "from": "main/desktop/speech-verification.ts",
+          "line": 73
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/voice-golden.wav",
+      "sha256": "5e82536420f9b0573b486fa9ce9d33a319885b2e8ae36acb4aa16773c80f2c02",
+      "references": [
+        {
+          "from": "main/desktop/speech-verification.ts",
+          "line": 75
+        },
+        {
+          "from": "scripts/robustness-run-case.mjs",
+          "line": 36
         }
       ]
     }
@@ -16071,5 +16700,13 @@
       "expression": "import(pathToFileURL(process.env.SOFTWARE_CRASH_RUNTIME).href)"
     }
   ],
-  "zero_runtime_importers": []
+  "zero_runtime_importers": [
+    {
+      "path": "main/templates/tools/speech_bridge.cjs",
+      "group": "shared_capability_keep_migrate",
+      "type_importers": 0,
+      "test_importers": 0,
+      "module_load_reachable": false
+    }
+  ]
 }

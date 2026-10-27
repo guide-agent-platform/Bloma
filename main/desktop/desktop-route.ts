@@ -54,7 +54,7 @@ export async function defaultLaunchSmokeGate(projectId: string, signal?: AbortSi
   try {
     const project = findProject(projectId)
     if (!project?.root_path) return null
-    return await runLaunchSmoke(project.root_path, { signal })
+    return await runLaunchSmoke(project.root_path, { signal,projectId })
   } catch (error) {
     if (signal?.aborted) throw error
     console.error('[desktop-quick] 启动冒烟执行失败（跳过本次门禁，留痕）：', error)

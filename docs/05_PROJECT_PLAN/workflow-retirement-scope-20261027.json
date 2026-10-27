@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "groups": [
     {
       "id": "modern_workflow_keep",
@@ -35,7 +35,7 @@
       "id": "shared_capability_keep_migrate",
       "action": "retain_capabilities_migrate_interfaces_in_batch_B",
       "reason": "Resource discovery, runtime preparation and independent capability verification remain needed by current products.",
-      "paths": ["main/desktop/component-library.ts", "main/desktop/resource-discovery.ts", "main/desktop/install-packages-tool.ts", "main/desktop/skeleton-provision.ts", "main/desktop/process-driver.ts", "main/desktop/capability-verifiers.ts", "main/desktop/core-verification.ts", "main/desktop/core-verification-cache.ts", "main/desktop/launch-smoke.ts", "main/desktop/speech-verification.ts", "main/desktop/file-verification.ts", "main/desktop/llm-verification.ts", "main/desktop/gui-acceptance.ts", "main/desktop/gui-fixtures.ts", "main/desktop/verification-fingerprint.ts", "main/desktop/verification-receipts.ts", "main/desktop/production-context.ts", "main/desktop/delivery-state.ts", "main/desktop/contract-schema.ts", "main/model/requirement-capabilities.ts", "main/project/requirement-contract.ts", "main/software/runtime-manager.ts"]
+      "paths": ["main/desktop/component-library.ts", "main/desktop/resource-discovery.ts", "main/desktop/install-packages-tool.ts", "main/desktop/skeleton-provision.ts", "main/desktop/process-driver.ts", "main/desktop/capability-verifiers.ts", "main/desktop/core-verification.ts", "main/desktop/core-verification-cache.ts", "main/desktop/launch-smoke.ts", "main/desktop/speech-verification.ts", "main/desktop/file-verification.ts", "main/desktop/llm-verification.ts", "main/desktop/gui-acceptance.ts", "main/desktop/gui-fixtures.ts", "main/desktop/verification-fingerprint.ts", "main/desktop/verification-receipts.ts", "main/desktop/production-context.ts", "main/desktop/delivery-state.ts", "main/desktop/contract-schema.ts", "main/model/requirement-capabilities.ts", "main/project/requirement-contract.ts", "main/software/runtime-manager.ts", "main/software/capability-bindings.ts", "main/software/capability-resources.ts", "main/software/capability-tools.ts", "main/templates/tools/speech_bridge.cjs"]
     },
     {
       "id": "history_data_and_user_access_keep",
@@ -66,5 +66,6 @@
     {"id":"web_retirement_guard","path":"main/orchestration/stages/agent-dispatch.ts","needle":"if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage))","meaning":"Existing retired web-stage response is separate from desktop migration."}
   ],
   "symbols": ["isLeanProject", "isSoftwareProject", "readExperiment", "enterDesktopLine", "handleDesktopDispatchMessage", "runLeanProduction", "runDesktopDispatcherLoop", "buildDesktopChildTools", "productionAgentTools", "guardDispatcherCompletion", "getDesktopPhase", "runPrdPipeline", "restorePrdConfirmation", "restoreUxConfirmation", "buildResourceDiscoveryTool", "buildInstallPackagesTool", "provisionDesktopSkeletonV2", "runCoreVerification", "runCapabilityVerifiers", "holdForMvpConfirm", "confirmMvpDelivered"],
-  "asset_terms": ["speech_runtime.py", "speech_locator.py", "driver-skeleton.py", "contract.json", "PHASE_ADVANCE", "desktop-arch", "00_VERIFY/MVP", "pending-confirmations"]
+  "asset_terms": ["speech_runtime.py", "speech_locator.py", "speech_worker.py", "speech_bridge.cjs", "driver-skeleton.py", "contract.json", "PHASE_ADVANCE", "desktop-arch", "00_VERIFY/MVP", "pending-confirmations"],
+  "asset_files": ["main/templates/tools/speech_runtime.py", "main/templates/tools/speech_locator.py", "main/templates/tools/speech_worker.py", "main/templates/tools/speech_probe.py", "main/templates/tools/voice-golden.wav"]
 }

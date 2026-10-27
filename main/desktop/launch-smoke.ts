@@ -173,6 +173,7 @@ export interface LaunchSmokeResult {
 }
 
 export interface LaunchSmokeDeps {
+  projectId?:string
   /** Only the lean non-UI route can authorize a declared one-shot command. */
   allowCleanExit?: boolean
   signal?: AbortSignal
@@ -678,12 +679,12 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
   const declared = readLaunchDeclaration(rootPath)
   if (declared?.ok && declared.launch.schema_version === 2 && declared.launch.ui === 'browser') {
     const { runBrowserStartup } = await import('../software/startup')
-    return runBrowserStartup(rootPath, declared.launch, deps.signal)
+    return runBrowserStartup(rootPath, declared.launch, deps.signal,deps.projectId)
   }
   const dataRoot = mkdtempSync(join(tmpdir(), 'bloma-launch-data-'))
   const probeController = new AbortController()
   const signal = deps.signal ? AbortSignal.any([deps.signal, probeController.signal]) : probeController.signal
-  const env: Record<string, string> = { ...(declared?.ok && declared.launch.schema_version === 2 ? softwareEnvironment('launch-smoke', join(dataRoot, 'data'))
+  const env: Record<string, string> = { ...(declared?.ok && declared.launch.schema_version === 2 ? softwareEnvironment(deps.projectId??'launch-smoke', join(dataRoot, 'data'),rootPath)
     : buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'] } as never, process.env)),
     APP_DATA_DIR: join(dataRoot, 'data'), PYTHONDONTWRITEBYTECODE: '1' }
   if (declared?.ok && declared.launch.schema_version === 2) {

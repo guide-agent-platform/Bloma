@@ -5,6 +5,7 @@ import { getPromaHome } from '../../storage/config-paths'
 import { createRequire } from 'node:module'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand } from '../desktop/process-driver'
 import { managedRuntime, managedRuntimeDirectories } from './runtime-bindings'
+import { capabilityEnvironment } from './capability-bindings'
 
 /** Project execution policy, NOT an OS sandbox. Arguments are passed directly;
  * Windows package-manager shims are resolved to their Node entry, never cmd /c. */
@@ -41,14 +42,14 @@ function pathExecutable(name: string): string | undefined {
   return undefined
 }
 
-export function softwareEnvironment(projectId: string, dataDir?: string): Record<string, string> {
+export function softwareEnvironment(projectId: string, dataDir?: string, root?:string): Record<string, string> {
   if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error('ENVIRONMENT_PROJECT_ID_INVALID')
   const toolsHome = join(getPromaHome(), 'software-environments', projectId)
   const home = dataDir ? join(dirname(dataDir), 'environment-home') : toolsHome
   for (const directory of [home, join(home, 'appdata'), join(home, 'localappdata'), dataDir ?? join(home, 'test-data')]) mkdirSync(directory, { recursive: true })
   const clean = buildDriverEnv({ env_whitelist: [] } as never, process.env), directories = managedRuntimeDirectories(projectId)
   return { ...clean, ...(directories.length ? { PATH: [...directories, clean.PATH ?? clean.Path ?? ''].join(process.platform === 'win32' ? ';' : ':') } : {}),
-    BLOMA_RUNTIME_PROJECT: projectId,
+    BLOMA_RUNTIME_PROJECT: projectId, BLOMA_SPEECH_OFFLINE:'1', ...capabilityEnvironment(projectId,root),
     HOME: home, USERPROFILE: home, APPDATA: join(home, 'appdata'), LOCALAPPDATA: join(home, 'localappdata'),
     APP_DATA_DIR: dataDir ?? join(home, 'test-data'), BROWSER: 'none', CI: '1',
     npm_config_cache: join(toolsHome, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false',
@@ -117,7 +118,7 @@ export function bindSoftwareProfile(command:string[],environment:Record<string,s
 export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string; targetId?:string; evidenceDir: string; nativeTest?: { file: string; phase: string; trace: string } } }) {
   input.signal?.throwIfAborted()
   const cwd = projectDirectory(input.root, input.cwd)
-  const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir))
+  const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir,input.root))
   resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
   if (input.browserBinding) {
     const evidence = input.browserBinding.evidenceDir

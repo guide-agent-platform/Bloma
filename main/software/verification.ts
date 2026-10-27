@@ -24,6 +24,7 @@ import { verificationFailure, type VerificationFailure } from './verification-di
 import { independentDesignVersion } from './independent-design'
 import { independentAdapterVersion, verifyIndependentDesign } from './independent-verification'
 import { recordEvaluationEvent } from './harness-evaluation'
+import { capabilityBindingVersion } from './capability-bindings'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
   independent?:Awaited<ReturnType<typeof verifyIndependentDesign>>
@@ -42,7 +43,7 @@ async function inputs(projectId: string, requestId: string, signal?: AbortSignal
   const ruleVersion = [guiSuitePath(projectId), cliSuitePath(projectId)].map(file => existsSync(file) ? digest(readFileSync(file)) : null)
   const gui=existsSync(guiSuitePath(projectId))?parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId),'utf8'))):undefined
   const fixtureVersion = gui ? [...frozenGuiFixtureVersion(projectId,gui),frozenNativeGuiVersion(projectId,gui.native_tests,project.root_path)] : []
-  const environment = softwareEnvironment(projectId), resolved = resolveSoftwareCommand(project.root_path, launch.command, environment)
+  const environment = softwareEnvironment(projectId,undefined,project.root_path), resolved = resolveSoftwareCommand(project.root_path, launch.command, environment)
   const executable = resolved.command[0], runtime: unknown[] = []
   let reusable = isAbsolute(executable) && existsSync(executable) && !/python(?:3)?(?:\.exe)?$/i.test(basename(executable))
   if (isAbsolute(executable) && existsSync(executable)) runtime.push(await fileDigest(executable, signal))
@@ -63,7 +64,7 @@ async function inputs(projectId: string, requestId: string, signal?: AbortSignal
   }
   return { key: digest({ protocol: 1, hostId, source: (await runtimeInventory(project.root_path, signal)).digest, requestId, operation: project.lean_operation_id,
     scope: prdScopeFingerprint(brief), confirmed: brief.user_confirmed_at, ux: project.ux_confirmation, rules: ruleVersion, fixtures: fixtureVersion,
-    runtime, command: resolved.command, environment: resolved.env, managed: runtimeBindingVersion(projectId), independent:independentDesignVersion(projectId),adapter:independentAdapterVersion(project.root_path),implementation, platform: process.platform, arch: process.arch, node: process.versions.node }), reusable }
+    runtime, command: resolved.command, environment: resolved.env, managed: runtimeBindingVersion(projectId),capabilities:capabilityBindingVersion(projectId), independent:independentDesignVersion(projectId),adapter:independentAdapterVersion(project.root_path),implementation, platform: process.platform, arch: process.arch, node: process.versions.node }), reusable }
 }
 export async function recentSoftwareVerification(projectId: string, requestId: string, signal?: AbortSignal): Promise<SoftwareVerification | undefined> {
   const file = receiptPath(projectId); if (poisoned.has(file) || !existsSync(file)) return
@@ -117,7 +118,7 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     if(independent.status!=='disabled'&&independent.status!=='passed'){
       result.status=independent.status;result.summary=`独立设计的宿主执行未通过：${'error' in independent?independent.error??'实际断言失败':'缺少当前证据'}`;return result
     }
-    const launch = result.launch = await runLaunchSmoke(candidate.root, { signal, allowCleanExit: candidate.launch.mode === 'command' })
+    const launch = result.launch = await runLaunchSmoke(candidate.root, { signal, allowCleanExit: candidate.launch.mode === 'command',projectId })
     const brief = readPrdBackplane(projectId), windowReady = brief.lean_brief?.ui !== 'required'
       || candidate.launch.ui === 'browser' && launch.http_ready === true
       || launch.criteria && !launch.criteria.degraded && launch.criteria.window_found && launch.criteria.responsive && launch.criteria.stable && launch.criteria.closed_gracefully

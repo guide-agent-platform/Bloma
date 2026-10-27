@@ -139,7 +139,7 @@ export async function observeSoftwareGui(input: { projectId: string; root: strin
       if (input.launch.ui === 'electron') {
         const entry = electronEntry(input.root, input.launch.command)
         app = await _electron.launch({ ...entry, args: [...entry.args, `--user-data-dir=${userData}`], cwd: input.root,
-          env: softwareEnvironment(input.projectId, data), timeout: 20000 })
+          env: softwareEnvironment(input.projectId, data,input.root), timeout: 20000 })
         child = app.process()
         input.signal?.throwIfAborted()
         page = await app.firstWindow({ timeout: 15000 })
@@ -148,7 +148,7 @@ export async function observeSoftwareGui(input: { projectId: string; root: strin
           url: input.launch.url, dataDir: data, signal: input.signal, purpose: input.purpose })
         const installed = existsSync(chromium.executablePath())
         context = await chromium.launchPersistentContext(userData, { headless: true, ...(installed ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }),
-          env: softwareEnvironment(input.projectId, data), timeout: 20000 })
+          env: softwareEnvironment(input.projectId, data,input.root), timeout: 20000 })
         input.signal?.throwIfAborted()
         page = context.pages()[0] ?? await context.newPage()
         await page.goto(input.launch.url, { waitUntil: 'domcontentloaded', timeout: 15000 })

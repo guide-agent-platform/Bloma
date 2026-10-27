@@ -7,8 +7,8 @@ import { startSoftwareProcess, stopSoftwareSession } from './process-manager'
 
 /** Normal server entry, with separate isolated data. Business UI behavior is
  * already observed by the GUI verifier; HTTP readiness is not called a GUI PASS. */
-export async function runBrowserStartup(root: string, launch: LaunchDeclaration, signal?: AbortSignal): Promise<LaunchSmokeResult> {
-  const home = mkdtempSync(join(tmpdir(), 'bloma-browser-startup-')), owner = randomUUID(), projectId = `startup-${createHash('sha256').update(root).digest('hex').slice(0, 24)}`
+export async function runBrowserStartup(root: string, launch: LaunchDeclaration, signal?: AbortSignal, projectIdentity?:string): Promise<LaunchSmokeResult> {
+  const home = mkdtempSync(join(tmpdir(), 'bloma-browser-startup-')), owner = randomUUID(), projectId = projectIdentity??`startup-${createHash('sha256').update(root).digest('hex').slice(0, 24)}`
   try {
     if (!launch.url || launch.ui !== 'browser') throw new Error('BROWSER_LAUNCH_DECLARATION_REQUIRED')
     const result = await startSoftwareProcess({ root, projectId, sessionId: owner, command: launch.command, url: launch.url, signal, dataDir: join(home, 'data') })

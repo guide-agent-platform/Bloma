@@ -13,6 +13,10 @@ import wave
 from pathlib import Path
 import numpy as np
 
+# -I excludes the cwd and script directory. Only trusted host tooling is added
+# before real sherpa loads; product imports are introduced later in main().
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 def normalized(text):
     return re.sub(r"[\s，。,.!?！？]", "", text).replace("三点", "3点")

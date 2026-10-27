@@ -15,8 +15,16 @@ import { SPEECH_MODEL_MANIFEST, speechModelRoot, speechModelPaths } from '../../
 import { SpeechService, type SpeechWorkerProcess } from '../../../../main/platform/speech/speech-service'
 
 describe('model-manifest', () => {
-  it('缓存根在 ~/.proma/speech-models/sensevoice-int8（A/C 共用唯一路径）', () => {
-    expect(speechModelRoot().replace(/\\/g, '/')).toContain('.proma/speech-models/sensevoice-int8')
+  it('缓存根尊重隔离 PROMA_HOME 和显式绝对资源目录，拒绝随工作目录漂移的相对覆盖', () => {
+    const prior=process.env.BLOMA_SPEECH_MODEL_DIR
+    try{
+      delete process.env.BLOMA_SPEECH_MODEL_DIR
+      expect(speechModelRoot()).toBe(join(process.env.PROMA_HOME!, 'speech-models/sensevoice-int8'))
+      const explicit=join(tmpdir(),'explicit-speech-cache');process.env.BLOMA_SPEECH_MODEL_DIR=explicit
+      expect(speechModelRoot()).toBe(explicit)
+      process.env.BLOMA_SPEECH_MODEL_DIR='relative-cache'
+      expect(()=>speechModelRoot()).toThrow('ABSOLUTE_REQUIRED')
+    }finally{if(prior===undefined)delete process.env.BLOMA_SPEECH_MODEL_DIR;else process.env.BLOMA_SPEECH_MODEL_DIR=prior}
   })
   it('三件路径指向缓存根且文件名与资产清单一致', () => {
     const paths = speechModelPaths()

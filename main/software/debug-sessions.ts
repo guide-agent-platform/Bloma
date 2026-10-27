@@ -261,12 +261,12 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
         session.cdpEndpoint=await debugOrigin(input.signal)
         session.browser=await chromium.launchPersistentContext(join(workspace,'formal-profile'),{headless:true,acceptDownloads:true,
           args:['--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${new URL(session.cdpEndpoint).port}`],
-          ...(existsSync(chromium.executablePath())?{executablePath:chromium.executablePath()}:{channel:process.platform==='win32'?'msedge':'chrome'}),env:softwareEnvironment(input.projectId,session.data),timeout:20000})
+          ...(existsSync(chromium.executablePath())?{executablePath:chromium.executablePath()}:{channel:process.platform==='win32'?'msedge':'chrome'}),env:softwareEnvironment(input.projectId,session.data,input.root),timeout:20000})
         session.page=session.browser.pages()[0]??await session.browser.newPage();observePage(session,session.page)
       }else{
       session.browserServer = await chromium.launchServer({ headless: true,
         args: ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${new URL(session.cdpEndpoint = await debugOrigin(input.signal)).port}`],
-        ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }), env: softwareEnvironment(input.projectId, session.data), timeout: 20000 })
+        ...(existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }), env: softwareEnvironment(input.projectId, session.data,input.root), timeout: 20000 })
       session.child = session.browserServer.process()
       session.browserClient = await chromium.connectOverCDP(session.cdpEndpoint!, { isLocal: true, artifactsDir: join(session.data, 'browser-downloads') })
       const storage = join(workspace, 'browser-state.json')

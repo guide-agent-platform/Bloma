@@ -20,6 +20,11 @@ afterEach(() => { restorePromaHome(process.env.PROMA_HOME); rmSync(base, { recur
 const report = { probe_version: 1, status: 'passed', real_decode_calls: 3, tests: ['flat', 'column', 'stereo'].map(name => ({ name, passed: true })), microphone: { status: 'not_run' } }
 
 describe('host speech evidence', () => {
+  it('rejects an unsupported runtime declaration before a Python probe can impersonate it',async()=>{
+    let calls=0
+    const result=await runHostSpeechProbe({projectId:'p1',root,speech:{...speech,runtime:'node' as never},spawn:async()=>{calls++;return{code:0,stdout:JSON.stringify(report),stderr:''}}})
+    expect(result.status).toBe('environment_blocked');expect(result.error).toContain('ASR_RUNTIME_UNSUPPORTED');expect(calls).toBe(0)
+  })
   it('human acceptance stays separate and only reuses byte-identical speech components', () => {
     writeFileSync(join(root, 'speech_locator.py'), '# locator')
     const components = { 'speech_runtime.py': createHash('sha256').update('# product boundary').digest('hex'),

@@ -65,7 +65,7 @@ export function projectRuntimeRequest(root: string, kind: RuntimeKind): string |
   const project = join(root, 'pyproject.toml')
   return existsSync(project) ? readFileSync(project, 'utf8').match(/^requires-python\s*=\s*["']([^"']+)["']/m)?.[1] : undefined
 }
-function satisfies(version: string, request: string, kind: RuntimeKind) {
+export function satisfies(version: string, request: string, kind: RuntimeKind) {
   const range = kind === 'python' ? request.replaceAll(',', ' ').replaceAll('==', '').replaceAll('~=', '~').replaceAll('.*', '.x') : request
   return Boolean(semver.validRange(range) && semver.satisfies(version, range, { loose: true }))
 }
