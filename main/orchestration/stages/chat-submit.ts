@@ -8,6 +8,7 @@ import { categoryForStage } from '../../platform/llm/model-resolution'
 import { enqueueSteer, registerSteer, steerConfirmEnabled } from '../../agent/loop/steer-queue'
 import { runAgent } from './agent-dispatch'
 import { hasRunForProject, sessionMessageQueue } from './run-registry'
+import { trialFeedbackText } from '../../software/trial'
 
 /** Durable acceptance precedes dispatch. No model promise is part of the IPC receipt. */
 export function submitChat(input: ChatSubmitInput): SendReceipt {
@@ -28,7 +29,7 @@ export function submitChat(input: ChatSubmitInput): SendReceipt {
   const receipt = acceptMessage(input, queued, imageRefs, attachments.map(item => item.info))
   const dispatchInput = { ...input, request_id: input.client_message_id, images: imageRefs, run_generation: receipt.run_generation }
   if (queued && attachments.length === 0) {
-    const steer = { queueMessageId: input.client_message_id, content: input.content, enqueuedAt: Date.now() }
+    const steer = { queueMessageId: input.client_message_id, content: input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content) : input.content, enqueuedAt: Date.now() }
     const steered = steerConfirmEnabled() ? registerSteer(input.session_id, steer, input.project_id) : enqueueSteer(input.session_id, steer)
     if (steered) {
       updateReceipt(input.client_message_id, 'steered')

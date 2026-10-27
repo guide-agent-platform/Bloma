@@ -128,7 +128,7 @@ async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
   session.cdpEndpoint = origin
   const process = await startSoftwareProcess({ root: session.root, projectId: session.snapshot.projectId, sessionId: session.owner,
     command: [entry.executablePath, ...entry.args, `--user-data-dir=${join(session.workspace, 'profile')}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${new URL(origin).port}`],
-    url: `${origin}/json/version`, dataDir: session.data, signal, internal: true, visibleDesktop:true })
+    url: `${origin}/json/version`, dataDir: session.data, signal, internal: true, visibleDesktop:true, purpose: session.formal ? 'acceptance' : 'development' })
   session.ownedProcessId = process.id
   session.nativeRoot = process.pid
   const { chromium } = await import('playwright')
@@ -250,7 +250,7 @@ export async function openDebugSession(input: { projectId: string; sessionId: st
       input.processId ??= matchingOwnedSoftwarePreview(input.projectId, input.sessionId, input.root, input.launch.url)
       const service = input.processId ? ownedSoftwarePreview(input.projectId, input.sessionId, input.processId)
         : await startSoftwareProcess({ root: input.root, projectId: input.projectId, sessionId: session.owner, command: input.launch.command,
-          url: input.launch.url, dataDir: session.data, signal: input.signal })
+          url: input.launch.url, dataDir: session.data, signal: input.signal, purpose: input.formal ? 'acceptance' : 'development' })
       if (service.root !== resolve(input.root)) throw Error('DEBUG_PROCESS_ROOT_MISMATCH')
       if (!source || service.source !== source) throw Error('DEBUG_PROCESS_SOURCE_CHANGED: 已有服务不是当前源码版本；先stop_process后start_service，不能把旧后端绑定为新代码')
       if (!service.data_dir) throw Error('DEBUG_PROCESS_DATA_DIR_MISSING')

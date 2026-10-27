@@ -9,6 +9,7 @@ import { mainRootDir } from '../platform/paths'
 import { softwareVerificationFingerprint } from '../desktop/verification-fingerprint'
 
 export interface SoftwareProcessSnapshot {
+  purpose?: 'trial' | 'development' | 'acceptance' | 'user'
   source?: string
   data_dir?: string
   root?: string
@@ -71,7 +72,7 @@ export async function stopSoftwareProcess(projectId: string, id: string, session
   return softwareProcess(projectId, id, sessionId)
 }
 
-export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean; internal?: boolean; visibleDesktop?:boolean }): Promise<SoftwareProcessSnapshot> {
+export async function startSoftwareProcess(input: { root: string; projectId: string; sessionId: string; command: unknown; cwd?: string; url?: string; signal?: AbortSignal; dataDir?: string; readyMs?: number; independentUserApp?: boolean; internal?: boolean; visibleDesktop?:boolean; purpose?: SoftwareProcessSnapshot['purpose'] }): Promise<SoftwareProcessSnapshot> {
   input.signal?.throwIfAborted()
   const cwd = projectDirectory(input.root, input.cwd), url = input.url ? loopbackUrl(input.url) : undefined
   const commandKey = JSON.stringify([cwd, input.command, input.dataDir ?? null, Boolean(input.internal)])
@@ -91,9 +92,10 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
     probe.listen(Number(address.port || 80), address.hostname.replace(/^\[|\]$/g, ''), () => probe.close(() => resolve()))
   })
   const environment = softwareEnvironment(input.projectId, input.dataDir)
+  if (url && input.purpose === 'trial') { environment.PORT = new URL(url).port; environment.APP_PORT = new URL(url).port }
   const resolved = resolveSoftwareCommand(input.root, input.command, environment)
   resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
-  const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, root: projectDirectory(input.root), source, data_dir: environment.APP_DATA_DIR, ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
+  const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, purpose: input.purpose ?? (input.sessionId === 'user-launch' ? 'user' : 'development'), root: projectDirectory(input.root), source, data_dir: environment.APP_DATA_DIR, ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }
   // Save ownership before spawn. A failure cannot leave an untracked child.
   const file = pathFor(snapshot.id)
   writeJsonFile(file, snapshot)
@@ -140,7 +142,7 @@ export async function stopSoftwareSession(projectId: string, sessionId: string):
     .map(entry => stopSoftwareProcess(projectId, entry.snapshot.id, sessionId)))
 }
 export function activeSoftwarePreview(projectId: string, sessionId?: string): string | undefined {
-  return [...processes.values()].find(entry => entry.snapshot.projectId === projectId && !entry.snapshot.internal && entry.snapshot.sessionId !== 'user-launch'
+  return [...processes.values()].find(entry => entry.snapshot.projectId === projectId && !entry.snapshot.internal && !['trial','user'].includes(entry.snapshot.purpose ?? '') && entry.snapshot.sessionId !== 'user-launch'
     && (!sessionId || entry.snapshot.sessionId === sessionId) && entry.snapshot.state === 'running' && entry.snapshot.ready)?.snapshot.url
 }
 export function hasSoftwareSessionProcess(projectId: string, sessionId: string): boolean {
@@ -150,7 +152,7 @@ export function hasSoftwareSessionProcess(projectId: string, sessionId: string):
 /** Attachment requires the live owned handle, never a disk PID or a user app. */
 export function ownedSoftwarePreview(projectId: string, sessionId: string, id: string): SoftwareProcessSnapshot {
   const snapshot = softwareProcess(projectId, id, sessionId)
-  if (!processes.has(id) || snapshot.internal || snapshot.state !== 'running' || !snapshot.ready || !snapshot.url || sessionId === 'user-launch') throw Error('DEBUG_PROCESS_NOT_OWNED_AND_READY')
+  if (!processes.has(id) || snapshot.internal || ['trial','user'].includes(snapshot.purpose ?? '') || snapshot.state !== 'running' || !snapshot.ready || !snapshot.url || sessionId === 'user-launch') throw Error('DEBUG_PROCESS_NOT_OWNED_AND_READY')
   return snapshot
 }
 export function matchingOwnedSoftwarePreview(projectId: string, sessionId: string, root: string, url: string) {

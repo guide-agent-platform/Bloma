@@ -14,7 +14,7 @@ import { configure } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Provider, createStore } from 'jotai'
 import { DeliveryPanel } from '../../renderer/components/DeliveryPanel'
-import { currentProjectAtom } from '../../renderer/agent-atoms'
+import { currentProjectAtom, softwarePreviewsAtom, softwareTrialsAtom } from '../../renderer/agent-atoms'
 
 configure({ testIdAttribute: 'data-ai-id' })
 
@@ -25,6 +25,8 @@ interface PanelState {
     launch: { declared: boolean; parse_ok: boolean; parse_error?: string; command?: string[] }
     can_launch: boolean
     supports_point_selection?: boolean
+    can_trial?: boolean
+    trial?: import('../../shared/types').SoftwareTrial
   }
   launchResult?: { ok: boolean; data?: { started: boolean; pid?: number }; error?: { message?: string } }
 }
@@ -46,6 +48,20 @@ function renderPanel(stage: string): void {
 }
 
 describe('DeliveryPanel', () => {
+  it('keeps the independent trial visible when verification clears the debug preview and binds update requests to its version',async()=>{
+    const trial: import('../../shared/types').SoftwareTrial={release_id:'a'.repeat(64),source:'b'.repeat(64),process_id:'owned',state:'running',data_dir:'isolated',url:'http://127.0.0.1:33441',qualification:'unverified_test_data',at:new Date().toISOString()}
+    mockBloma({deliverables:{files:[],launch:{declared:true,parse_ok:true},can_launch:false,can_trial:true,trial}})
+    const store=createStore();store.set(currentProjectAtom,{project_id:'p1',current_stage:'generating_mvp',template_type:'desktop_tool'} as never)
+    store.set(softwarePreviewsAtom,{p1:'http://127.0.0.1:33442'})
+    render(<Provider store={store}><DeliveryPanel embedded /></Provider>)
+    const frame=await screen.findByTitle('独立程序试用（测试数据，尚未验收）')
+    expect(frame.getAttribute('src')).toBe(trial.url)
+    act(()=>store.set(softwarePreviewsAtom,{}))
+    expect(screen.getByTitle('独立程序试用（测试数据，尚未验收）')).toBe(frame)
+    expect(store.get(softwareTrialsAtom).p1.release_id).toBe(trial.release_id)
+    fireEvent.click(screen.getByTestId('software-trial-update'))
+    await waitFor(()=>expect(window.electronAPI!.projectDeliverables.launch).toHaveBeenCalledWith(expect.objectContaining({trial:true,restart:true,trial_version:trial.release_id})))
+  })
   it('keeps the newest launch declaration when an older refresh arrives late', async () => {
     let resolveOld!: (value: unknown) => void
     const old = new Promise(resolve => { resolveOld = resolve })

@@ -18,7 +18,7 @@ import { SettingsPage } from './SettingsPage'
 import '../styles/refined.css'
 import '../styles/workspace.css'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
-import { globalUserErrorAtom } from '../agent-atoms'
+import { globalUserErrorAtom, softwareTrialsAtom } from '../agent-atoms'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, AgentMessage, Project, PastedImageRef } from './atoms'
@@ -382,7 +382,7 @@ const AppRoutes: React.FC = () => {
       images,
       mode: mode ?? 'quick',
       current_stage: currentStage,
-      metadata: { source: 'chat' } as const,
+      metadata: { source: 'chat', observed_software_version: store.get(softwareTrialsAtom)[currentProject?.project_id ?? '']?.release_id } as const,
     }
     const settle = async (): Promise<void> => {
       // P0-1 steer（运行中转向，2026-09-08）：会话有前台/后台生成的流式事件（hasActiveStream）
@@ -424,7 +424,7 @@ const AppRoutes: React.FC = () => {
         request_id: crypto.randomUUID(), client_message_id: submission.client_message_id,
         project_id: target.project_id, session_id: target.session_id, draft_id: target.draft_id,
         content, attachment_refs: target.attachment_refs, mode: mode ?? 'quick', current_stage: currentStage,
-        metadata: { source: 'chat' },
+        metadata: { source: 'chat', observed_software_version: store.get(softwareTrialsAtom)[target.project_id]?.release_id },
       })
       if (!result.ok) throw new Error(result.error.message)
       const receipt = result.data

@@ -18,7 +18,8 @@ export function isCurrentReceiptGeneration(id: string, generation: number): bool
 }
 interface InboxRecord { input: ChatSubmitInput; fingerprint: string; receipt: SendReceipt; epoch: string; last_recovery_operation?: string; accepted_at?: number }
 function fingerprint(input: ChatSubmitInput): string {
-  const identity = { project_id: input.project_id, session_id: input.session_id, draft_id: input.draft_id, content: input.content, attachment_refs: input.attachment_refs }
+  const identity = { project_id: input.project_id, session_id: input.session_id, draft_id: input.draft_id, content: input.content, attachment_refs: input.attachment_refs,
+    ...(input.metadata?.observed_software_version ? {observed_software_version:input.metadata.observed_software_version} : {}) }
   return createHash('sha256').update(JSON.stringify(identity)).digest('hex')
 }
 export function existingReceipt(input: ChatSubmitInput): SendReceipt | undefined {

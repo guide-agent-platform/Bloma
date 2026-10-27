@@ -27,6 +27,8 @@ import { isSoftwareProject } from '../desktop/workflow-policy'
 import { launchSoftwareForUser } from '../software/user-launch'
 import { activeSoftwareRelease } from '../software/release-store'
 import { listSoftwareDataSnapshots, softwareFallbackReleaseId } from '../software/data-update'
+import { launchSoftwareTrial, softwareTrial, closeSoftwareTrial } from '../software/trial'
+import { readPrdBackplane } from '../project/prd-store'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -108,6 +110,10 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
         result.launch = { declared: true, parse_ok: false, parse_error: declaration.error }
       }
       result.can_launch = (project.current_stage === 'completed' || Boolean(stable)) && result.launch.parse_ok
+      if (isSoftwareProject(project.project_id)) {
+        result.trial = softwareTrial(project.project_id)
+        result.can_trial = Boolean(readPrdBackplane(project.project_id).user_confirmed_at && readLaunchDeclaration(project.root_path)?.ok)
+      }
       return result
     })
   })
@@ -116,6 +122,11 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectLaunchAppInput>(payload, ['project_id'])
       const project = findProject(input.project_id)
+      if (input.trial === true) {
+        if (!isSoftwareProject(project.project_id) || input.restore_snapshot || input.previous_release) throw Error('TRIAL_INPUT_INVALID')
+        if (input.stop_trial === true) return closeSoftwareTrial(project.project_id, input.trial_version)
+        return launchSoftwareTrial(project.project_id, input.trial_version, input.restart === true)
+      }
       const stable = isSoftwareProject(input.project_id) ? await activeSoftwareRelease(input.project_id, undefined, false) : undefined
       if (project.current_stage !== 'completed' && !stable) {
         throw new Error('LAUNCH_NOT_DELIVERED: 项目尚未完成交付，不能启动')

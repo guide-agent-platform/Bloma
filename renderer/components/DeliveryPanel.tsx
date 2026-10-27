@@ -1,11 +1,11 @@
 import React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { RotateCw, LayoutTemplate, Play } from './icons'
 import { Markdown } from './Markdown'
 import { CorrectionPanel } from './CorrectionPanel'
 import { ProgramScreenshot } from './ProgramScreenshot'
 import { SketchViewport } from './SketchViewport'
-import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom, softwarePreviewsAtom } from '../agent-atoms'
+import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom, softwarePreviewsAtom, softwareTrialsAtom } from '../agent-atoms'
 import type { ProjectDeliverablesResult } from '../../shared/types'
 
 /**
@@ -28,6 +28,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
   const correctionSession = useAtomValue(correctionSessionAtom)
   const projectId = project?.project_id
   const liveUrl = useAtomValue(softwarePreviewsAtom)[projectId ?? '']
+  const setTrials = useSetAtom(softwareTrialsAtom)
   // 自动刷新信号：桌面阶段推进（stage_changed 回填后变化）或产物变更（version+1）
   const desktopPhase = useAtomValue(desktopPhaseAtom)
   const artifactsVersion = useAtomValue(desktopArtifactsAtom).version
@@ -53,7 +54,10 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     setLoading(true)
     try {
       const result = await api.get({ request_id: crypto.randomUUID(), project_id: projectId })
-      if (currentProjectId.current === projectId && sequence === refreshSequence.current) setData(result.ok ? result.data : undefined)
+      if (currentProjectId.current === projectId && sequence === refreshSequence.current) {
+        setData(result.ok ? result.data : undefined)
+        if (result.ok) setTrials(previous => { const next = { ...previous }; if (result.data.trial?.state === 'running') next[projectId] = result.data.trial; else delete next[projectId]; return next })
+      }
     } catch {
       if (currentProjectId.current === projectId && sequence === refreshSequence.current) setData(undefined)
     } finally {
@@ -67,7 +71,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
   }, [refresh, desktopPhase, artifactsVersion, project?.current_stage])
 
-  const onLaunch = async (restart = false, snapshot?: string, previous = false): Promise<void> => {
+  const onLaunch = async (restart = false, snapshot?: string, previous = false, trial = false): Promise<void> => {
     if (!projectId) return
     setLaunchState('启动中…')
     const api = window.electronAPI?.projectDeliverables
@@ -76,9 +80,14 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       return
     }
     let result
-    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId, ...(restart ? { restart: true } : {}), ...(snapshot ? { restore_snapshot: snapshot, restore_data_confirmed: true } : {}), ...(previous ? { previous_release: true } : {}) }) }
+    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId, ...(restart ? { restart: true } : {}), ...(snapshot ? { restore_snapshot: snapshot, restore_data_confirmed: true } : {}), ...(previous ? { previous_release: true } : {}), ...(trial ? { trial: true, trial_version: data?.trial?.release_id } : {}) }) }
     catch { if (currentProjectId.current === projectId) setLaunchState('启动失败：请重试，或告诉向导你遇到的问题'); return }
     if (currentProjectId.current !== projectId) return
+    if (result.ok && result.data.trial?.state === 'running') {
+      const current = result.data.trial
+      setData(previous => previous ? { ...previous, trial: current } : previous)
+      setTrials(previous => ({...previous, [projectId]: current}))
+    }
     setConfirmRestore(false); void refresh()
     if (result.ok && result.data.started) {
       setNeedsRestart(false)
@@ -88,6 +97,15 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       setRestartPrevious(previous)
       setLaunchState(result.ok && result.data.detail ? result.data.detail : `启动失败：${result.ok ? '进程未能存活' : result.error?.user_visible_message || result.error?.message || '未知错误'}`)
     }
+  }
+  const onCloseTrial = async () => {
+    if (!projectId || !data?.trial) return
+    const api = window.electronAPI?.projectDeliverables
+    if (!api) return
+    const result = await api.launch({request_id:crypto.randomUUID(),project_id:projectId,trial:true,stop_trial:true,trial_version:data.trial.release_id})
+    if (currentProjectId.current !== projectId) return
+    setLaunchState(result.ok ? result.data.detail ?? '试用已关闭' : result.error.message)
+    void refresh()
   }
 
   return (
@@ -162,11 +180,18 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
         </>}
       </div>}
 
-      {embedded && liveUrl && <iframe title="实际程序试用" src={liveUrl} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" style={{ flex: 1, width: '100%', minHeight: 360, border: 0 }} />}
-      {embedded && !liveUrl && project?.current_stage !== 'completed' && data?.confirmed_sketch_url && <div className="delivery-confirmed-sketch"><SketchViewport src={data.confirmed_sketch_url} readOnly /></div>}
-      <div className="theatre-delivery-body" data-has-sketch={Boolean(embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url)} style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
-        <ProgramScreenshot />
-        {!loading && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
+      {(data?.can_trial || data?.trial) && <div className="theatre-launch-row software-trial-controls" style={{padding: '8px 14px', display:'flex', gap:8, flexWrap:'wrap'}}>
+        <button type="button" data-ai-id="software-trial-launch" disabled={loading || !data?.can_trial} onClick={() => void onLaunch(false, undefined, false, true)}>打开独立试用</button>
+        {data.trial?.state === 'running' && <button type="button" data-ai-id="software-trial-update" disabled={loading} onClick={() => void onLaunch(true, undefined, false, true)}>已保存，切换到当前代码试用</button>}
+        {data.trial?.state === 'running' && <button type="button" disabled={loading} onClick={() => void onCloseTrial()}>关闭试用</button>}
+        <span>测试数据 · 尚未验收 · 自动验收期间可继续使用{data.trial ? ` · 版本 ${data.trial.release_id.slice(0,12)}` : ''}</span>
+      </div>}
+      {embedded && data?.trial?.state === 'running' && data.trial.url && <iframe key={data.trial.release_id} title="独立程序试用（测试数据，尚未验收）" src={data.trial.url} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" style={{ flex: 1, width: '100%', minHeight: 360, border: 0 }} />}
+      {embedded && data?.trial?.state !== 'running' && liveUrl && <><span>开发调试画面 · 可能随调试关闭</span><iframe title="开发调试画面" src={liveUrl} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" style={{ flex: 1, width: '100%', minHeight: 360, border: 0 }} /></>}
+      {embedded && !liveUrl && data?.trial?.state !== 'running' && project?.current_stage !== 'completed' && data?.confirmed_sketch_url && <div className="delivery-confirmed-sketch"><SketchViewport src={data.confirmed_sketch_url} readOnly /></div>}
+      <div className="theatre-delivery-body" data-has-sketch={Boolean(embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url)} style={{ flex: data?.trial?.state === 'running' ? '0 0 auto' : 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
+        {data?.trial?.state !== 'running' && <ProgramScreenshot />}
+        {!loading && !liveUrl && data?.trial?.state !== 'running' && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
         {/* 点选纠错（批11 MVP-E，2026-10-08）：入口/会话视图内嵌交付面板；completed 项目
             可用（主进程校验，旧骨架产物返回 unsupported 如实置灰提示） */}
         {project?.current_stage === 'completed' && (

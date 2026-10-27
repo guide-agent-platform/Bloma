@@ -435,6 +435,8 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface ProjectDeliverablesResult {
+  trial?: SoftwareTrial
+  can_trial?: boolean
   data_snapshots?: Array<{ id: string; at: string; schema: string }>
   stable_release?: string
   can_use_previous_release?: boolean
@@ -465,10 +467,18 @@ export interface ProjectLaunchAppInput extends RequestEnvelope {
   restore_snapshot?: string
   restore_data_confirmed?: boolean
   previous_release?: boolean
+  trial?: boolean
+  trial_version?: string
+  stop_trial?: boolean
+}
+export interface SoftwareTrial {
+  release_id: string; source: string; process_id: string; pid?: number; state: string; data_dir: string; url?: string
+  qualification: 'unverified_test_data'; at: string
 }
 
 /** 启动程序结果。 */
 export interface ProjectLaunchAppResult {
+  trial?: SoftwareTrial
   started: boolean
   needs_restart?: boolean
   url?: string
@@ -914,6 +924,7 @@ export interface AgentSendMessageInput extends RequestEnvelope {
     selected_option_id?: string
     /** Optional lean-scope suggestions; ids are resolved against the saved candidate. */
     selected_suggestion_ids?: string[]
+    observed_software_version?: string
     /** PRD 确认卡 confirm 时勾选采纳的市调想法（2026-08-29 灵感参考，四段式卡同样可采纳） */
     adopted_ideas?: string[]
     /** 裁判审查逐题选择题的答案（2026-08-30）：弹窗一次性回传，每题 issue_id/option_id/label */

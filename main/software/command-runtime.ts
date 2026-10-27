@@ -108,9 +108,10 @@ export function resolveSoftwareCommand(root: string, value: unknown, environment
 /** Bind Chromium's profile at execution time, not in the immutable launch
  * declaration. The same app uses isolated test profiles and durable user data. */
 export function bindSoftwareProfile(command:string[],environment:Record<string,string>):string[]{
-  if(!/^electron(?:\.exe)?$/i.test(basename(command[0]))||!environment.APP_DATA_DIR||command.some(arg=>arg==='--user-data-dir'||arg.startsWith('--user-data-dir=')))return command
+  if(!/^electron(?:\.exe)?$/i.test(basename(command[0]))||!environment.APP_DATA_DIR)return command
   const profile=join(environment.APP_DATA_DIR,'electron-profile');mkdirSync(profile,{recursive:true})
-  return[...command,`--user-data-dir=${profile}`]
+  const clean = command.filter((arg, index) => arg !== '--user-data-dir' && !arg.startsWith('--user-data-dir=') && command[index - 1] !== '--user-data-dir')
+  return[...clean,`--user-data-dir=${profile}`]
 }
 
 export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string; targetId?:string; evidenceDir: string; nativeTest?: { file: string; phase: string; trace: string } } }) {

@@ -52,10 +52,10 @@ export async function runNativeGuiTests(input: {
         // Reports and synthetic data remain inspectable; don't retain a large
         // Chromium profile for every finished formal test run. These are owned
         // isolated test directories, never a user's daily browser profile.
-        for(const name of ['formal-profile','profile','environment-home']){
+        for(const name of ['formal-profile','profile','environment-home','data/electron-profile']){
           const target=join(workspace,name)
           if(!existsSync(target))continue
-          if(lstatSync(target).isSymbolicLink()||relative(realpathSync(workspace),realpathSync(target))!==name)throw Error('GUI_NATIVE_CLEANUP_PATH_INVALID')
+          if(lstatSync(target).isSymbolicLink()||relative(realpathSync(workspace),realpathSync(target)).replaceAll('\\','/')!==name)throw Error('GUI_NATIVE_CLEANUP_PATH_INVALID')
           try{rmSync(target,{recursive:true,force:true,maxRetries:3,retryDelay:100})}catch{console.warn('Native test profile cleanup deferred; isolated diagnostic workspace retained')}
         }
     }

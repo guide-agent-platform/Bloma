@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,11 +16,20 @@ vi.mock('../../main/agent/loop/steer-queue', () => ({ enqueueSteer: steer, regis
 const input = (): ChatSubmitInput => ({ request_id: 'request', client_message_id: 'client', project_id: 'p', session_id: 's', draft_id: 'draft', attachment_refs: [], content: 'hello', mode: 'quick', current_stage: 'clarifying' })
 beforeEach(() => {
   vi.stubEnv('PROMA_HOME', mkdtempSync(join(tmpdir(), 'bloma-submit-')))
-  run.mockReset(); busy.mockReturnValue(false); channel.mockReturnValue({ env: { MODEL: 'test' } }); steer.mockReturnValue(false)
+  run.mockReset(); busy.mockReturnValue(false); channel.mockReturnValue({ env: { MODEL: 'test' } }); steer.mockReset().mockReturnValue(false)
   run.mockReturnValue(new Promise(() => {}))
 })
 afterEach(() => vi.unstubAllEnvs())
 describe('quick chat acceptance', () => {
+  it('binds steered trial feedback and retry identity to the version the user saw',()=>{
+    const version='a'.repeat(64),directory=join(process.env.PROMA_HOME!,'software-trials','p');mkdirSync(directory,{recursive:true})
+    writeFileSync(join(directory,version+'.json'),JSON.stringify({release_id:version,qualification:'unverified_test_data'}))
+    busy.mockReturnValue(true);steer.mockReturnValue(true)
+    const message={...input(),metadata:{source:'chat' as const,observed_software_version:version}}
+    expect(submitChat(message).status).toBe('steered')
+    expect(steer).toHaveBeenCalledWith('s',expect.objectContaining({content:expect.stringContaining(version)}))
+    expect(()=>submitChat({...message,metadata:{...message.metadata,observed_software_version:'b'.repeat(64)}})).toThrow('MESSAGE_ID_CONFLICT')
+  })
   it('returns before the unresolved model run and duplicate retries do not dispatch twice', () => {
     expect(submitChat(input()).status).toBe('accepted')
     expect(readReceipt('client', 's')?.status).toBe('accepted')

@@ -153,3 +153,8 @@
   .workspace-theatre:not([data-focused="true"])[data-view="preview"] .theatre-conversation { display: flex; }
 }
 @media(prefers-reduced-motion:reduce) { .workspace-progress-line::after { animation: none !important; } }
+.software-trial-controls { align-items: center; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.software-trial-controls button { border: 1px solid var(--color-border); border-radius: 8px; padding: 6px 10px; background: var(--color-surface); color: var(--color-text); font: inherit; cursor: pointer; }
+.software-trial-controls button:hover { background: var(--color-surface-muted); }
+.software-trial-controls button:disabled { opacity: .5; cursor: default; }
+.software-trial-controls span { flex-basis: 100%; line-height: 1.5; }

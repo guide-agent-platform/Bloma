@@ -1017,6 +1017,8 @@ export const stageIndicatorLabelAtom = atom<string>('选择模式')
 export const previewUrlsAtom = atom<Record<string, { url: string; reviewUrl?: string; updatedAt: number }>>({})
 /** Host-owned live application URLs; never treated as a confirmed design or delivery receipt. */
 export const softwarePreviewsAtom = atom<Record<string, string>>({})
+/** User trials are versioned independently of transient Agent debug URLs. */
+export const softwareTrialsAtom = atom<Record<string, import('../shared/types').SoftwareTrial>>({})
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)

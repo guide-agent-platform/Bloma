@@ -268,6 +268,7 @@ export async function enterDesktopLine(
 
 /** 路由输入面（orchestration 层从 AgentSendMessageInput 抽取）。 */
 export interface DesktopRouteInput {
+  observedSoftwareVersion?: string
   images?: import('../../shared/types').PastedImageRef[]
   initialMessagePersisted?: boolean
   projectId: string

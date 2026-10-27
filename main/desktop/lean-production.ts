@@ -39,6 +39,7 @@ import { verifySoftwareCandidate, recentSoftwareVerification } from '../software
 import { importedProjectContext } from '../software/import-project'
 import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type SoftwareRunStatus } from '../software/run-state'
 import { monetaryStopMessage, monetaryInputBlocked } from '../platform/llm/monetary-budget'
+import { trialFeedbackText } from '../software/trial'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -202,7 +203,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     childToolsBuilder: (id, role, format) => collaboration ? buildSoftwareAgentTools(id, role, collaboration) : buildDesktopChildTools(id, role, format) })
   const cancelChildren = () => { stopDelegations(input.sessionId) }
   runSignal.addEventListener('abort', cancelChildren, { once: true })
-  let task = input.content
+  let task = input.observedSoftwareVersion ? trialFeedbackText(input.projectId, input.observedSoftwareVersion, input.content) : input.content
   let initial = true
   try {
     for (;;) {

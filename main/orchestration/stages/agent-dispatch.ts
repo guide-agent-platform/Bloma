@@ -45,6 +45,7 @@ import { HISTORY_WINDOW_TURNS, loadConversationHistory, shouldUseGuideAgent } fr
 import { maybeRenameUnnamedProject } from '../../project/project-service'
 import { isCurrentReceiptGeneration, updateReceipt } from '../../platform/attachments/send-inbox'
 import { sessionMaterials } from '../../platform/attachments/material-context'
+import { trialFeedbackText } from '../../software/trial'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
   // 项目自动命名（2026-10-05 用户反馈修复）：「模式选择→建项目」路径无 initial_message
@@ -85,6 +86,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   let receiptOutcome: 'completed' | 'failed' | 'cancelled' = 'completed'
 
   try {
+    const observedContent = input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content) : input.content
     updateReceipt(input.client_message_id, 'running', undefined, input.run_generation)
     // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
     // 前移到渠道解析之前——类别路由（§6.4）需要按阶段选文档类别。
@@ -154,10 +156,10 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       // clipboard-paste P1（2026-08-29）：带图消息落 [text, ...image 短引用] 块数组（JSONL 无 base64）
       content: input.images?.length
         ? [
-            { type: 'text', text: input.content },
+            { type: 'text', text: observedContent },
             ...input.images.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
           ]
-        : [{ type: 'text', text: input.content }],
+        : [{ type: 'text', text: observedContent }],
       timestamp: Date.now(),
     })
     // 维护会话索引并回填 Project.last_session_id，支撑历史对话回访恢复
@@ -225,6 +227,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           sessionId: input.session_id,
           requestId: input.request_id,
           content: input.content,
+          observedSoftwareVersion: input.metadata?.observed_software_version,
           images: input.images,
           initialMessagePersisted: Boolean(input.client_message_id),
           cardOptionId: input.metadata?.source === 'card_option' ? input.metadata.selected_option_id : undefined,
