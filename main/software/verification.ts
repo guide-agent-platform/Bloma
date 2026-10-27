@@ -20,9 +20,10 @@ import { softwareEnvironment, resolveSoftwareCommand } from './command-runtime'
 import { runtimeBindingVersion } from './runtime-bindings'
 import { fileDigest, prepareSoftwareRelease, readSoftwareCandidate, runtimeInventory, verifyReleaseSource, type SoftwareRelease } from './release-store'
 import { frozenNativeGuiVersion } from './native-gui-tests'
+import { verificationFailure, type VerificationFailure } from './verification-diagnostics'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
-  core?: CoreVerificationResult; security?: SecurityScanResult; launch?: LaunchSmokeResult | null; reused?: boolean; report_path?: string }
+  core?: CoreVerificationResult; security?: SecurityScanResult; launch?: LaunchSmokeResult | null; reused?: boolean; report_path?: string; failure?: VerificationFailure }
 interface Receipt { version: 1; state: 'running' | 'complete'; key: string; at: number; result?: SoftwareVerification; result_hash?: string; reusable?: boolean }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const hostId = randomUUID(), poisoned = new Set<string>()
@@ -117,10 +118,11 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     result.status = localPending ? 'environment_blocked' : 'passed'; result.summary = localPending ? core.distribution!.detail : '当前候选的实际行为、安全静态检查与正常启动通过；结束制作即可由宿主收口。'
     return result
   } catch (error) {
-    signal?.throwIfAborted(); result.status = 'unverified'; result.summary = error instanceof Error ? error.message : String(error); return result
+    signal?.throwIfAborted(); result.status = 'unverified'; result.summary = error instanceof Error ? error.message : String(error); result.failure = verificationFailure(result, error); return result
   } finally {
     active.delete(file)
     if (signal?.aborted) { result.status = 'unverified'; result.summary = '验证已取消，当前通过凭据未生效。' }
+    result.failure ??= verificationFailure(result)
     // Even cancellation/write failure invalidates an older PASS. No result may
     // outlive changed rule, fixture, environment, binary or source inputs.
     const reusable = Boolean(version?.reusable && result.status === 'passed' && !result.security?.issues.some(issue => issue.category === 'external_resource'))

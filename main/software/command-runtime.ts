@@ -113,12 +113,18 @@ export function bindSoftwareProfile(command:string[],environment:Record<string,s
   return[...command,`--user-data-dir=${profile}`]
 }
 
-export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string; targetId?:string; nativeTest?: { file: string; phase: string; trace: string } } }) {
+export async function executeSoftwareCommand(input: { root: string; projectId: string; command: unknown; cwd?: string; timeoutMs?: number; signal?: AbortSignal; dataDir?: string; browserBinding?: { endpoint: string; page: string; targetId?:string; evidenceDir: string; nativeTest?: { file: string; phase: string; trace: string } } }) {
   input.signal?.throwIfAborted()
   const cwd = projectDirectory(input.root, input.cwd)
   const resolved = resolveSoftwareCommand(input.root, input.command, softwareEnvironment(input.projectId, input.dataDir))
   resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
   if (input.browserBinding) {
+    const evidence = input.browserBinding.evidenceDir
+    if (!isAbsolute(evidence)) throw Error('EVIDENCE_DIRECTORY_REQUIRED')
+    mkdirSync(evidence, { recursive: true })
+    const rel = relative(realpathSync(input.root), realpathSync(evidence))
+    if (!rel || !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)) throw Error('EVIDENCE_DIRECTORY_INSIDE_PROJECT')
+    resolved.env.BLOMA_EVIDENCE_DIR = realpathSync(evidence)
     const endpoint = new URL(input.browserBinding.endpoint)
     if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') throw Error('BROWSER_SCRIPT_OWNED_ENDPOINT_REQUIRED')
     resolved.env.BLOMA_DEBUG_CDP = endpoint.href

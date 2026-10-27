@@ -1,7 +1,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+vi.mock('../../../storage/json-store', async original => {
+  const actual = await original<typeof import('../../../storage/json-store')>()
+  return { ...actual, writeTextFileAtomic: vi.fn(actual.writeTextFileAtomic) }
+})
+import { writeTextFileAtomic } from '../../../storage/json-store'
 import { createProject, findProject } from '../../../main/project/project-service'
 import { parseLeanBrief } from '../../../main/guide/lean-brief'
 import { readPrdBackplane, markPrdUserConfirmed } from '../../../main/project/prd-store'
@@ -21,6 +26,24 @@ let home: string, old: string | undefined, project: ReturnType<typeof createProj
 beforeEach(() => { old = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-verify-action-')); process.env.PROMA_HOME = home;
   project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' }) })
 afterEach(() => { if (old === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = old; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
+it('invalidates old PASS on cancellation, corrupted receipts and receipt write failure', async () => {
+  await setup()
+  expect((await verifySoftwareCandidate(project.project_id, 'r')).status).toBe('passed')
+  const file = join(home, 'software-verification', project.project_id+'.json'), bytes = readFileSync(file, 'utf8')
+  writeFileSync(file, bytes.replace('"result_hash":"', '"result_hash":"bad'))
+  expect(await recentSoftwareVerification(project.project_id, 'r')).toBeUndefined()
+  writeFileSync(file, bytes)
+  const controller = new AbortController(); controller.abort()
+  await expect(verifySoftwareCandidate(project.project_id, 'r', controller.signal, true)).rejects.toThrow()
+  expect(await recentSoftwareVerification(project.project_id, 'r')).toBeUndefined()
+  writeFileSync(file, bytes)
+  const actual = await vi.importActual<typeof import('../../../storage/json-store')>('../../../storage/json-store')
+  vi.mocked(writeTextFileAtomic).mockImplementation((...args) => { if (args[0] === file) throw Error('fixture disk full'); actual.writeTextFileAtomic(...args) })
+  try { await expect(verifySoftwareCandidate(project.project_id, 'r', undefined, true)).rejects.toThrow('fixture disk full') }
+  finally { vi.mocked(writeTextFileAtomic).mockImplementation(actual.writeTextFileAtomic) }
+  expect(readFileSync(file, 'utf8')).toBe(bytes)
+  expect(await recentSoftwareVerification(project.project_id, 'r')).toBeUndefined()
+}, 60000)
 const ctx = () => ({ projectId: project.project_id, sessionId: 's', requestId: 'r', signal: AbortSignal.timeout(90000), state: createToolState() })
 async function setup() {
   const parsed = parseLeanBrief(JSON.stringify({ action: 'brief', goal: '输出5', ui: 'none', delivery: 'command', requirements: [{ description: '输出5', expected: '输出5' }] }),

@@ -124,7 +124,7 @@ export async function observeGuiStep(page: Page, step: GuiAcceptanceSuite['steps
 export async function observeSoftwareGui(input: { projectId: string; root: string; launch: LaunchDeclaration; suite: GuiAcceptanceSuite; temporary: string; signal?: AbortSignal; screenshotDir?: string }): Promise<Pick<GuiAcceptanceResult, 'status' | 'steps' | 'error'>> {
   const { _electron, chromium } = await import('playwright')
   const result: Pick<GuiAcceptanceResult, 'status' | 'steps' | 'error'> = { status: 'unverified', steps: [] }
-  const data = join(input.temporary, 'data'), userData = join(input.temporary, 'user-data'), screenshotDir = input.screenshotDir ?? join(input.root, '00_VERIFY/screenshots')
+  const data = join(input.temporary, 'data'), userData = join(input.temporary, 'user-data'), screenshotDir = input.screenshotDir ?? join(input.temporary, 'evidence')
   mkdirSync(screenshotDir, { recursive: true })
   const owner = `host-gui-${Date.now()}-${Math.random().toString(36).slice(2)}`
   for (const [index, steps] of splitSteps(input.suite).entries()) {

@@ -149,15 +149,17 @@ export function freezeNativeGuiTests(projectId: string, root: string, script: st
                 aliases(parsed);
                 // Only pure locator values are replaceable. Calls or assignments hidden
                 // inside a selector argument must remain part of the frozen logic.
-                const pure = (n: ts.Node): boolean => ts.isStringLiteralLike(n) || ts.isNumericLiteral(n) || ts.isRegularExpressionLiteral(n) || ts.isIdentifier(n)
+                const pure = (n: ts.Node): boolean => ts.isStringLiteralLike(n) || ts.isNumericLiteral(n) || ts.isRegularExpressionLiteral(n)
                     || [ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(n.kind)
-                    || ts.isPropertyAccessExpression(n) && pure(n.expression)
-                    || ts.isElementAccessExpression(n) && pure(n.expression) && Boolean(n.argumentExpression && pure(n.argumentExpression))
-                    || ts.isTemplateExpression(n) && n.templateSpans.every(span => pure(span.expression))
                     || ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken && pure(n.left) && pure(n.right)
-                    || ts.isObjectLiteralExpression(n) && n.properties.every(p => ts.isPropertyAssignment(p) && pure(p.initializer) || ts.isShorthandPropertyAssignment(p))
+                    || ts.isObjectLiteralExpression(n) && n.properties.every(p => ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name) && pure(p.initializer))
                     || ts.isArrayLiteralExpression(n) && n.elements.every(pure)
-                    || ts.isCallExpression(n) && n.arguments.every(pure) && (locator(n) || ts.isPropertyAccessExpression(n.expression) && n.expression.expression.getText(parsed) === 'JSON' && n.expression.name.text === 'stringify');
+                    || ts.isCallExpression(n) && n.arguments.every(pure) && locator(n);
+                const waitOptions = (n: ts.Node): boolean => ts.isObjectLiteralExpression(n) && n.properties.every(p =>
+                    ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name) && ['timeout', 'waitUntil'].includes(p.name.getText(parsed).replace(/['"]/g, ''))
+                    && (p.name.getText(parsed).replace(/['"]/g, '') === 'timeout'
+                        ? ts.isNumericLiteral(p.initializer) && Number(p.initializer.text) >= 100 && Number(p.initializer.text) <= 30000
+                        : ts.isStringLiteral(p.initializer) && ['load', 'domcontentloaded', 'networkidle', 'commit'].includes(p.initializer.text)));
                 const normalize = (node: ts.Node, removeCases = false) => {
                     const transformed = ts.transform(node, [context => {
                             const visit: ts.Visitor = n => {
@@ -172,6 +174,15 @@ export function freezeNativeGuiTests(projectId: string, root: string, script: st
                             return ts.factory.updateCallExpression(n,n.expression.expression,n.typeArguments,n.arguments.map(arg=>ts.visitNode(arg,visit) as ts.Expression))
                                 if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && locatorMethods.has(n.expression.name.text) && locator(n.expression.expression) && n.arguments.every(pure))
                                     return ts.factory.updateCallExpression(n, ts.visitNode(n.expression, visit) as ts.Expression, n.typeArguments, [ts.factory.createStringLiteral('[locator]')]);
+                                // Navigation destinations and wait states remain semantic;
+                                // only literal timing/readiness options may be adapted.
+                                if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.expression.getText(parsed) === 'page'
+                                    && ['goto', 'waitForLoadState'].includes(n.expression.name.text) && n.arguments.length === 2 && waitOptions(n.arguments[1]))
+                                    return ts.factory.updateCallExpression(n, n.expression, n.typeArguments, [n.arguments[0], ts.factory.createStringLiteral('[wait-options]')]);
+                                if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.expression.getText(parsed) === 'page'
+                                    && n.expression.name.text === 'waitForTimeout' && n.arguments.length === 1 && ts.isNumericLiteral(n.arguments[0])
+                                    && Number(n.arguments[0].text) >= 100 && Number(n.arguments[0].text) <= 30000)
+                                    return ts.factory.updateCallExpression(n, n.expression, n.typeArguments, [ts.factory.createStringLiteral('[bounded-wait]')]);
                                 return ts.visitEachChild(n, visit, context);
                             };
                             return root => ts.visitNode(root, visit) as typeof root;
@@ -288,7 +299,7 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
                     ids.forEach((id: string) => covered.add(id));
                     executed.add(event.name);
                 }
-                steps.push({ id: `native-${steps.length + 1}`, passed, actual: { test: event.name, error: event.error } });
+                steps.push({ id: `native-${steps.length + 1}`, passed, actual: { test: event.name, error: event.error, assertion: event.assertion } });
             }
         }
     }

@@ -341,7 +341,7 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
         `--test-reporter-destination=${report}`,join(mainRootDir(),'templates/tools/browser-test-runner.mjs')]:['node',join(mainRootDir(),'templates/tools/browser-script.mjs'),script]
       const result = await executeSoftwareCommand({ projectId: input.projectId, root: session.root,
         command, timeoutMs: input.timeoutMs ?? 30000,
-        signal: input.signal, dataDir: session.data, browserBinding: { endpoint: session.cdpEndpoint, page: session.page.url(),targetId:await debugTarget(session.page),
+        signal: input.signal, dataDir: session.data, browserBinding: { endpoint: session.cdpEndpoint, page: session.page.url(),targetId:await debugTarget(session.page), evidenceDir: join(session.workspace, 'evidence', session.formal ? 'acceptance' : 'development', `${input.phase ?? 'initial'}-${Date.now()}`),
           ...(native?{nativeTest:{file:script,phase:input.phase??'initial',trace}}:{}) } })
       const nativeOutput=native&&existsSync(report)?readFileSync(report,'utf8'):''
       session.snapshot.steps.push({ id: 'browser-script', passed: result.code === 0,
@@ -355,7 +355,7 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
         command: ['node','--test','--test-concurrency=1',`--test-reporter=${pathToFileURL(join(mainRootDir(),'templates/tools/node-test-reporter.mjs')).href}`,
           `--test-reporter-destination=${input.nativeTests.report}`,join(mainRootDir(),'templates/tools/browser-test-runner.mjs')],
         dataDir:session.data, signal:input.signal,timeoutMs:input.timeoutMs??180000,
-        browserBinding:{endpoint:session.cdpEndpoint,page:session.page.url(),targetId:await debugTarget(session.page),nativeTest:input.nativeTests} })
+        browserBinding:{endpoint:session.cdpEndpoint,page:session.page.url(),targetId:await debugTarget(session.page),evidenceDir:join(session.workspace,'evidence','acceptance',input.nativeTests.phase),nativeTest:input.nativeTests} })
       session.snapshot.steps.push({id:'native-tests',passed:result.code===0,actual:{exit_code:result.code,stderr:redactSoftwareOutput(result.stderr).slice(-4000)}})
     }
     session.activeAction = undefined
@@ -363,7 +363,7 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
     if (session.launch.ui === 'browser' && !session.formal && session.browser) {
       writeTextFileAtomic(join(session.workspace, 'browser-state.json'), JSON.stringify(await session.browser.storageState()))
     }
-    const screenshotDir = join(getPromaHome(), 'software-debug-sessions', session.snapshot.id); mkdirSync(screenshotDir, { recursive: true })
+    const screenshotDir = join(session.workspace, 'evidence', session.formal ? 'acceptance' : 'development'); mkdirSync(screenshotDir, { recursive: true })
     session.snapshot.screenshot = join(screenshotDir, `v${session.snapshot.version}-${Date.now()}.png`)
     await session.page.screenshot({ path: session.snapshot.screenshot })
     if (!input.nativeTests && !session.snapshot.steps.some(step => !step.passed)

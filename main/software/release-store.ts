@@ -15,6 +15,23 @@ const { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, stat, symli
 
 interface Entry { path: string; size: number; sha256: string }
 export interface RuntimeInventory { digest: string; bytes: number; files: Entry[] }
+export interface ReleaseDifference { path: string; change: 'added' | 'deleted' | 'changed'; category: 'dependency' | 'test_output' | 'application'; expected?: string; actual?: string }
+export class ReleaseIntegrityError extends Error {
+  readonly differences: ReleaseDifference[]
+  readonly omitted: number
+  constructor(code: string, expected: RuntimeInventory, actual: RuntimeInventory) {
+    const before = new Map(expected.files.map(file => [file.path, file])), after = new Map(actual.files.map(file => [file.path, file]))
+    const changes: ReleaseDifference[] = []
+    for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+      const a = before.get(path), b = after.get(path)
+      if (a?.sha256 === b?.sha256 && a?.size === b?.size) continue
+      changes.push({ path, change: !a ? 'added' : !b ? 'deleted' : 'changed', category: DEPENDENCIES.has(path.split('/')[0]) ? 'dependency' : /\.(png|jpe?g|webp|jsonl|trace|log)$/i.test(path) ? 'test_output' : 'application', expected: a?.sha256, actual: b?.sha256 })
+    }
+    const differences = changes.slice(0, 24)
+    super(`${code}: ${JSON.stringify({ differences, omitted: changes.length - differences.length })}`)
+    this.name = 'ReleaseIntegrityError'; this.differences = differences; this.omitted = changes.length - differences.length
+  }
+}
 export interface SoftwareRelease { version: 1; id: string; projectId: string; sourceRoot: string; root: string;
   source: RuntimeInventory; runtime: RuntimeInventory; launch: LaunchDeclaration; dependencies: Record<string, string>;
   external_files?: Array<{ path: string; sha256: string }>
@@ -125,12 +142,14 @@ export async function validateSoftwareRelease(projectId: string, release: Softwa
     const rel = relative(resolve(getPromaHome(), 'software-dependency-snapshots'), resolve(cache))
     if (rel.includes(sep) || !/^[a-f0-9]{64}$/.test(rel)) throw Error('RELEASE_CACHE_PATH_INVALID')
   }
-  if ((await runtimeInventory(release.root, signal, release.dependencies)).digest !== release.runtime.digest) throw Error('RELEASE_BYTES_CHANGED')
+  const runtime = await runtimeInventory(release.root, signal, release.dependencies)
+  if (runtime.digest !== release.runtime.digest) throw new ReleaseIntegrityError('RELEASE_BYTES_CHANGED', release.runtime, runtime)
   for (const file of release.external_files ?? []) if (await fileDigest(file.path, signal) !== file.sha256) throw Error('RELEASE_EXTERNAL_RUNTIME_CHANGED')
 }
 export async function verifyReleaseSource(release: SoftwareRelease, signal?: AbortSignal) {
   await validateSoftwareRelease(release.projectId, release, signal)
-  if ((await runtimeInventory(release.sourceRoot, signal)).digest !== release.source.digest) throw Error('RELEASE_WORKING_SOURCE_CHANGED')
+  const source = await runtimeInventory(release.sourceRoot, signal)
+  if (source.digest !== release.source.digest) throw new ReleaseIntegrityError('RELEASE_WORKING_SOURCE_CHANGED', release.source, source)
 }
 /** Only the host after actual candidate checks may call this, never model tools. */
 export async function promoteSoftwareRelease(release: SoftwareRelease, evidence: NonNullable<SoftwareRelease['verified']>, signal?: AbortSignal, stillCurrent?: () => boolean) {

@@ -7,6 +7,9 @@ import { guiSuitePath, installGuiAcceptanceSuite, parseGuiSuite } from '../deskt
 import { assertRetainedSoftwareBehavior } from './regression-baseline';
 import { createHash } from 'node:crypto';
 import { canRepairUnexecutedNativePlan } from './verification';
+import { join } from 'node:path';
+import { getPromaHome } from '../../storage/config-paths';
+import { writeTextFileAtomic } from '../../storage/json-store';
 export function registerNativeGuiTests(projectId: string, script: string, restart = false) {
     const project = findProject(projectId), brief = readPrdBackplane(projectId), scope = prdScopeFingerprint(brief);
     if (project.workflow_version !== 'software-v1' || !brief.user_confirmed_at || project.ux_confirmation?.prd_fingerprint !== scope)
@@ -20,6 +23,13 @@ export function registerNativeGuiTests(projectId: string, script: string, restar
             throw Error('GUI_EXISTING_EXPECTATIONS_CHANGED: 同目标只允许修正定位，不能改输入、断言或测试逻辑过关');
     }
     assertRetainedSoftwareBehavior(projectId, 'gui', suite);
+    // Immutable identity pair records every accepted adapter revision. No model
+    // can use the audit record to replace the frozen business contract.
+    const previous = existsSync(guiSuitePath(projectId)) ? parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8'))) : undefined;
+    writeTextFileAtomic(join(getPromaHome(), 'gui-native-adapters', projectId, `${native_tests.digest}.json`), JSON.stringify({
+        version: 1, at: new Date().toISOString(), scope, previous: previous?.native_tests?.digest, current: native_tests.digest, contract: native_tests.contract,
+        rule: 'static-locators-and-bounded-wait-options-v1'
+    }));
     installGuiAcceptanceSuite(projectId, suite);
     updateProject(projectId, { gui_acceptance: { status: 'sealed', scope_hash: scope } });
     return suite;

@@ -17,7 +17,8 @@ import { createSoftwareCollaborationPolicy } from '../../../main/software/collab
 import { createToolState } from '../../../main/agent/loop/agent-loop';
 import { saveSoftwareRegressionBaseline } from '../../../main/software/regression-baseline';
 let home: string, previous: string | undefined, project: ReturnType<typeof createProject>;
-const script = `export default async({test,page,expect,assert,phase})=>{
+const script = `export default async({test,page,expect,assert,phase,evidenceDir})=>{
+ assert.ok(evidenceDir);await page.screenshot({path:'shots/acceptance.png'});await page.locator('body').screenshot({path:'shots/body.png'});
  if(phase==='reopened'){await test('F-001 real reopen',async()=>{await page.goto('/');await expect(page.locator('#list')).toHaveText('Alice')});return;}
  await test('F-001 create Alice',async()=>{await page.goto('/');await page.locator('#name').focus();await page.keyboard.type('Alice');await page.locator('#save').click();await expect(page.locator('#list')).toHaveText('Alice')});
  await test('F-002 reject blank',async()=>{await page.locator('#name').fill('');await page.locator('#save').click();await expect(page.locator('#status')).toHaveText('required');assert.equal(await page.locator('#list').innerText(),'Alice')});
@@ -76,8 +77,11 @@ it('verify_app directly freezes and actually runs node:test UI checks, including
     expect(checked?.core?.host_gui?.method).toBe('node:test');
     expect(checked?.core?.host_gui?.native_evidence?.interactions).toBe(4)
     expect(checked?.core?.host_gui?.steps).toHaveLength(3);
+    expect(existsSync(join(checked!.candidate!.root, 'shots/acceptance.png'))).toBe(false);
+    expect(existsSync(join(project.root_path, 'shots/acceptance.png'))).toBe(false);
     const workspaces=join(home,'software-debug-data',project.project_id)
     expect(readdirSync(workspaces).every(dir=>!existsSync(join(workspaces,dir,'formal-profile')))).toBe(true)
+    expect(readdirSync(workspaces).some(dir=>existsSync(join(workspaces,dir,'evidence/acceptance/initial/shots/acceptance.png')) && existsSync(join(workspaces,dir,'evidence/acceptance/reopened/shots/body.png')))).toBe(true)
 }, 120000);
 it.skipIf(process.platform!=='win32'||!existsSync(resolve('node_modules/electron/dist/electron.exe')))('executes the same native suite through a real Electron entry and checks the normal window launch',async()=>{
  const root=project.root_path
@@ -105,6 +109,21 @@ it('allows locator repairs but freezes input, expected values and helper busines
     expect(() => registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs')).toThrow('EXISTING_EXPECTATIONS_CHANGED');
     writeFileSync(join(project.root_path, 'tests/acceptance.mjs'), base.replace("page.locator('#list')", "page.locator((()=>{throw Error('changed logic');return '#list'})())"));
     expect(() => registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs')).toThrow('EXISTING_EXPECTATIONS_CHANGED');
+});
+it('records bounded wait/navigation adaptations and rejects selector getters, computed keys and navigation changes', () => {
+    const file = join(project.root_path, 'tests/acceptance.mjs');
+    const initial = script.replace("await page.goto('/');", "await page.goto('/',{timeout:1000,waitUntil:'load'});await page.waitForTimeout(100);");
+    writeFileSync(file, initial);
+    const first = registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!;
+    const adapted = initial.replace('timeout:1000', 'timeout:2000').replace("waitUntil:'load'", "waitUntil:'domcontentloaded'").replace('waitForTimeout(100)', 'waitForTimeout(200)');
+    writeFileSync(file, adapted);
+    const second = registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!;
+    expect(second.contract).toBe(first.contract); expect(second.digest).not.toBe(first.digest);
+    expect(JSON.parse(readFileSync(join(home, 'gui-native-adapters', project.project_id, second.digest+'.json'), 'utf8')).previous).toBe(first.digest);
+    for (const bad of [initial.replace("goto('/'", "goto('/bypass'"), initial.replace('timeout:1000', 'timeout:0'),
+        initial.replace("locator('#list')", "locator(selectors.dangerous)"), initial.replace("locator('#list')", "getByRole('list',{[runCode()]:true})")]) {
+        writeFileSync(file, bad); expect(() => registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs')).toThrow('EXISTING_EXPECTATIONS_CHANGED');
+    }
 });
 it('rejects missing coverage before registration and rejects changed frozen tests before cached PASS reuse', async () => {
     writeFileSync(join(project.root_path, 'tests/acceptance.mjs'), script.replaceAll('F-002', 'F-099'));

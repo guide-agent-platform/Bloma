@@ -5,8 +5,10 @@ import { pathToFileURL } from 'node:url';
 import { expect } from 'playwright/test';
 import { connectApp } from './browser-context.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { bindScreenshotEvidence } from './browser-evidence.mjs';
 await test('Bloma native application suite', async () => {
     const { browser, page, context } = await connectApp();
+    const evidenceDir = bindScreenshotEvidence(page, context);
     const counts = { interactions: 0, assertions: 0, cases: [] }, cache = new WeakMap(), current = new AsyncLocalStorage();
     const observed = key => { counts[key]++; const active = current.getStore(); if (active)
         active[key]++; };
@@ -61,7 +63,7 @@ await test('Bloma native application suite', async () => {
             throw Error('GUI_NATIVE_DEFAULT_FUNCTION_REQUIRED');
         const checkedExpect = new Proxy(expect, { apply(target, self, args) { return matcher(Reflect.apply(target, self, args)); }, get(target, key) { const member = Reflect.get(target, key); return key === 'poll' ? (...args) => matcher(member(...args)) : member; } });
         await script.default({ test: checkedTest, page: object(page), context: object(context), expect: checkedExpect, assert: checkedAssert,
-            dataDir: process.env.APP_DATA_DIR, phase: process.env.BLOMA_NATIVE_TEST_PHASE });
+            dataDir: process.env.APP_DATA_DIR, evidenceDir, phase: process.env.BLOMA_NATIVE_TEST_PHASE });
     }
     finally {
         writeFileSync(process.env.BLOMA_NATIVE_TEST_TRACE, JSON.stringify(counts));

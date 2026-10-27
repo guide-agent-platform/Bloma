@@ -68,7 +68,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
           return { output: JSON.stringify({ launch: SOFTWARE_LAUNCH_GUIDANCE, protocol: '界面测试可直接verify_app({script:"tests/acceptance.mjs"})，不必展开动作表；使用模块参数提供的test/expect/assert。旧steps+acceptance_refs仍兼容，kind不是action，精确预期填equals。开发观察不等于验收。CLI仍用register_cli_check固定args/stdout/exit_code和任务单expectations。',
             native_tests: {call:'verify_app({script:"tests/acceptance.mjs"})',
               example:'export default async({test,page,expect,assert,dataDir,phase})=>{ await test("F-001 主路径",async()=>{await page.locator("#input").fill("已确认输入");await page.locator("#save").click();await expect(page.locator("#result")).toHaveText("已确认预期")}) }',
-              rules:'使用参数中的test/expect/assert，宿主记录真实案例与断言；每个案例名含一个F编号。可用inspect_app(script)调试同一文件。phase===reopened会自动触发真实重开。测试逻辑和输入预期冻结，可修定位；业务代码独立修复。'},
+              rules:'使用参数中的test/expect/assert，宿主记录真实案例与断言；每个案例名含一个F编号。上下文evidenceDir是本次执行的工程外证据目录，截图和报告写入此处；相对截图路径自动落位。可用inspect_app(script)调试同一文件。phase===reopened会自动触发真实重开。业务输入、断言和逻辑冻结；只允许静态定位、有界等待100–30000ms及导航等待选项适配，目标页面不变；重新verify_app(script)记录适配版本。不要从宿主源码猜协议或让成品删除验收痕迹。'},
             gui_step_schema: guiStepsSchema(96, SOFTWARE_GUI_ACTION_KINDS), gui_fixture_schema: GUI_FIXTURE_SCHEMA, example: GUI_CHECK_EXAMPLE,
             selector_guidance: '列表记录按稳定身份定位，避免nth-child随着新增/编辑后的排序改变。Electron/浏览器观察器支持Playwright可见文本选择器，如#note-list .note-item:has-text("笔记B")；Python固定观察器仍需真实CSS。修正selector可以，不能降低固定输入/预期。',
             authoritative_expectations: Object.fromEntries(brief.requirements.map(row => [row.id, trustedAcceptance(brief, row)])),

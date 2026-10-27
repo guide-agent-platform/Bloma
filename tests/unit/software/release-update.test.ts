@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { beforeEach, afterEach, it, expect } from 'vitest'
 import { createProject } from '../../../main/project/project-service'
-import { activeSoftwareRelease, prepareSoftwareRelease, promoteSoftwareRelease, validateSoftwareRelease, runtimeInventory } from '../../../main/software/release-store'
+import { activeSoftwareRelease, prepareSoftwareRelease, promoteSoftwareRelease, validateSoftwareRelease, runtimeInventory, ReleaseIntegrityError } from '../../../main/software/release-store'
+import { verificationFailure } from '../../../main/software/verification-diagnostics'
 import { launchSoftwareForUser } from '../../../main/software/user-launch'
 import { listSoftwareDataSnapshots, softwareDataDirectory } from '../../../main/software/data-update'
 import { stopSoftwareSession } from '../../../main/software/process-manager'
@@ -17,6 +18,27 @@ afterEach(async () => { await stopSoftwareSession(project.project_id, 'user-laun
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) }, 30000)
 async function promote() { const release = await prepareSoftwareRelease(project.project_id, project.root_path); await promoteSoftwareRelease(release, { version: 'actual-test-evidence', scope: 'test-scope', at: new Date().toISOString() }); return release }
 async function port() { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const a = server.address(); if (!a || typeof a === 'string') throw Error('port'); await new Promise<void>(done => server.close(() => done())); return a.port }
+it('reports bounded added/deleted/changed paths without exempting screenshots or dependency changes', async () => {
+  const root = project.root_path;
+  writeFileSync(join(root, 'app.cjs'), 'console.log(5)'); writeFileSync(join(root, 'gone.txt'), 'old');
+  mkdirSync(join(root, 'node_modules/pkg'), {recursive:true}); writeFileSync(join(root,'node_modules/pkg/code.cjs'),'old');
+  writeFileSync(join(root,'LAUNCH.json'), JSON.stringify({schema_version:2,mode:'command',command:['node','app.cjs']}));
+  const release = await prepareSoftwareRelease(project.project_id, root);
+  writeFileSync(join(release.root,'app.cjs'),'changed'); rmSync(join(release.root,'gone.txt'));
+  mkdirSync(join(release.root,'shots')); writeFileSync(join(release.root,'shots/acceptance.png'),'pollution');
+  writeFileSync(join(release.dependencies.node_modules,'pkg/code.cjs'),'changed');
+  try { await validateSoftwareRelease(project.project_id, release); throw Error('unexpected pass') }
+  catch(error) {
+    expect(error).toBeInstanceOf(ReleaseIntegrityError);
+    const differences = (error as ReleaseIntegrityError).differences;
+    expect(differences).toEqual(expect.arrayContaining([
+      expect.objectContaining({path:'app.cjs',change:'changed',category:'application'}),
+      expect.objectContaining({path:'gone.txt',change:'deleted'}),
+      expect.objectContaining({path:'shots/acceptance.png',change:'added',category:'test_output'}),
+      expect.objectContaining({path:'node_modules/pkg/code.cjs',category:'dependency'})]));
+    expect(verificationFailure({status:'unverified',summary:String(error)},error)?.paths).toContain('shots/acceptance.png');
+  }
+});
 
 it('serves a stable release while working assets change, reuses dependency bytes, and invalidates changed binary/cache evidence', async () => {
   const root = project.root_path, url = `http://127.0.0.1:${await port()}`
