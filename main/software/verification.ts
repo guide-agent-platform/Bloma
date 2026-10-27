@@ -23,6 +23,7 @@ import { frozenNativeGuiVersion } from './native-gui-tests'
 import { verificationFailure, type VerificationFailure } from './verification-diagnostics'
 import { independentDesignVersion } from './independent-design'
 import { independentAdapterVersion, verifyIndependentDesign } from './independent-verification'
+import { recordEvaluationEvent } from './harness-evaluation'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
   independent?:Awaited<ReturnType<typeof verifyIndependentDesign>>
@@ -95,9 +96,10 @@ export function canRepairUnexecutedNativePlan(projectId:string,suiteHash:string)
 export async function verifySoftwareCandidate(projectId: string, requestId: string, signal?: AbortSignal, force = false): Promise<SoftwareVerification> {
   const file = receiptPath(projectId)
   if (active.has(file)) throw Error('SOFTWARE_VERIFY_ALREADY_RUNNING')
-  if (!force) { const previous = await recentSoftwareVerification(projectId, requestId, signal); if (previous) return previous }
+  if (!force) { const previous = await recentSoftwareVerification(projectId, requestId, signal); if (previous) {recordEvaluationEvent(projectId,'verification_result',{status:'reused',candidate_id:previous.candidate?.id});return previous} }
   if (active.has(file)) throw Error('SOFTWARE_VERIFY_ALREADY_RUNNING')
   active.add(file); poisoned.add(file)
+  recordEvaluationEvent(projectId,'verification_started',{request_id:requestId})
   let version: Awaited<ReturnType<typeof inputs>> | undefined
   const result: SoftwareVerification = { status: 'unverified', summary: '当前版本尚未通过检查。', report_path: file }
   try {
@@ -135,5 +137,6 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     const reusable = Boolean(version?.reusable && result.status === 'passed' && !result.security?.issues.some(issue => issue.category === 'external_resource'))
     writeTextFileAtomic(file, JSON.stringify({ version: 1, state: 'complete', key: version?.key ?? '', at: Date.now(), result, result_hash: digest(result), reusable } satisfies Receipt))
     poisoned.delete(file)
+    recordEvaluationEvent(projectId,'verification_result',{status:result.status,category:result.failure?.category,summary:result.summary.slice(0,1600),candidate_id:result.candidate?.id})
   }
 }

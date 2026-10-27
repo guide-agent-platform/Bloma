@@ -41,6 +41,7 @@ import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type 
 import { monetaryStopMessage, monetaryInputBlocked } from '../platform/llm/monetary-budget'
 import { trialFeedbackText } from '../software/trial'
 import { prepareIndependentDesign } from '../software/independent-design'
+import { recordEvaluationEvent } from '../software/harness-evaluation'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -48,6 +49,7 @@ const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(par
 /** A continuous Pi executor followed by one host verification boundary. No
  * dispatcher dialogue, PHASE_ADVANCE markers or synthetic architecture stages. */
 export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopRouteDeps): Promise<void> {
+  recordEvaluationEvent(input.projectId,'operation_started',{session_id:input.sessionId,request_id:input.requestId})
   const project = findProject(input.projectId)
   if (isSoftwareProject(input.projectId) && /^(?:继续|恢复|查看进度|查看结果)[。！!\s]*$/.test(input.content.trim())) {
     const saved = readSoftwareRunState(input.projectId)
@@ -247,12 +249,13 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       const version = versionOf()
       if (!version || prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope) { blocked('验证前目标或文件版本发生变化，请沿当前版本继续。'); return }
       let candidate: Awaited<ReturnType<typeof prepareSoftwareRelease>> | undefined
-      let core: CoreVerificationResult, failure: string | undefined, cleanEnvironmentPending = false
+      let core: CoreVerificationResult, failure: string | undefined, cleanEnvironmentPending = false, failureCategory = 'unknown'
       if (software && !deps.coreVerification && !deps.securityScan && !deps.launchSmoke) {
         // The agent tool and final delivery share one verifier. Every fresh
         // attempt invalidates earlier receipts, including failures at closure.
         checkpoint('verifying', { source: softwareVerificationFingerprint(project.root_path) })
         const checked = await verifySoftwareCandidate(input.projectId, input.requestId, runSignal)
+        failureCategory=checked.failure?.category??'unknown'
         candidate = checked.candidate
         core = checked.core ?? { status: 'unverified', checked_at: new Date().toISOString(), summary: checked.summary, missing: [checked.summary], evidence: [] }
         cleanEnvironmentPending = checked.status === 'environment_blocked' && core.local_status === 'passed'
@@ -299,7 +302,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         if (modelBudgetStop) { blocked(`模型请求额度已到，宿主检查未通过，未再调用模型：\n${failure}`); return }
         if (core.status === 'environment_blocked' && !cleanEnvironmentPending) { blocked(failure); return }
         if (software) {
-          const progress = recordSoftwareRepair({ projectId: input.projectId, sessionId: input.sessionId, runId, error: failure,
+          const progress = recordSoftwareRepair({ projectId: input.projectId, sessionId: input.sessionId, runId, error: failure,category:failureCategory,
             source: softwareVerificationFingerprint(project.root_path), candidateId: candidate?.id,
             observations: { gui: core.host_gui?.steps, cli: core.host_cli?.cases } })
           if (!progress.allowed) { blocked(`连续${progress.repeats}次验证得到相同失败观察，尚无可见改善，已停止自动重试并保留现场：\n${failure}`); return }
@@ -336,6 +339,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         checkpoint('verified', { candidateId: candidate?.id, source: software ? softwareVerificationFingerprint(project.root_path) : undefined,
           ...(existsSync(report) ? { check: { path: report, sha256: createHash('sha256').update(readFileSync(report)).digest('hex') } } : {}) })
         commitDesktopDelivery(input.projectId, runSignal)
+        recordEvaluationEvent(input.projectId,'delivery_final',{status:'delivered',candidate_id:candidate?.id})
         emit('stage_changed', { stage: 'delivered' })
         deps.persistAssistant(input.sessionId, text); emit('message_delta', { text }); deps.complete(input.sessionId, input.projectId)
       }

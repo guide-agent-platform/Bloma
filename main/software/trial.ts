@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+import { createHash } from 'node:crypto'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { findProject } from '../project/project-service'
@@ -10,6 +11,7 @@ import { prepareSoftwareRelease, validateSoftwareRelease } from './release-store
 import { startSoftwareProcess, stopSoftwareProcess, softwareProcess } from './process-manager'
 import { runSecurityScan } from '../verification/security-scan'
 import type { SoftwareTrial, ProjectLaunchAppResult } from '../../shared/types'
+import { recordEvaluationEvent } from './harness-evaluation'
 
 const live = new Map<string, SoftwareTrial>(), busy = new Set<string>()
 function directory(projectId: string) {
@@ -76,6 +78,7 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
     writeTextFileAtomic(join(directory(projectId), `${release.id}.json`), JSON.stringify(trial))
     writeTextFileAtomic(join(directory(projectId), 'current.json'), JSON.stringify(trial))
     live.set(projectId, trial)
+    recordEvaluationEvent(projectId,'trial_ready',{release_id:trial.release_id})
     if (previous && previous.state === 'running') {
       try { await stopSoftwareProcess(projectId, previous.process_id, 'user-trial') }
       catch { console.warn('Old owned trial did not close completely; new usable trial retained') }
@@ -86,10 +89,11 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
     return { started: false, detail: String(error), trial: softwareTrial(projectId) }
   } finally { busy.delete(projectId) }
 }
-export function trialFeedbackText(projectId: string, version: string, content: string): string {
+export function trialFeedbackText(projectId: string, version: string, content: string, messageId?:string): string {
   if (!/^[a-f0-9]{64}$/.test(version)) throw Error('TRIAL_FEEDBACK_VERSION_INVALID')
   const record = JSON.parse(readFileSync(join(directory(projectId), `${version}.json`), 'utf8')) as SoftwareTrial
   if (record.release_id !== version || record.qualification !== 'unverified_test_data') throw Error('TRIAL_FEEDBACK_VERSION_INVALID')
+  if(messageId)recordEvaluationEvent(projectId,'user_intervention',{message_id:messageId,observed_version:version,content_sha256:createHash('sha256').update(content).digest('hex')})
   return `【用户所见试用版本 ${version}；测试数据，尚未验收】\n${content}`
 }
 export async function closeSoftwareTrial(projectId: string, version?: string): Promise<ProjectLaunchAppResult> {

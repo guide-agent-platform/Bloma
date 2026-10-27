@@ -86,7 +86,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   let receiptOutcome: 'completed' | 'failed' | 'cancelled' = 'completed'
 
   try {
-    const observedContent = input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content) : input.content
+    const observedContent = input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content,input.client_message_id??input.request_id) : input.content
     updateReceipt(input.client_message_id, 'running', undefined, input.run_generation)
     // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
     // 前移到渠道解析之前——类别路由（§6.4）需要按阶段选文档类别。

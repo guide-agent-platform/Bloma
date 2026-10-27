@@ -2,6 +2,8 @@
 
 日期：2026-10-27。检查基线：`sprint2 / c8aeb28`。
 
+后继实施状态（2026-10-27）：批次 1、2、制作中/交付后建议和批次 3 的离线工程已实施；批次 4 已准备固定任务与采集/报告工具，真实付费对照仍待明确新预算。当前代码、提交和逐批验证以 [实施记录](harness-improvement-progress-20261027.md) 为准，下面原规划和批次 0 结果保留其历史口径。
+
 执行接手入口：[Harness 改进执行交接](harness-improvement-handoff-20261027.md)。批次 0 工程提交为 `840f8eb`，剩余批次从证据隔离与诊断开始。
 
 ## 目标与本轮范围
@@ -71,4 +73,4 @@
 - `npm run typecheck`、`npm run build`、`npm run docs:check` 通过。
 - Electron 离线验证脚本：`scripts/verify-lean-suggestions.mjs`。实际渲染、持久候选恢复、键盘勾选、renderer/preload IPC 携带所选 ID、实际范围函数合并、更新后回访与窄屏操作共 7 组检查通过，页面异常 0；截图及测得的 viewport 尺寸在 `run-artifacts/lean-suggestions-20261027/`，执行日志 `run-artifacts/lean-suggestions-native-final-20261027.log`。
 - 原生脚本用固定任务单和 IPC 捕获器验证界面传输，后端权限/采纳/确认路径由单元集成验证；不冒充新真实模型生成、完整产品交付或模型建议质量实验。本轮未发新付费模型请求，未改用户实际项目和进程。
-- 批次 1–4 与制作中的主动建议尚未实施；先依本计划推进验收设施，再做独立试用，最后评估第二模型。需求确认建议代码已构建，下次启动 Bloma 后加载。
+- 上述“本轮”结果是原批次 0 的验证快照。后继批次状态与限制见顶部实施记录；构建不会替用户重启真实 Bloma。

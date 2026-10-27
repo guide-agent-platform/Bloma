@@ -74,7 +74,7 @@ function listFiles(rootPath: string): string[] {
 export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: BrowserWindow): void {
   ipcMain.handle(IPC_CHANNELS.SOFTWARE_SUGGESTIONS_DECIDE, (_event,payload:unknown)=>safeInvoke(extractRequestId(payload),async()=>{
     const input=requireFields<import('../../shared/types').SoftwareSuggestionDecisionInput>(payload,['request_id','project_id','session_id','set_id','suggestion_id','action'])
-    return decideSoftwareSuggestion(input,hasRunForProject(input.project_id),(type,data)=>_mainWindow.webContents.send('agent:stream-event',{
+    return decideSoftwareSuggestion(input,hasRunForProject(input.project_id),(type,data)=>_mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT,{
       event_id:randomUUID(),project_id:input.project_id,session_id:input.session_id,type,payload:data,created_at:new Date().toISOString()}))
   }))
   ipcMain.handle(IPC_CHANNELS.PROJECT_DELIVERABLES, async (_event, payload: unknown) => {

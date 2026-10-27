@@ -7,6 +7,7 @@ import { findProject } from '../project/project-service'
 import { leanBudget } from '../desktop/lean-budget'
 import { redactSoftwareOutput } from './process-manager'
 import { projectUsageLedgerPath } from '../platform/llm/request-ledger'
+import { recordEvaluationEvent } from './harness-evaluation'
 
 export type SoftwareRunStatus = 'running' | 'verifying' | 'repairing' | 'blocked' | 'waiting_user' | 'waiting_environment' | 'cancelled' | 'interrupted' | 'verified'
 export interface SoftwareRunState { version: 1; projectId: string; operationId?: string; sessionId: string; runId: string; status: SoftwareRunStatus; at: string;
@@ -33,11 +34,13 @@ export function saveSoftwareRunState(input: { projectId: string; sessionId: stri
     source: input.source ?? (sameOperation ? before?.source : undefined), check: input.check ?? (sameOperation ? before?.check : undefined), operationId: project.lean_operation_id, at: new Date().toISOString(), budget,
     candidateId: input.candidateId ?? (sameOperation ? before?.candidateId : undefined), failure: sameOperation ? before?.failure : undefined,
     error: input.error ? redactSoftwareOutput(input.error).slice(0, 2400) : input.status === 'verified' ? undefined : sameOperation ? before?.error : undefined }
-  writeTextFileAtomic(pathFor(input.projectId), JSON.stringify(state)); return state
+  writeTextFileAtomic(pathFor(input.projectId), JSON.stringify(state))
+  recordEvaluationEvent(input.projectId,'run_state',{status:state.status,run_id:state.runId,error:state.error,candidate_id:state.candidateId})
+  return state
 }
 /** Repeated identical host observations without observable improvement stop a
  * single run; changed results get another attempt within the SAME budget. */
-export function recordSoftwareRepair(input: { projectId: string; sessionId: string; runId: string; source?: string; candidateId?: string; error: string; observations?: unknown }) {
+export function recordSoftwareRepair(input: { projectId: string; sessionId: string; runId: string; source?: string; candidateId?: string; error: string; observations?: unknown; category?:string }) {
   const previous = readSoftwareRunState(input.projectId), operation = findProject(input.projectId).lean_operation_id
   const normalized = redactSoftwareOutput(JSON.stringify({ error: input.error, observations: input.observations ?? null }))
     .split(input.candidateId ?? '[no-candidate]').join('[candidate]')
@@ -47,6 +50,7 @@ export function recordSoftwareRepair(input: { projectId: string; sessionId: stri
   const state = saveSoftwareRunState({ ...input, status: 'repairing' })
   state.failure = { signature, runId: input.runId, repeats, total: (prior?.total ?? 0) + 1 }
   writeTextFileAtomic(pathFor(input.projectId), JSON.stringify(state))
+  recordEvaluationEvent(input.projectId,'repair_started',{category:input.category??'unknown',candidate_id:input.candidateId})
   return { allowed: repeats < 3, repeats, total: state.failure.total }
 }
 export function softwareResumeContext(projectId: string) {

@@ -13,6 +13,7 @@ import { softwareProcess, stopSoftwareSession, ownedSoftwarePreview } from '../.
 import { closeAllDebugSessions } from '../../../main/software/debug-sessions'
 import { registerNativeGuiTests } from '../../../main/software/native-gui-registration'
 import { verifySoftwareCandidate } from '../../../main/software/verification'
+import { createEvaluationProtocol, bindEvaluationRun } from '../../../main/software/harness-evaluation'
 
 let home: string, old: string | undefined, project: ReturnType<typeof createProject>
 beforeEach(async () => {
@@ -36,6 +37,9 @@ beforeEach(async () => {
 })
 afterEach(async()=>{await closeAllDebugSessions();await stopSoftwareSession(project.project_id,'user-trial');await stopSoftwareSession(project.project_id,'s');if(old===undefined)delete process.env.PROMA_HOME;else process.env.PROMA_HOME=old;rmSync(home,{recursive:true,force:true,maxRetries:5,retryDelay:100})},30000)
 it('keeps a versioned real trial usable and data isolated throughout successful and failing acceptance, then replaces it only when ready',async()=>{
+  const brief=readPrdBackplane(project.project_id)
+  const protocol=createEvaluationProtocol([{id:'names-collector',goal:brief.positioning,delivery:'browser',requirements:brief.requirements.map(item=>({description:item.description,expected:brief.acceptance[item.id]})),constraints:brief.constraints??[],out_of_scope:brief.out_of_scope}])
+  bindEvaluationRun(project.project_id,protocol,'names-collector','single','owned-process-collector')
   const first=await launchSoftwareTrial(project.project_id);expect(first.started,first.detail).toBe(true)
   const trial=first.trial!, originalUrl=JSON.parse(readFileSync(join(project.root_path,'LAUNCH.json'),'utf8')).url
   expect(trial.url).not.toBe(originalUrl);expect(softwareProcess(project.project_id,trial.process_id).purpose).toBe('trial')
@@ -45,6 +49,10 @@ it('keeps a versioned real trial usable and data isolated throughout successful 
   let requests=0
   const timer=setInterval(()=>{void fetch(trial.url!).then(response=>{if(response.ok)requests++}).catch(()=>{})},100)
   try{expect((await verifySoftwareCandidate(project.project_id,'r',AbortSignal.timeout(90000))).status).toBe('passed')}finally{clearInterval(timer)}
+  const observations=readFileSync(join(home,'harness-evaluation',project.project_id,'events.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line))
+  expect(observations.some(event=>event.kind==='trial_ready'&&event.data.release_id===trial.release_id)).toBe(true)
+  expect(observations.some(event=>event.kind==='verification_started')).toBe(true)
+  expect(observations.some(event=>event.kind==='verification_result'&&event.data.status==='passed')).toBe(true)
   expect(requests).toBeGreaterThan(2);expect(await(await fetch(new URL('/data',trial.url))).text()).toBe('trial-only')
   const html=readFileSync(join(project.root_path,'index.html'),'utf8')
   writeFileSync(join(project.root_path,'index.html'),html.replace(".value\"", ".value+'Wrong'\""))

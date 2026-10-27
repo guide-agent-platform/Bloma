@@ -1,0 +1,37 @@
+[
+  {
+    "id": "names-browser",
+    "goal": "本地姓名清单",
+    "delivery": "browser",
+    "requirements": [
+      { "description": "保存并查看姓名", "expected": "输入 Alice 保存后清单显示 Alice，关闭重开仍保留" },
+      { "description": "拒绝空姓名", "expected": "空白输入提示姓名不能为空，原清单不改变" }
+    ],
+    "constraints": ["数据只保存在本机"],
+    "out_of_scope": ["账号与云同步"]
+  },
+  {
+    "id": "calculator-desktop",
+    "goal": "带历史的桌面计算器",
+    "delivery": "desktop",
+    "requirements": [
+      { "description": "计算四则运算", "expected": "2+3 显示 5；0.1+0.2 显示 0.3" },
+      { "description": "除零错误恢复", "expected": "除以零显示可理解的错误，清除后仍能正确计算" },
+      { "description": "保留并查看完整历史", "expected": "至少保存并可查看最近 10 次运算，关闭重开后历史仍可找到" }
+    ],
+    "constraints": ["离线使用"],
+    "out_of_scope": ["科学计算与账号"]
+  },
+  {
+    "id": "notes-desktop",
+    "goal": "本地课程笔记",
+    "delivery": "desktop",
+    "requirements": [
+      { "description": "新增和编辑课程笔记", "expected": "保存多行中文笔记，再次编辑并重开后可读到修改内容" },
+      { "description": "按关键词查找", "expected": "只显示包含关键词的笔记，清空关键词恢复完整列表" },
+      { "description": "导出笔记备份", "expected": "导出的文件包含所有笔记，失败时原数据不损坏" }
+    ],
+    "constraints": ["数据只保存在本机"],
+    "out_of_scope": ["联网搜索与云同步"]
+  }
+]

@@ -61,7 +61,7 @@ export function registerAgentSessionsIpc(ipcMain: IpcMain, mainWindow: BrowserWi
       //  分流——低档 received 直接入队（简短确认即注入）；中/高档 pending_impact 不入队，
       //  影响卡三选回执走 agent:steer-resolve。off 时与 P0-1 字节级一致。
       if ((input.images?.length ?? 0) === 0) {
-        const content = input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content) : input.content
+        const content = input.metadata?.observed_software_version ? trialFeedbackText(input.project_id, input.metadata.observed_software_version, input.content,input.request_id) : input.content
         if (steerConfirmEnabled()) {
           const registered = registerSteer(input.session_id, {
             queueMessageId: input.request_id,
