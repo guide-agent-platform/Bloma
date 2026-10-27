@@ -912,6 +912,8 @@ export interface AgentSendMessageInput extends RequestEnvelope {
   metadata?: {
     source: 'chat' | 'card_option' | 'system_resume' | 'sketch_correction'
     selected_option_id?: string
+    /** Optional lean-scope suggestions; ids are resolved against the saved candidate. */
+    selected_suggestion_ids?: string[]
     /** PRD 确认卡 confirm 时勾选采纳的市调想法（2026-08-29 灵感参考，四段式卡同样可采纳） */
     adopted_ideas?: string[]
     /** 裁判审查逐题选择题的答案（2026-08-30）：弹窗一次性回传，每题 issue_id/option_id/label */
@@ -1085,12 +1087,21 @@ export interface AgentLoadMessagesResult {
   }>
 }
 
+export interface LeanScopeSuggestion {
+  id: string
+  title: string
+  description: string
+  benefit: string
+  expected: string
+}
+
 export interface LeanScopeView {
   goal: string
   features: Array<{ id: string; description: string; expected: string }>
   constraints: string[]
   out_of_scope: string[]
   usage: string
+  suggestions?: LeanScopeSuggestion[]
 }
 
 /** U11：清理孤儿会话的结果——被移除的会话数量（无孤儿时 removed=0）。 */

@@ -15,6 +15,31 @@ it('shows readable structured goals and acceptance in the main panel without dev
   expect(screen.queryByText('F-001')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '按这份做' })); expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: 'confirm' }))
 })
+it('offers unchecked optional ideas and submits an explicit adoption action with selected ids', () => {
+  const select = vi.fn(), scope = { goal: '课程笔记', usage: '本机', features: [{ id: 'F-001', description: '保存笔记', expected: '重开保留' }], constraints: [], out_of_scope: [],
+    suggestions: [{ id: 'idea-one', title: '按关键词查找', description: '查找已保存笔记', benefit: '快速定位内容', expected: '只显示匹配项' }] }
+  render(<ScopeConfirmationPanel scope={scope} options={[{ id: 'lean_confirm:current', label: '按这份做' }, { id: 'lean_pause', label: '稍后再说' }]} onSelect={select} busy={false} />)
+  const checkbox = screen.getByRole('checkbox', { name: '按关键词查找' }) as HTMLInputElement
+  expect(checkbox.checked).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: '按这份做' })); expect(select).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'lean_confirm:current' }))
+  fireEvent.click(checkbox)
+  expect(screen.getByText('采纳后：只显示匹配项')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /采纳 1 条建议，更新任务单/ }))
+  expect(select).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'lean_adopt:current', selectedSuggestionIds: ['idea-one'] }))
+  fireEvent.click(screen.getByRole('button', { name: '稍后再说' }))
+  expect(select).toHaveBeenLastCalledWith({ id: 'lean_pause', label: '稍后再说' })
+})
+it('clears selections for a new candidate and disables idea controls while busy', () => {
+  const select = vi.fn(), scope = { goal: '课程笔记', usage: '本机', features: [], constraints: [], out_of_scope: [],
+    suggestions: [{ id: 'idea-one', title: '按关键词查找', description: '查找笔记', benefit: '快速查找', expected: '显示匹配项' }] }
+  const view = render(<ScopeConfirmationPanel scope={scope} options={[{ id: 'lean_confirm:old', label: '按这份做' }]} onSelect={select} busy={false} />)
+  fireEvent.click(screen.getByRole('checkbox'))
+  expect(screen.getByRole('button', { name: /采纳 1 条建议，更新任务单/ })).toBeTruthy()
+  view.rerender(<ScopeConfirmationPanel scope={scope} options={[{ id: 'lean_confirm:new', label: '按这份做' }]} onSelect={select} busy />)
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(true)
+  expect((screen.getByRole('button', { name: '按这份做' }) as HTMLButtonElement).disabled).toBe(true)
+})
 it('loads a pending decision and its preview without sending a new agent message', async () => {
   const store = createStore(); window.__jotai_store__ = store; store.set(activeAgentSessionIdAtom, 's')
   const send = vi.fn()

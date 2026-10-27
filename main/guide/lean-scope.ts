@@ -9,11 +9,14 @@ import type { PrdBackplane } from '../model/prd-backplane'
 import { saveGuideConfirmation } from './confirmation-journal'
 import { renderLeanBrief } from './lean-brief'
 import { readConfirmedUxBinding } from '../project/ux-binding'
+import type { LeanScopeSuggestion } from '../../shared/types'
+import { parseLeanSuggestions } from './lean-suggestions'
 
 type Emit = (type: 'message_delta' | 'user_decision_required' | 'stage_changed', payload: Record<string, unknown>) => void
 
 /** One authoritative task sheet, including revisions proposed during production. */
-export function stageLeanScope(projectId: string, sessionId: string, requestId: string, previous: PrdBackplane, next: PrdBackplane, emit: Emit): void {
+export function stageLeanScope(projectId: string, sessionId: string, requestId: string, previous: PrdBackplane, next: PrdBackplane, emit: Emit,
+  options: { suggestions?: LeanScopeSuggestion[]; adoptedSuggestions?: LeanScopeSuggestion[] } = {}): void {
   const project = findProject(projectId)
   if (previous.user_confirmed_at && previous.lean_brief && next.lean_brief?.ui === 'required' && !next.lean_brief.preview) {
     try {
@@ -26,8 +29,10 @@ export function stageLeanScope(projectId: string, sessionId: string, requestId: 
   if (previous.requirements.length) writeTextFileAtomic(join(getDocumentsDir(project.workspace_slug, projectId), 'history',
     `brief-${prdScopeFingerprint(previous)}.json`), JSON.stringify(previous, null, 2))
   syncDocuments({ request_id: requestId, project_id: projectId, session_id: sessionId, checkpoint: 'requirement_confirmed' }, next)
+  const suggestions = parseLeanSuggestions(options.suggestions, next.requirements.map(row => row.description))
   saveGuideConfirmation({ version: 1, kind: 'prd', id: randomUUID(), project_id: projectId, session_id: sessionId,
-    scope_hash: prdScopeFingerprint(next), state: 'pending', data: { lean: true } })
+    scope_hash: prdScopeFingerprint(next), state: 'pending', data: { lean: true, suggestions,
+      ...(options.adoptedSuggestions?.length ? { adopted_suggestions: options.adoptedSuggestions } : {}) } })
   const removed = previous.requirements.filter(old => !next.requirements.some(row => row.id === old.id))
   const changed = next.requirements.filter(row => previous.requirements.some(old => old.id === row.id
     && (old.description !== row.description || previous.acceptance[old.id] !== next.acceptance[row.id])))
@@ -37,20 +42,21 @@ export function stageLeanScope(projectId: string, sessionId: string, requestId: 
     ...added.map(row => `新增：${row.description}`), ...changed.map(row => `调整：${row.description}`),
     ...removed.map(row => `移除：${row.description}`), ...removedConstraints.map(text => `取消限制：${text}`),
   ].join('\n') || '任务说明已更新，请核对。' })
-  publishLeanScope(next, emit)
+  publishLeanScope(next, emit, suggestions)
   updateProject(projectId, { status: 'active', desktop_phase: undefined, current_stage: 'blocked_for_user_decision', desktop_blocked: undefined })
 }
 
-export function publishLeanScope(brief: PrdBackplane, emit: Emit): void {
-  emit('user_decision_required', leanScopeDecision(brief))
+export function publishLeanScope(brief: PrdBackplane, emit: Emit, suggestions: LeanScopeSuggestion[] = []): void {
+  emit('user_decision_required', leanScopeDecision(brief, suggestions))
   updateProject(brief.project_id, { current_stage: 'blocked_for_user_decision' })
   emit('stage_changed', { stage: 'blocked_for_user_decision' })
 }
 
-export function leanScopeDecision(brief: PrdBackplane): Record<string, unknown> {
+export function leanScopeDecision(brief: PrdBackplane, suggestions: LeanScopeSuggestion[] = []): Record<string, unknown> {
   return { kind: 'lean_scope', title: '确认这次要做的内容', summary: renderLeanBrief(brief),
     scope: { goal: brief.positioning, features: brief.requirements.map(row => ({ id: row.id, description: row.description, expected: brief.acceptance[row.id] ?? '' })),
       constraints: brief.constraints ?? [], out_of_scope: brief.out_of_scope,
+      ...(suggestions.length ? { suggestions } : {}),
       usage: brief.lean_brief?.delivery === 'browser' ? '在本机浏览器使用' : brief.lean_brief?.delivery === 'command' ? '通过命令行使用' : '在桌面窗口使用' },
     questions: [{ id: `lean_confirm:${prdScopeFingerprint(brief)}`, label: '按这份做', description: '确认目标和范围' },
       { id: 'lean_adjust', label: '补充或修改', description: '告诉我需要改哪里' }, { id: 'lean_pause', label: '稍后再说', description: '先保留，暂不开工' }] }

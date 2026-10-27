@@ -7,6 +7,7 @@ import { prdScopeFingerprint } from '../project/requirement-contract'
 import { readGuideConfirmation } from './confirmation-journal'
 import { leanScopeDecision } from './lean-scope'
 import { uxDecisionPayload, type PendingUxConfirm } from './ux-confirm'
+import { parseLeanSuggestions } from './lean-suggestions'
 
 /** Read-only rehydration. Showing a card never consumes confirmation or starts
  * model work; normal scope/hash/ownership checks still run on the user's click. */
@@ -17,7 +18,7 @@ export function readPendingDecision(projectId: string, sessionId: string) {
   const prd = readGuideConfirmation('prd', projectId)
   if (!brief.user_confirmed_at && prd?.state === 'pending' && prd.data.lean === true && prd.session_id === sessionId) {
     if (prd.scope_hash !== scope) throw Error('LEAN_CONFIRMATION_STALE')
-    return { project_id: projectId, payload: leanScopeDecision(brief) }
+    return { project_id: projectId, payload: leanScopeDecision(brief, parseLeanSuggestions(prd.data.suggestions, brief.requirements.map(row => row.description))) }
   }
   const ux = readGuideConfirmation('ux', projectId)
   if (brief.user_confirmed_at && ux?.state === 'pending' && ux.session_id === sessionId) {

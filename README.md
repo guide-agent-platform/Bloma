@@ -6,6 +6,8 @@
 
 > 当前新项目入口（2026-10-23）：[流程缩减实施记录](docs/05_PROJECT_PLAN/workflow-reduction-implementation-20261023.md)。新普通项目使用短任务单、单稿HTML、连续Pi制作和宿主实际验证；不默认调用AC、完整PRD、架构/脚手架独立阶段或MVP确认。历史项目与冻结实验保留各自协议，本页早期规划不作为新默认流程。
 
+> 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
+
 > 历史接线（2026-10-20）：平台生成Windows Python/WebView2桌面应用，[制作流程v2](docs/05_PROJECT_PLAN/production-workflow-v2-20261020.md)保留当时设计；代码清理、硬编码修复和本机旧项目清理结果见[清理实施记录](docs/05_PROJECT_PLAN/hardcoding-cleanup-execution-20261020.md)。
 
 > 2026-10-22后续完善：[全流程实施记录](docs/05_PROJECT_PLAN/workflow-improvement-20261022.md)包含持久MVP确认、宿主原生GUI验收CLI、验证凭据复用及交付规则收敛的实现与验证边界。

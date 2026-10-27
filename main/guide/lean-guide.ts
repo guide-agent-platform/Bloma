@@ -20,8 +20,9 @@ import { runUxConfirmGate, restoreUxConfirmation, replayUxConfirmation, hasPendi
 import { enterDesktopLine } from '../desktop/desktop-route'
 import { isSoftwareProject } from '../desktop/workflow-policy'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
+import { adoptLeanSuggestions, parseLeanSuggestions } from './lean-suggestions'
 
-/** One extraction and one scope confirmation. No legacy PRD/audit/ideas pipeline. */
+/** One extraction includes optional ideas; no separate research or audit pipeline. */
 export async function handleLeanGuide(input: AgentSendMessageInput, publish: (event: AgentEvent) => void, model?: GuideModelOptions): Promise<void> {
   const emit = (type: AgentEvent['type'], payload: Record<string, unknown>) => publish({ event_id: randomUUID(),
     project_id: input.project_id, session_id: input.session_id, type, payload, created_at: new Date().toISOString() })
@@ -30,7 +31,11 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   const brief = readPrdBackplane(input.project_id)
   const saved = readGuideConfirmation('prd', input.project_id)
   if (saved && (saved.session_id !== input.session_id || saved.data.lean !== true)) throw new Error('LEAN_CONFIRMATION_OWNER_MISMATCH')
-  const publishScope = () => publishLeanScope(brief, emit)
+  const suggestions = parseLeanSuggestions(saved?.data.suggestions, brief.requirements.map(row => row.description))
+  const publishScope = () => {
+    if (saved?.state === 'dismissed') saveGuideConfirmation({ ...saved, state: 'pending' })
+    publishLeanScope(brief, emit, suggestions)
+  }
   const begin = async () => {
     if (brief.lean_brief?.ui !== 'none' && !brief.lean_brief?.preview) {
       await runUxConfirmGate({ ...input, mode: project.mode, query: model.query, env: model.env, publish, signal: model.signal,
@@ -53,6 +58,19 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
     }
   }
   const selected = input.metadata?.source === 'card_option' ? input.metadata.selected_option_id : undefined
+  if (selected?.startsWith('lean_adopt:')) {
+    if (!saved || saved.state !== 'pending' || saved.scope_hash !== prdScopeFingerprint(brief)
+      || selected !== `lean_adopt:${saved.scope_hash}`) throw Error('LEAN_CONFIRMATION_STALE')
+    model.signal.throwIfAborted()
+    const next = adoptLeanSuggestions(brief, suggestions, input.metadata?.selected_suggestion_ids)
+    const ids = input.metadata!.selected_suggestion_ids!
+    stageLeanScope(input.project_id, input.session_id, input.request_id, brief, next, emit, {
+      suggestions: suggestions.filter(item => !ids.includes(item.id)),
+      adoptedSuggestions: [...parseLeanSuggestions(saved.data.adopted_suggestions), ...suggestions.filter(item => ids.includes(item.id))],
+    })
+    return
+  }
+  if (input.metadata?.selected_suggestion_ids?.length) throw Error('LEAN_SUGGESTIONS_NOT_APPLIED')
   const confirm = saved?.state !== 'adjust' && /^(?:确认|按这份做|按这个做|直接做|开始开发|开始实现)[。！!\s]*$/.test(input.content.trim())
   if (selected?.startsWith('lean_confirm:') || confirm && saved) {
     if (!saved || saved.scope_hash !== prdScopeFingerprint(brief) || selected && selected !== `lean_confirm:${saved.scope_hash}`) throw new Error('LEAN_CONFIRMATION_STALE')
@@ -109,7 +127,7 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   }
   const next = result.brief
   if (authorizesSkipPreview(input.content) && next.lean_brief?.ui === 'required') next.lean_brief.preview = 'skip'
-  stageLeanScope(input.project_id, input.session_id, input.request_id, brief, next, emit)
+  stageLeanScope(input.project_id, input.session_id, input.request_id, brief, next, emit, { suggestions: result.suggestions })
   applyGeneratedProjectName(input.project_id, project.name, next.name)
   if (authorizesDirectBuild(input.content)) {
     model.signal.throwIfAborted()

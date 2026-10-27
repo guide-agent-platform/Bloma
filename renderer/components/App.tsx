@@ -517,7 +517,7 @@ const AppRoutes: React.FC = () => {
       content: option.label,
       mode: mode ?? 'quick',
       current_stage: currentStage,
-      metadata: toCardSelectionMeta(option.id),
+      metadata: { ...toCardSelectionMeta(option.id), ...(option.selectedSuggestionIds ? { selected_suggestion_ids: option.selectedSuggestionIds } : {}) },
     })
   }, [sessionId, currentProject, projectList, mode, currentStage])
   /** 草图预览面板的「确认草图」入口：与聊天卡 ux_confirm_go 同一动作——复用

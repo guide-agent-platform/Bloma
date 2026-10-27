@@ -4,6 +4,7 @@ export interface CardOption {
   id: string
   label: string
   description?: string
+  selectedSuggestionIds?: string[]
 }
 
 export interface CardOptionsProps {
