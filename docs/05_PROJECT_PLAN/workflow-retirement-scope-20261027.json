@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "modern_workflow_keep",
+      "action": "keep",
+      "reason": "Current software-v1 and lean-v1 entry points; never inferred legacy from directory names.",
+      "paths": ["main/desktop/lean-production.ts", "main/desktop/lean-budget.ts", "main/guide/lean-guide.ts", "main/guide/lean-brief.ts", "main/guide/lean-scope.ts", "main/guide/lean-suggestions.ts", "main/guide/pending-decision.ts", "main/software/agent-tools.ts", "main/software/verification.ts", "main/software/release-store.ts", "main/software/trial.ts", "main/software/independent-design.ts", "main/software/independent-verification.ts", "main/software/harness-evaluation.ts"]
+    },
+    {
+      "id": "mixed_bridges_split_first",
+      "action": "split_before_retirement",
+      "reason": "These files mix routing, shared types/helpers or lean-v1 fallback with legacy execution; whole-file deletion breaks current users.",
+      "paths": ["main/orchestration/stages/agent-dispatch.ts", "main/orchestration/stages/dispatch-support.ts", "main/guide/guide-agent-service.ts", "main/guide/stages/guide-pipeline.ts", "main/guide/ux-confirm.ts", "main/desktop/desktop-route.ts", "main/desktop/workflow-policy.ts", "main/desktop/dispatcher-loop.ts", "main/desktop/dispatcher-phases.ts", "main/desktop/production-agent.ts", "main/desktop/dispatcher-completion.ts", "main/project/document-engine.ts", "main/project/document-sync.ts", "main/project/prd-store.ts"]
+    },
+    {
+      "id": "legacy_guide_candidate",
+      "action": "retire_after_legacy_confirmations_and_entrypoints_migrate",
+      "reason": "Old guide/PRD orchestration; runtime importers, reexports and pending records must be resolved before deletion.",
+      "pattern": "^main/guide/(prd-confirm|prd-engine-llm|prd-sections|pipeline|dialogue-router|guide-tools)\\.ts$|^main/guide/stages/(guide-runtime|clarify-flow|requirement-confirm|research-flow|prd-pipeline)\\.ts$"
+    },
+    {
+      "id": "legacy_desktop_candidate",
+      "action": "retire_after_mixed_helpers_and_old_projects_migrate",
+      "reason": "Old phase orchestration and MVP presentation; imported modules are candidates, not deletion approvals.",
+      "pattern": "^main/desktop/(dispatcher-(prompt|gate|finalize|telemetry|switch)|advance-rejection-loop|phase-checkpoint|mvp-confirm|delivery-policy|core-delivery|quick-production-review|notice-cards|delivered-notice|pending-confirmation-store)\\.ts$"
+    },
+    {
+      "id": "frozen_experiment_separate",
+      "action": "preserve_evidence_and_narrow_reader_before_retiring_executor",
+      "reason": "Opt-in pinned experiments are different from current independent-design and harness-evaluation; do not replay or silently migrate.",
+      "pattern": "^main/desktop/dispatch-experiment(?:-[a-z]+)*\\.ts$"
+    },
+    {
+      "id": "shared_capability_keep_migrate",
+      "action": "retain_capabilities_migrate_interfaces_in_batch_B",
+      "reason": "Resource discovery, runtime preparation and independent capability verification remain needed by current products.",
+      "paths": ["main/desktop/component-library.ts", "main/desktop/resource-discovery.ts", "main/desktop/install-packages-tool.ts", "main/desktop/skeleton-provision.ts", "main/desktop/process-driver.ts", "main/desktop/capability-verifiers.ts", "main/desktop/core-verification.ts", "main/desktop/core-verification-cache.ts", "main/desktop/launch-smoke.ts", "main/desktop/speech-verification.ts", "main/desktop/file-verification.ts", "main/desktop/llm-verification.ts", "main/desktop/gui-acceptance.ts", "main/desktop/gui-fixtures.ts", "main/desktop/verification-fingerprint.ts", "main/desktop/verification-receipts.ts", "main/desktop/production-context.ts", "main/desktop/delivery-state.ts", "main/desktop/contract-schema.ts", "main/model/requirement-capabilities.ts", "main/project/requirement-contract.ts", "main/software/runtime-manager.ts"]
+    },
+    {
+      "id": "history_data_and_user_access_keep",
+      "action": "keep_read_export_launch_and_storage_boundaries",
+      "reason": "Project metadata, histories, receipts, budgets and launch/export APIs must remain available during retirement.",
+      "paths": ["main/guide/confirmation-journal.ts", "main/platform/sessions/session-service.ts", "main/platform/sessions/session-tree.ts", "main/ipc/projects.ts", "main/ipc/project-deliverables.ts", "main/delivery/project-export.ts", "main/project/project-service.ts", "main/desktop/production-budget.ts", "main/platform/llm/request-ledger.ts", "main/platform/llm/monetary-budget.ts", "storage/config-paths.ts", "shared/workflow-version.ts"]
+    },
+    {
+      "id": "retired_web_guard_keep_until_compatibility_decided",
+      "action": "keep_explicit_retirement_response_no_silent_fallback",
+      "reason": "Old web generation is already guarded; archival UI, preview and export are separate from generation.",
+      "paths": ["main/guide/web-line-retired.ts"]
+    }
+  ],
+  "anchors": [
+    {"id":"new_project_version","path":"main/ipc/projects.ts","needle":"createProject(input, { workflowVersion: 'software-v1' })","meaning":"New UI projects select software-v1."},
+    {"id":"experiment_opt_in","path":"main/desktop/dispatch-experiment.ts","needle":"if (process.env[EXPERIMENT_SWITCH] !== '1') return undefined","meaning":"A config file is not an active experiment without the switch."},
+    {"id":"experiment_isolation","path":"main/desktop/dispatch-experiment.ts","needle":"assertExperimentHome()","meaning":"Experiment reading checks isolated home and pinned configuration."},
+    {"id":"unmarked_project_policy","path":"main/desktop/workflow-policy.ts","needle":"if (project.workflow_version === undefined) return false","meaning":"Unmarked projects do not auto-upgrade."},
+    {"id":"unknown_version_rejected","path":"main/desktop/workflow-policy.ts","needle":"WORKFLOW_VERSION_UNSUPPORTED","meaning":"Unknown versions cannot become legacy/new successful execution by default."},
+    {"id":"modern_guide_early_return","path":"main/guide/stages/guide-pipeline.ts","needle":"return handleLeanGuide(input, publish, model)","meaning":"Modern guide bypasses the remaining legacy guide body."},
+    {"id":"modern_build_early_return","path":"main/desktop/desktop-route.ts","needle":"await runLeanProduction({ ...input, query, env","meaning":"Modern projects use the shared Pi production loop."},
+    {"id":"old_dispatcher_entry","path":"main/desktop/desktop-route.ts","needle":"runDesktopDispatcherLoop(loopInput)","meaning":"Legacy executor is still called after the modern early return."},
+    {"id":"shared_production_tools","path":"main/desktop/lean-production.ts","needle":"productionAgentTools(baseTools","meaning":"Shared helper in an old-named module still serves modern projects."},
+    {"id":"legacy_python_fallback","path":"main/desktop/lean-production.ts","needle":"if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2","meaning":"lean-v1 still consumes Python skeleton support; software-v1 does not materialize it by default."},
+    {"id":"software_tool_filter","path":"main/software/agent-tools.ts","needle":"const FILE_TOOLS = new Set","meaning":"Old resource/installer tools are not exposed by this filtering path."},
+    {"id":"new_capability_verification","path":"main/desktop/core-verification.ts","needle":"const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane: brief, manifest, signal: options.signal }, options.capabilityVerifiers)","meaning":"Current short workflow still runs capability verifiers."},
+    {"id":"web_retirement_guard","path":"main/orchestration/stages/agent-dispatch.ts","needle":"if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage))","meaning":"Existing retired web-stage response is separate from desktop migration."}
+  ],
+  "symbols": ["isLeanProject", "isSoftwareProject", "readExperiment", "enterDesktopLine", "handleDesktopDispatchMessage", "runLeanProduction", "runDesktopDispatcherLoop", "buildDesktopChildTools", "productionAgentTools", "guardDispatcherCompletion", "getDesktopPhase", "runPrdPipeline", "restorePrdConfirmation", "restoreUxConfirmation", "buildResourceDiscoveryTool", "buildInstallPackagesTool", "provisionDesktopSkeletonV2", "runCoreVerification", "runCapabilityVerifiers", "holdForMvpConfirm", "confirmMvpDelivered"],
+  "asset_terms": ["speech_runtime.py", "speech_locator.py", "driver-skeleton.py", "contract.json", "PHASE_ADVANCE", "desktop-arch", "00_VERIFY/MVP", "pending-confirmations"]
+}
