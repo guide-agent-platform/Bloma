@@ -20,7 +20,7 @@ let home: string, previous: string | undefined
 beforeEach(() => { vi.clearAllMocks(); previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-lean-ux-')); process.env.PROMA_HOME = home })
 afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true }) })
 it('one scope extraction plus one HTML request reaches preview and survives restart confirmation without any graph or audit calls', async () => {
-  const project = createProject({ request_id: 'create', mode: 'longterm' }, { workflowVersion: 'lean-v1' })
+  const project = createProject({ request_id: 'create', mode: 'longterm' }, { workflowVersion: 'software-v1' })
   const calls: string[] = [], events: AgentEvent[] = []
   const query: SDKQuery = async function* (prompt) {
     calls.push(prompt)
@@ -63,7 +63,7 @@ it('one scope extraction plus one HTML request reaches preview and survives rest
   expect(() => readConfirmedUxBinding(project.project_id, readPrdBackplane(project.project_id))).toThrow('UX_CONFIRMATION_CHANGED')
 })
 it('explicit direct implementation skips preview without a second model request; negatives never approve', async () => {
-  const project = createProject({ request_id: 'create', mode: 'quick' }, { workflowVersion: 'lean-v1' })
+  const project = createProject({ request_id: 'create', mode: 'quick' }, { workflowVersion: 'software-v1' })
   const query = vi.fn<SDKQuery>(async function* () {
     yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ action: 'brief', goal: '计算加法', ui: 'required', requirements: [{ description: '加法', expected: '2加3得5' }] }) }] } }
     yield { type: 'result', subtype: 'success', usage: { output_tokens: 20 } }
@@ -78,7 +78,7 @@ it('explicit direct implementation skips preview without a second model request;
   expect(existsSync(join(project.root_path, '00_UX/confirmed.html'))).toBe(false)
   expect(authorizesDirectBuild('不要直接做，先确认')).toBe(false)
   expect(authorizesDirectBuild('用户说“直接做”是什么意思')).toBe(false)
-  const undecided = createProject({ request_id: 'create-2', mode: 'quick' }, { workflowVersion: 'lean-v1' })
+  const undecided = createProject({ request_id: 'create-2', mode: 'quick' }, { workflowVersion: 'software-v1' })
   await handleGuideMessage({ project_id: undecided.project_id, session_id: 's2', request_id: 'r2', mode: 'quick', current_stage: 'clarifying', content: '做加法工具，不需要草图，先确认任务单' }, () => {},
     { query, env: {}, signal: new AbortController().signal, sessionId: 's2', history: [], maxTokens: 8192, persistAssistant: vi.fn() })
   expect(readPrdBackplane(undecided.project_id).user_confirmed_at).toBeUndefined()

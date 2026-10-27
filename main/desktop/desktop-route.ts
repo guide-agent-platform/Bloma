@@ -1,17 +1,16 @@
 /** Short production routing; retired phase dispatch has no executor here. */
-import {isModernWorkflowVersion} from '../../shared/workflow-version'
 import {findProject} from '../project/project-service'
 import {GENERATION_MAX_TOKENS} from '../platform/llm/model-resolution'
 import type {SDKQuery} from '../orchestration/stages/orchestration-contracts'
 import {isLeanProject} from './workflow-policy'
 import {workflowRetirementReason} from './workflow-retirement'
 import type {DesktopRouteDeps,DesktopRouteInput} from './production-contracts'
-export {defaultQuickSecurityGate,defaultLaunchSmokeGate,type DesktopRouteDeps,type DesktopRouteInput,type QuickSecurityGateResult} from './production-contracts'
+export {defaultQuickSecurityGate,type DesktopRouteDeps,type DesktopRouteInput,type QuickSecurityGateResult} from './production-contracts'
 export interface DesktopLineProjectLike{project_id?:string;workflow_version?:import('../../shared/workflow-version').ModernWorkflowVersion;template_type:string;desktop_phase?:string;current_stage?:string}
 export const DESKTOP_LINE_TEMPLATE_TYPES:ReadonlySet<string>=new Set(['desktop_tool','game'])
 const PHASE_IDS=new Set(['requirements','desktop-arch','desktop-scaffold','desktop-implement','desktop-verify','delivered'])
 export function shouldEnterDesktopLine(project:DesktopLineProjectLike|undefined):boolean{
-  return !!project&&isModernWorkflowVersion(project.workflow_version)&&(!project.project_id||isLeanProject(project.project_id))&&DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)
+  return !!project&&project.workflow_version==='software-v1'&&(!project.project_id||isLeanProject(project.project_id))&&DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)
 }
 export function isDesktopLineActive(project:DesktopLineProjectLike|undefined):boolean{
   return shouldEnterDesktopLine(project)&&(PHASE_IDS.has(project?.desktop_phase??'')||['generating_mvp','testing','completed','ready'].includes(project?.current_stage??''))

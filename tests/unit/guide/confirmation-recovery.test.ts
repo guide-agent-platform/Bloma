@@ -37,7 +37,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true })
 })
 function setup() {
-  const project = createProject({ request_id: 'create', mode: 'quick' },{workflowVersion:'lean-v1'})
+  const project = createProject({ request_id: 'create', mode: 'quick' },{workflowVersion:'software-v1'})
   const organized = organizedPrd([{ id: 'F-001', description: '保存记录' }], '保存后重启仍保留记录')
   const prd = projectRequirementsModel(bindAcceptance({ project_id: project.project_id, name: '记录', positioning: '记录管理', requirements: organized.requirements,
     requirements_model: organized.requirements_model, acceptance: {}, constraints: [], assumptions: [], out_of_scope: [] }))

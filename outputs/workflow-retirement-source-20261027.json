@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "4ddf814b8b49506938fd4907b5e8a65b9d32ecce",
-  "scope_version": 7,
+  "source_revision": "c096a50d0b6c2b91d0e38a2d9353c42f5eb66392",
+  "scope_version": 8,
   "scanner_sha256": "e4369a6fe2ce260f9b12487ceddb7f75a369f262b31fb8bd71a8daaba23b472a",
-  "scope_sha256": "06b78f0cb1439f3eec8362c68cf12ec8c94bf2d535de103881fe2415be59d8e3",
-  "source_input_digest": "acbe95f8a923a6800adf74ef0fcd496fc48881c517278eb09580e14f97cb1ee4",
+  "scope_sha256": "621de6ce906ba8d15ab321091335dff461c906e8011b33939d6bba152ae10d1c",
+  "source_input_digest": "d60c3f254c0823e32cee112ab3408a38f2fdd4da6da2f051fbbdc4b459ff8740",
   "method": "existing tracked and unignored working files + TypeScript AST static/type/reexport/literal dynamic/require imports; retired paths must remain absent; no app execution or symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,18 +19,18 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 810,
-    "module_edges": 3016,
+    "scanned_sources": 805,
+    "module_edges": 2973,
     "asset_edges": 38,
-    "scoped_modules": 83,
+    "scoped_modules": 81,
     "groups": {
       "legacy_retirement_boundary": 2,
-      "production_shared_extracted": 4,
+      "production_shared_extracted": 3,
       "longterm_milestones_keep": 5,
       "modern_workflow_keep": 14,
       "current_routes_and_storage_keep": 10,
       "frozen_experiment_separate": 5,
-      "shared_capability_keep_migrate": 26,
+      "shared_capability_keep_migrate": 25,
       "history_data_and_user_access_keep": 12,
       "legacy_card_identity_keep": 1,
       "historical_schema_and_shared_diagnostics": 1,
@@ -52,7 +52,6 @@
       "action": "keep",
       "reason": "Shared tools, completion and host gates extracted from legacy orchestrators before retirement.",
       "paths": [
-        "main/desktop/production-runtime-tools.ts",
         "main/desktop/production-tool-assembly.ts",
         "main/desktop/production-completion.ts",
         "main/desktop/production-contracts.ts"
@@ -120,7 +119,6 @@
       "reason": "Shared resource discovery, project preparation and independent capability verification were retained and migrated in batch B.",
       "paths": [
         "main/desktop/component-library.ts",
-        "main/desktop/resource-discovery.ts",
         "main/desktop/install-packages-tool.ts",
         "main/desktop/skeleton-provision.ts",
         "main/desktop/process-driver.ts",
@@ -367,7 +365,7 @@
       "path": "main/desktop/component-library.ts",
       "group": "shared_capability_keep_migrate",
       "sha256": "85d9b799245cf3ac680161253db901e27f6d68c09032ce9d879e8f37661a9e9b",
-      "module_load_reachable": true,
+      "module_load_reachable": false,
       "runtime_importers": [
         {
           "from": "main/desktop/install-packages-tool.ts",
@@ -713,7 +711,7 @@
     {
       "path": "main/desktop/desktop-route.ts",
       "group": "current_routes_and_storage_keep",
-      "sha256": "c4aa180f2b87a136539fdc7ed4db006a1ca6df92d34b102421d59c1c74a1a6f0",
+      "sha256": "de53564a47ab32eb90369c29d78bf38aa61613dc92d4d9c8c6c06bbfab04350c",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -758,14 +756,6 @@
           "specifier": "../../../main/desktop/desktop-route",
           "kind": "static_runtime",
           "line": 8
-        },
-        {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/desktop/desktop-route.ts",
-          "resolution": "module",
-          "specifier": "../../../main/desktop/desktop-route",
-          "kind": "static_runtime",
-          "line": 9
         },
         {
           "from": "tests/unit/guide/confirmation-recovery.test.ts",
@@ -1481,16 +1471,8 @@
       "path": "main/desktop/install-packages-tool.ts",
       "group": "shared_capability_keep_migrate",
       "sha256": "0de493cd0a3ebb8c682593bdfc87458c76b5862cd08e8f381050b9f30da2d7b9",
-      "module_load_reachable": true,
+      "module_load_reachable": false,
       "runtime_importers": [
-        {
-          "from": "main/desktop/production-runtime-tools.ts",
-          "to": "main/desktop/install-packages-tool.ts",
-          "resolution": "module",
-          "specifier": "./install-packages-tool",
-          "kind": "static_runtime",
-          "line": 9
-        },
         {
           "from": "scripts/prepare-experiment-environment.ts",
           "to": "main/desktop/install-packages-tool.ts",
@@ -1614,14 +1596,6 @@
           "line": 16
         },
         {
-          "from": "main/desktop/production-contracts.ts",
-          "to": "main/desktop/launch-smoke.ts",
-          "resolution": "module",
-          "specifier": "./launch-smoke",
-          "kind": "static_runtime",
-          "line": 6
-        },
-        {
           "from": "main/ipc/project-deliverables.ts",
           "to": "main/desktop/launch-smoke.ts",
           "resolution": "module",
@@ -1679,6 +1653,14 @@
         }
       ],
       "type_importers": [
+        {
+          "from": "main/desktop/production-contracts.ts",
+          "to": "main/desktop/launch-smoke.ts",
+          "resolution": "module",
+          "specifier": "./launch-smoke",
+          "kind": "type",
+          "line": 6
+        },
         {
           "from": "main/software/correction-runtime.ts",
           "to": "main/desktop/launch-smoke.ts",
@@ -1849,14 +1831,6 @@
           "line": 12
         },
         {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/desktop/lean-budget.ts",
-          "resolution": "module",
-          "specifier": "../../../main/desktop/lean-budget",
-          "kind": "static_runtime",
-          "line": 11
-        },
-        {
           "from": "tests/unit/desktop/production-budget.test.ts",
           "to": "main/desktop/lean-budget.ts",
           "resolution": "module",
@@ -1905,7 +1879,7 @@
     {
       "path": "main/desktop/lean-production.ts",
       "group": "modern_workflow_keep",
-      "sha256": "c7ebcb6a742c17b1dc9b35038f12682457464ad99a4e1b1934401f9b7a165e67",
+      "sha256": "db51f2ed6aeed77e76bdbd4169108dbbbde15579653643b56181298a554fd1bb",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -1914,7 +1888,7 @@
           "resolution": "module",
           "specifier": "./lean-production",
           "kind": "dynamic_runtime",
-          "line": 25
+          "line": 24
         },
         {
           "from": "main/desktop/desktop-route.ts",
@@ -1922,7 +1896,7 @@
           "resolution": "module",
           "specifier": "./lean-production",
           "kind": "dynamic_runtime",
-          "line": 33
+          "line": 32
         }
       ],
       "type_importers": [],
@@ -2089,14 +2063,6 @@
           "specifier": "./process-driver",
           "kind": "static_runtime",
           "line": 7
-        },
-        {
-          "from": "main/desktop/resource-discovery.ts",
-          "to": "main/desktop/process-driver.ts",
-          "resolution": "module",
-          "specifier": "./process-driver",
-          "kind": "static_runtime",
-          "line": 9
         },
         {
           "from": "main/desktop/speech-verification.ts",
@@ -2377,14 +2343,6 @@
       "module_load_reachable": true,
       "runtime_importers": [
         {
-          "from": "main/desktop/production-runtime-tools.ts",
-          "to": "main/desktop/production-context.ts",
-          "resolution": "module",
-          "specifier": "./production-context",
-          "kind": "static_runtime",
-          "line": 7
-        },
-        {
           "from": "main/software/agent-tools.ts",
           "to": "main/desktop/production-context.ts",
           "resolution": "module",
@@ -2422,7 +2380,7 @@
     {
       "path": "main/desktop/production-contracts.ts",
       "group": "production_shared_extracted",
-      "sha256": "3b9626ea69f5eca65de3b07d49146803f7d712a981538e8e9a15734055392e04",
+      "sha256": "6d75174134b40b89295b5652da7efcc6f889d54118d91e03e71646cab725a1ae",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2431,7 +2389,7 @@
           "resolution": "module",
           "specifier": "./production-contracts",
           "kind": "reexport_runtime",
-          "line": 9
+          "line": 8
         },
         {
           "from": "main/desktop/lean-production.ts",
@@ -2449,7 +2407,7 @@
           "resolution": "module",
           "specifier": "./production-contracts",
           "kind": "type",
-          "line": 8
+          "line": 7
         },
         {
           "from": "main/software/longterm-message.ts",
@@ -2463,55 +2421,6 @@
       "test_importers": [],
       "string_references": [],
       "asset_terms": [],
-      "computed_imports": [],
-      "deletion_authorized": false
-    },
-    {
-      "path": "main/desktop/production-runtime-tools.ts",
-      "group": "production_shared_extracted",
-      "sha256": "45239b44ad6cab1b6c0585244e69d724b3536cab57f8af7f1a81800882fffba6",
-      "module_load_reachable": true,
-      "runtime_importers": [
-        {
-          "from": "main/desktop/lean-production.ts",
-          "to": "main/desktop/production-runtime-tools.ts",
-          "resolution": "module",
-          "specifier": "./production-runtime-tools",
-          "kind": "static_runtime",
-          "line": 10
-        }
-      ],
-      "type_importers": [],
-      "test_importers": [
-        {
-          "from": "tests/unit/desktop/child-exec-tool.test.ts",
-          "to": "main/desktop/production-runtime-tools.ts",
-          "resolution": "module",
-          "specifier": "../../../main/desktop/production-runtime-tools",
-          "kind": "static_runtime",
-          "line": 14
-        },
-        {
-          "from": "tests/unit/desktop/child-tools.test.ts",
-          "to": "main/desktop/production-runtime-tools.ts",
-          "resolution": "module",
-          "specifier": "../../../main/desktop/production-runtime-tools",
-          "kind": "static_runtime",
-          "line": 12
-        },
-        {
-          "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "to": "main/desktop/production-runtime-tools.ts",
-          "resolution": "module",
-          "specifier": "../../../main/desktop/production-runtime-tools",
-          "kind": "static_runtime",
-          "line": 16
-        }
-      ],
-      "string_references": [],
-      "asset_terms": [
-        "desktop-arch"
-      ],
       "computed_imports": [],
       "deletion_authorized": false
     },
@@ -2538,53 +2447,11 @@
       "deletion_authorized": false
     },
     {
-      "path": "main/desktop/resource-discovery.ts",
-      "group": "shared_capability_keep_migrate",
-      "sha256": "1060f3acef77b7931fa55c14752e1e9097abfc4ee1fa41bb25885f18bb368e7e",
-      "module_load_reachable": true,
-      "runtime_importers": [
-        {
-          "from": "main/desktop/production-runtime-tools.ts",
-          "to": "main/desktop/resource-discovery.ts",
-          "resolution": "module",
-          "specifier": "./resource-discovery",
-          "kind": "static_runtime",
-          "line": 6
-        }
-      ],
-      "type_importers": [],
-      "test_importers": [
-        {
-          "from": "tests/unit/desktop/resource-discovery.test.ts",
-          "to": "main/desktop/resource-discovery.ts",
-          "resolution": "module",
-          "specifier": "../../../main/desktop/resource-discovery",
-          "kind": "static_runtime",
-          "line": 6
-        }
-      ],
-      "string_references": [],
-      "asset_terms": [
-        "speech_runtime.py",
-        "speech_locator.py"
-      ],
-      "computed_imports": [],
-      "deletion_authorized": false
-    },
-    {
       "path": "main/desktop/skeleton-provision.ts",
       "group": "shared_capability_keep_migrate",
       "sha256": "239726e6c6eea9f9197d4db4a7013587170f397f46a1ca316ee5dd9d9ced27df",
-      "module_load_reachable": true,
+      "module_load_reachable": false,
       "runtime_importers": [
-        {
-          "from": "main/desktop/lean-production.ts",
-          "to": "main/desktop/skeleton-provision.ts",
-          "resolution": "module",
-          "specifier": "./skeleton-provision",
-          "kind": "static_runtime",
-          "line": 14
-        },
         {
           "from": "scripts/prepare-experiment-environment.ts",
           "to": "main/desktop/skeleton-provision.ts",
@@ -2917,7 +2784,7 @@
     {
       "path": "main/desktop/workflow-policy.ts",
       "group": "current_routes_and_storage_keep",
-      "sha256": "a2f8cdf15210ad75f71b3a7dc4ea288668678acc0008308c5549b233b56b7973",
+      "sha256": "a5e0db3f961787e6ce84936464de2f4e2f6c379529d0c3e142a3996befe9a86d",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2950,7 +2817,7 @@
           "resolution": "module",
           "specifier": "./workflow-policy",
           "kind": "static_runtime",
-          "line": 6
+          "line": 5
         },
         {
           "from": "main/desktop/gui-acceptance.ts",
@@ -3068,7 +2935,7 @@
     {
       "path": "main/desktop/workflow-retirement.ts",
       "group": "legacy_retirement_boundary",
-      "sha256": "c1048768a0533442e4ba7c81d5443ae603ce76e7b8240dbc4e284caa7ad134eb",
+      "sha256": "078e8fca3f1d7a45af4ab4f85d6653d712f7e90497d5a130e3c439d109112411",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -3077,7 +2944,7 @@
           "resolution": "module",
           "specifier": "./workflow-retirement",
           "kind": "static_runtime",
-          "line": 7
+          "line": 6
         },
         {
           "from": "main/desktop/lean-production.ts",
@@ -3094,6 +2961,14 @@
           "specifier": "./workflow-retirement",
           "kind": "static_runtime",
           "line": 3
+        },
+        {
+          "from": "main/guide/lean-guide.ts",
+          "to": "main/desktop/workflow-retirement.ts",
+          "resolution": "module",
+          "specifier": "../desktop/workflow-retirement",
+          "kind": "static_runtime",
+          "line": 24
         },
         {
           "from": "main/guide/pending-decision.ts",
@@ -3362,14 +3237,6 @@
           "line": 6
         },
         {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/guide/lean-brief.ts",
-          "resolution": "module",
-          "specifier": "../../../main/guide/lean-brief",
-          "kind": "static_runtime",
-          "line": 6
-        },
-        {
           "from": "tests/unit/guide/lean-ux.test.ts",
           "to": "main/guide/lean-brief.ts",
           "resolution": "module",
@@ -3554,7 +3421,7 @@
     {
       "path": "main/guide/lean-guide.ts",
       "group": "modern_workflow_keep",
-      "sha256": "f8d573ac1a7138cf0c2994a82311163f2a2b7b9733e277819cb79e4ea258e639",
+      "sha256": "e747e843db0d11e5764ad10864f268f74830d8ee9ec94f8f7a4a63da825662a6",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -4255,14 +4122,6 @@
       ],
       "type_importers": [],
       "test_importers": [
-        {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/platform/llm/monetary-budget.ts",
-          "resolution": "module",
-          "specifier": "../../../main/platform/llm/monetary-budget",
-          "kind": "static_runtime",
-          "line": 14
-        },
         {
           "from": "tests/unit/monetary-budget.test.ts",
           "to": "main/platform/llm/monetary-budget.ts",
@@ -5011,14 +4870,6 @@
           "line": 8
         },
         {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/project/document-sync.ts",
-          "resolution": "module",
-          "specifier": "../../../main/project/document-sync",
-          "kind": "static_runtime",
-          "line": 7
-        },
-        {
           "from": "tests/unit/software/budget-host-completion.test.ts",
           "to": "main/project/document-sync.ts",
           "resolution": "module",
@@ -5426,14 +5277,6 @@
           "line": 7
         },
         {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/project/prd-store.ts",
-          "resolution": "module",
-          "specifier": "../../../main/project/prd-store",
-          "kind": "static_runtime",
-          "line": 8
-        },
-        {
           "from": "tests/unit/guide/lean-guide.test.ts",
           "to": "main/project/prd-store.ts",
           "resolution": "module",
@@ -5787,7 +5630,7 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
-          "line": 3
+          "line": 2
         },
         {
           "from": "main/desktop/drive-app-tool.ts",
@@ -5847,14 +5690,6 @@
         },
         {
           "from": "main/desktop/production-contracts.ts",
-          "to": "main/project/project-service.ts",
-          "resolution": "module",
-          "specifier": "../project/project-service",
-          "kind": "static_runtime",
-          "line": 7
-        },
-        {
-          "from": "main/desktop/resource-discovery.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
           "specifier": "../project/project-service",
@@ -6481,14 +6316,6 @@
           "line": 16
         },
         {
-          "from": "tests/unit/desktop/child-tools.test.ts",
-          "to": "main/project/project-service.ts",
-          "resolution": "module",
-          "specifier": "../../../main/project/project-service",
-          "kind": "static_runtime",
-          "line": 15
-        },
-        {
           "from": "tests/unit/desktop/correction-session.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6537,14 +6364,6 @@
           "line": 5
         },
         {
-          "from": "tests/unit/desktop/lean-production.test.ts",
-          "to": "main/project/project-service.ts",
-          "resolution": "module",
-          "specifier": "../../../main/project/project-service",
-          "kind": "static_runtime",
-          "line": 5
-        },
-        {
           "from": "tests/unit/desktop/production-budget.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6559,14 +6378,6 @@
           "specifier": "../../../main/project/project-service",
           "kind": "static_runtime",
           "line": 9
-        },
-        {
-          "from": "tests/unit/desktop/resource-discovery.test.ts",
-          "to": "main/project/project-service.ts",
-          "resolution": "module",
-          "specifier": "../../../main/project/project-service",
-          "kind": "static_runtime",
-          "line": 7
         },
         {
           "from": "tests/unit/desktop/verification-receipts.test.ts",
@@ -8722,17 +8533,9 @@
     {
       "path": "shared/workflow-version.ts",
       "group": "history_data_and_user_access_keep",
-      "sha256": "0ba7d2a34b4591016661bc9e71fdf1ab946bc4ed8bc9d205edfde82089c82780",
+      "sha256": "f5b40b6613ad6157e6abc5a0ea26bfd3fcc44ec2da13b06345814b44bc84feba",
       "module_load_reachable": true,
       "runtime_importers": [
-        {
-          "from": "main/desktop/desktop-route.ts",
-          "to": "shared/workflow-version.ts",
-          "resolution": "module",
-          "specifier": "../../shared/workflow-version",
-          "kind": "static_runtime",
-          "line": 2
-        },
         {
           "from": "main/desktop/workflow-policy.ts",
           "to": "shared/workflow-version.ts",
@@ -9066,14 +8869,6 @@
           "specifier": "../../storage/config-paths",
           "kind": "static_runtime",
           "line": 2
-        },
-        {
-          "from": "main/desktop/resource-discovery.ts",
-          "to": "storage/config-paths.ts",
-          "resolution": "module",
-          "specifier": "../../storage/config-paths",
-          "kind": "static_runtime",
-          "line": 3
         },
         {
           "from": "main/desktop/speech-verification.ts",
@@ -9932,7 +9727,7 @@
       "path": "main/desktop/desktop-route.ts",
       "needle": "await runLeanProduction({ ...input, query, env",
       "meaning": "Modern projects use the shared Pi production loop.",
-      "line": 26
+      "line": 25
     },
     {
       "id": "shared_production_tools",
@@ -9940,13 +9735,6 @@
       "needle": "productionAgentTools(baseTools",
       "meaning": "Shared helper in an old-named module still serves modern projects.",
       "line": 195
-    },
-    {
-      "id": "legacy_python_fallback",
-      "path": "main/desktop/lean-production.ts",
-      "needle": "if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2",
-      "meaning": "lean-v1 still consumes Python skeleton support; software-v1 does not materialize it by default.",
-      "line": 159
     },
     {
       "id": "software_tool_filter",
@@ -9975,6 +9763,13 @@
       "needle": "if(!['inspect','report','aggregate'].includes(command))",
       "meaning": "All former preparation, restore, evaluation and execution commands reject before touching the requested home.",
       "line": 15
+    },
+    {
+      "id": "lean_v1_retired",
+      "path": "main/desktop/workflow-retirement.ts",
+      "needle": "if (project.workflow_version === 'lean-v1') return",
+      "meaning": "Recorded lean-v1 projects stay readable and explicitly migrate; no old production or budget replay.",
+      "line": 14
     }
   ],
   "symbols": [
@@ -9983,7 +9778,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 14,
+          "line": 13,
           "kind": "source"
         },
         {
@@ -10148,7 +9943,7 @@
         },
         {
           "path": "main/guide/lean-guide.ts",
-          "line": 113,
+          "line": 116,
           "kind": "source"
         },
         {
@@ -10212,7 +10007,7 @@
       "sites": [
         {
           "path": "main/guide/lean-guide.ts",
-          "line": 52,
+          "line": 55,
           "kind": "source"
         },
         {
@@ -10228,66 +10023,6 @@
         {
           "path": "tests/fixtures/software-recovery/worker.ts",
           "line": 49,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 27,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 58,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 69,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 76,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 92,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 103,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 105,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 109,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 119,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 131,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 135,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 147,
           "kind": "test"
         },
         {
@@ -10369,6 +10104,11 @@
           "path": "tests/unit/software/workflow-retirement.test.ts",
           "line": 49,
           "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/workflow-retirement.test.ts",
+          "line": 62,
+          "kind": "test"
         }
       ]
     },
@@ -10392,12 +10132,12 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 26,
+          "line": 25,
           "kind": "source"
         },
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 34,
+          "line": 33,
           "kind": "source"
         }
       ]
@@ -10408,53 +10148,7 @@
     },
     {
       "name": "buildDesktopChildTools",
-      "sites": [
-        {
-          "path": "main/desktop/lean-production.ts",
-          "line": 193,
-          "kind": "source"
-        },
-        {
-          "path": "main/desktop/lean-production.ts",
-          "line": 222,
-          "kind": "source"
-        },
-        {
-          "path": "tests/unit/desktop/child-exec-tool.test.ts",
-          "line": 182,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/child-exec-tool.test.ts",
-          "line": 184,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/child-exec-tool.test.ts",
-          "line": 186,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/child-tools.test.ts",
-          "line": 45,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/child-tools.test.ts",
-          "line": 62,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 162,
-          "kind": "test"
-        },
-        {
-          "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 165,
-          "kind": "test"
-        }
-      ]
+      "sites": []
     },
     {
       "name": "productionAgentTools",
@@ -10518,7 +10212,7 @@
       "sites": [
         {
           "path": "main/guide/lean-guide.ts",
-          "line": 92,
+          "line": 95,
           "kind": "source"
         },
         {
@@ -10555,27 +10249,11 @@
     },
     {
       "name": "buildResourceDiscoveryTool",
-      "sites": [
-        {
-          "path": "main/desktop/production-runtime-tools.ts",
-          "line": 29,
-          "kind": "source"
-        },
-        {
-          "path": "tests/unit/desktop/resource-discovery.test.ts",
-          "line": 17,
-          "kind": "test"
-        }
-      ]
+      "sites": []
     },
     {
       "name": "buildInstallPackagesTool",
       "sites": [
-        {
-          "path": "main/desktop/production-runtime-tools.ts",
-          "line": 37,
-          "kind": "source"
-        },
         {
           "path": "scripts/prepare-experiment-environment.ts",
           "line": 26,
@@ -10628,17 +10306,17 @@
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 172,
+          "line": 164,
           "kind": "test"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 191,
+          "line": 183,
           "kind": "test"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 202,
+          "line": 194,
           "kind": "test"
         }
       ]
@@ -10646,11 +10324,6 @@
     {
       "name": "provisionDesktopSkeletonV2",
       "sites": [
-        {
-          "path": "main/desktop/lean-production.ts",
-          "line": 159,
-          "kind": "source"
-        },
         {
           "path": "scripts/prepare-experiment-environment.ts",
           "line": 21,
@@ -10862,11 +10535,6 @@
           "value": "已生成 speech_runtime.py：SpeechEngine.prepare/transcribe(samples,sample_rate)，StreamingRecorder.start(on_text,on_error)/stop；on_text 是累计转写文本，回调转到 UI 线程。模型准备失败可重试，录音回调仅入队。"
         },
         {
-          "path": "main/desktop/resource-discovery.ts",
-          "line": 46,
-          "value": "speech_runtime.py"
-        },
-        {
           "path": "main/desktop/speech-verification.ts",
           "line": 43,
           "value": "speech_runtime.py"
@@ -10898,12 +10566,12 @@
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 179,
+          "line": 171,
           "value": "speech_runtime.py"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 180,
+          "line": 172,
           "value": "speech_runtime.py"
         },
         {
@@ -10967,11 +10635,6 @@
           "value": "已生成 speech_locator.py（语音模型定位器：import 它调 ensure_models() 拿模型路径，勿手写下载逻辑）"
         },
         {
-          "path": "main/desktop/resource-discovery.ts",
-          "line": 46,
-          "value": "speech_locator.py"
-        },
-        {
           "path": "main/desktop/speech-verification.ts",
           "line": 43,
           "value": "speech_locator.py"
@@ -10988,27 +10651,27 @@
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 170,
+          "line": 162,
           "value": "语音资产：装 sherpa-onnx 时项目根自动落 speech_locator.py（幂等，其他包不落）"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 175,
+          "line": 167,
           "value": "speech_locator.py"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 178,
+          "line": 170,
           "value": "speech_locator.py"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 185,
+          "line": 177,
           "value": "已生成 speech_locator.py"
         },
         {
           "path": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 188,
+          "line": 180,
           "value": "speech_locator.py"
         },
         {
@@ -11262,11 +10925,6 @@
       "term": "PHASE_ADVANCE",
       "sites": [
         {
-          "path": "tests/unit/desktop/lean-production.test.ts",
-          "line": 61,
-          "value": "PHASE_ADVANCE"
-        },
-        {
           "path": "tests/unit/studio-message-actions.test.tsx",
           "line": 21,
           "value": "界面已准备好。\nPHASE_ADVANCE: desktop-implement"
@@ -11288,7 +10946,7 @@
       "sites": [
         {
           "path": "main/desktop/desktop-route.ts",
-          "line": 12,
+          "line": 11,
           "value": "desktop-arch"
         },
         {
@@ -11305,11 +10963,6 @@
           "path": "main/desktop/production-budget.ts",
           "line": 27,
           "value": "desktop-arch"
-        },
-        {
-          "path": "main/desktop/production-runtime-tools.ts",
-          "line": 58,
-          "value": "desktop-arch 环境清单与选型结论的 [实证] 来源；失败项按分类如实报告，不要编造。"
         },
         {
           "path": "renderer/components/DesktopStageBar.tsx",
@@ -11519,10 +11172,6 @@
           "line": 250
         },
         {
-          "from": "main/desktop/resource-discovery.ts",
-          "line": 46
-        },
-        {
           "from": "main/desktop/speech-verification.ts",
           "line": 43
         },
@@ -11548,11 +11197,11 @@
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 179
+          "line": 171
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 180
+          "line": 172
         },
         {
           "from": "tests/unit/desktop/speech-verification.test.ts",
@@ -11605,10 +11254,6 @@
           "line": 240
         },
         {
-          "from": "main/desktop/resource-discovery.ts",
-          "line": 46
-        },
-        {
           "from": "main/desktop/speech-verification.ts",
           "line": 43
         },
@@ -11622,23 +11267,23 @@
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 162
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
+          "line": 167
+        },
+        {
+          "from": "tests/unit/desktop/install-packages-tool.test.ts",
           "line": 170
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 175
+          "line": 177
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 178
-        },
-        {
-          "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 185
-        },
-        {
-          "from": "tests/unit/desktop/install-packages-tool.test.ts",
-          "line": 188
+          "line": 180
         },
         {
           "from": "tests/unit/desktop/speech-verification.test.ts",
@@ -12343,6 +11988,36 @@
       "from_revision": "4ddf814",
       "git_blob": "86721f7ef821b7a6f4488925579b6a8963e2b239",
       "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/desktop/production-runtime-tools.ts",
+      "from_revision": "c096a50",
+      "git_blob": "42baa363308431d3b4f7141ac8bfabee8c85b9f6",
+      "reason": "lean-v1 production path and its old tool factory tests retired; shared capability tools remain."
+    },
+    {
+      "path": "tests/unit/desktop/child-tools.test.ts",
+      "from_revision": "c096a50",
+      "git_blob": "e826e742b5a7fc609eeee3523a65cb396a4e4758",
+      "reason": "lean-v1 production path and its old tool factory tests retired; shared capability tools remain."
+    },
+    {
+      "path": "tests/unit/desktop/lean-production.test.ts",
+      "from_revision": "c096a50",
+      "git_blob": "182a025e39a75eafc79d0f819b14aa7f7c25c345",
+      "reason": "lean-v1 production path and its old tool factory tests retired; shared capability tools remain."
+    },
+    {
+      "path": "main/desktop/resource-discovery.ts",
+      "from_revision": "c096a50",
+      "git_blob": "66d264b63ff62bdcb1f024aaf6a9995751e310d2",
+      "reason": "Obsolete discovery interface had no runtime callers after lean-v1 retirement; current capability inspection/preparation and speech verifiers retained."
+    },
+    {
+      "path": "tests/unit/desktop/resource-discovery.test.ts",
+      "from_revision": "c096a50",
+      "git_blob": "4d282e7546749995691faf1270d597f12f00e1bf",
+      "reason": "Obsolete discovery interface had no runtime callers after lean-v1 retirement; current capability inspection/preparation and speech verifiers retained."
     }
   ],
   "unresolved_relative_imports": [],

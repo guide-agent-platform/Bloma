@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { restorePromaHome } from '../../support/proma-home-guard'
 import { DriverExecutionError, type DriverCommandRequest } from '../../../main/desktop/process-driver'
 import { buildChildScriptRunnerTool } from '../../../main/desktop/child-exec-tool'
-import { buildDesktopChildTools } from '../../../main/desktop/production-runtime-tools'
+
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { createProject } from '../../../main/project/project-service'
 
@@ -178,11 +178,4 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     expect(noPythonOutcome.output).toContain('python-not-found')
   })
 
-  it('角色装配面：implement 有 run_project_script，research 没有', () => {
-    const implTools = buildDesktopChildTools(projectId, 'implement', 'diff')
-    expect(implTools.some((tool) => tool.name === 'run_project_script')).toBe(true)
-    const researchTools = buildDesktopChildTools(projectId, 'research', 'diff')
-    expect(researchTools.some((tool) => tool.name === 'run_project_script')).toBe(false)
-    expect(buildDesktopChildTools(projectId, 'custom', 'diff').some((tool) => tool.name === 'run_project_script')).toBe(true)
-  })
 })

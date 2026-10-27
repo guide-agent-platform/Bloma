@@ -3,29 +3,12 @@ import type {AgentEvent} from '../../shared/types'
 import type {SDKQuery} from '../orchestration/stages/orchestration-contracts'
 import type {CoreVerificationResult} from './core-verification'
 import type {DriverSpawn} from './process-driver'
-import {runLaunchSmoke,type LaunchSmokeResult} from './launch-smoke'
+import type {LaunchSmokeResult} from './launch-smoke'
 import {findProject} from '../project/project-service'
 import {runSecurityScan} from '../verification/security-scan'
 import {writeTextFileAtomic} from '../../storage/json-store'
 import {join} from 'node:path'
 
-
-/** 启动冒烟门缺省实现（2026-10-04；批1 2026-10-06 起服务 quick/longterm 双路）：读项目根
- *  真实 spawn 一次——宽限期内退出（含启动即崩）即不通过，stdout/stderr 尾部随卡回传修复轮；
- *  有 window_title 时走联合判定档（探针：窗口可见/消息循环响应/稳定期/优雅关闭/错误框），
- *  截图落 00_VERIFY/screenshots（delivered 卡自动嵌图）。项目根缺失/异常返回 null 跳过
- *  留痕（冒烟门不做可用性单点）。 */
-export async function defaultLaunchSmokeGate(projectId: string, signal?: AbortSignal): Promise<LaunchSmokeResult | null> {
-  try {
-    const project = findProject(projectId)
-    if (!project?.root_path) return null
-    return await runLaunchSmoke(project.root_path, { signal,projectId })
-  } catch (error) {
-    if (signal?.aborted) throw error
-    console.error('[desktop-quick] 启动冒烟执行失败（跳过本次门禁，留痕）：', error)
-    return null
-  }
-}
 
 
 // =========================================================================
@@ -53,7 +36,7 @@ export interface DesktopRouteDeps {
    *  缺省生产实现见 defaultQuickSecurityGate（无项目上下文返回 null 跳过留痕）。 */
   securityScan?: (projectId: string) => QuickSecurityGateResult | null
   /** 启动冒烟门注入（2026-10-04 呈现层收口）：quick 直落 delivered 前真实启动一次；
-   *  缺省生产实现见 defaultLaunchSmokeGate（无项目上下文返回 null 跳过留痕）。 */
+   *  缺省由当前发布验收器检查封存候选；此处只供宿主测试注入。 */
   launchSmoke?: (projectId: string, signal?: AbortSignal) => Promise<LaunchSmokeResult | null>
 }
 

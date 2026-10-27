@@ -8,7 +8,7 @@ export function usesLeanWorkflow(project: Pick<Project, 'workflow_version'>, exp
   if (experimental) return false
   if (project.workflow_version === undefined) return false
   if (!isModernWorkflowVersion(project.workflow_version)) throw new Error('WORKFLOW_VERSION_UNSUPPORTED')
-  return true
+  return project.workflow_version === 'software-v1'
 }
 
 export function isLeanProject(projectId: string): boolean {

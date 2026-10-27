@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -15,7 +15,6 @@
       "action": "keep",
       "reason": "Shared tools, completion and host gates extracted from legacy orchestrators before retirement.",
       "paths": [
-        "main/desktop/production-runtime-tools.ts",
         "main/desktop/production-tool-assembly.ts",
         "main/desktop/production-completion.ts",
         "main/desktop/production-contracts.ts"
@@ -83,7 +82,6 @@
       "reason": "Shared resource discovery, project preparation and independent capability verification were retained and migrated in batch B.",
       "paths": [
         "main/desktop/component-library.ts",
-        "main/desktop/resource-discovery.ts",
         "main/desktop/install-packages-tool.ts",
         "main/desktop/skeleton-provision.ts",
         "main/desktop/process-driver.ts",
@@ -212,12 +210,6 @@
       "meaning": "Shared helper in an old-named module still serves modern projects."
     },
     {
-      "id": "legacy_python_fallback",
-      "path": "main/desktop/lean-production.ts",
-      "needle": "if (!software && brief.lean_brief.ui === 'required') provisionDesktopSkeletonV2",
-      "meaning": "lean-v1 still consumes Python skeleton support; software-v1 does not materialize it by default."
-    },
-    {
       "id": "software_tool_filter",
       "path": "main/software/agent-tools.ts",
       "needle": "const FILE_TOOLS = new Set",
@@ -240,6 +232,12 @@
       "path": "scripts/dispatch-experiment-entry.ts",
       "needle": "if(!['inspect','report','aggregate'].includes(command))",
       "meaning": "All former preparation, restore, evaluation and execution commands reject before touching the requested home."
+    },
+    {
+      "id": "lean_v1_retired",
+      "path": "main/desktop/workflow-retirement.ts",
+      "needle": "if (project.workflow_version === 'lean-v1') return",
+      "meaning": "Recorded lean-v1 projects stay readable and explicitly migrate; no old production or budget replay."
     }
   ],
   "symbols": [
@@ -926,6 +924,36 @@
       "from_revision": "4ddf814",
       "git_blob": "86721f7ef821b7a6f4488925579b6a8963e2b239",
       "reason": "Unused old guide/review helpers or retired executor tests removed after business-consumer audit."
+    },
+    {
+      "path": "main/desktop/production-runtime-tools.ts",
+      "from_revision": "c096a50",
+      "git_blob": "42baa363308431d3b4f7141ac8bfabee8c85b9f6",
+      "reason": "lean-v1 production path and its old tool factory tests retired; shared capability tools remain."
+    },
+    {
+      "path": "tests/unit/desktop/child-tools.test.ts",
+      "from_revision": "c096a50",
+      "git_blob": "e826e742b5a7fc609eeee3523a65cb396a4e4758",
+      "reason": "lean-v1 production path and its old tool factory tests retired; shared capability tools remain."
+    },
+    {
+      "path": "tests/unit/desktop/lean-production.test.ts",
+      "from_revision": "c096a50",
+      "git_blob": "182a025e39a75eafc79d0f819b14aa7f7c25c345",
+      "reason": "lean-v1 production path and its old tool factory tests retired; shared capability tools remain."
+    },
+    {
+      "path": "main/desktop/resource-discovery.ts",
+      "from_revision": "c096a50",
+      "git_blob": "66d264b63ff62bdcb1f024aaf6a9995751e310d2",
+      "reason": "Obsolete discovery interface had no runtime callers after lean-v1 retirement; current capability inspection/preparation and speech verifiers retained."
+    },
+    {
+      "path": "tests/unit/desktop/resource-discovery.test.ts",
+      "from_revision": "c096a50",
+      "git_blob": "4d282e7546749995691faf1270d597f12f00e1bf",
+      "reason": "Obsolete discovery interface had no runtime callers after lean-v1 retirement; current capability inspection/preparation and speech verifiers retained."
     }
   ]
 }

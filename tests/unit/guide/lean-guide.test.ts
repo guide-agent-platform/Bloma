@@ -13,7 +13,7 @@ let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-lean-guide-')); process.env.PROMA_HOME = home })
 afterEach(() => { if (previous === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true }) })
 function fixture(reply: unknown) {
-  const project = createProject({ request_id: 'create', mode: 'longterm' }, { workflowVersion: 'lean-v1' })
+  const project = createProject({ request_id: 'create', mode: 'longterm' }, { workflowVersion: 'software-v1' })
   const calls: string[] = [], events: AgentEvent[] = []
   const query: SDKQuery = async function* (prompt) { calls.push(prompt); yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(reply) }] } }; yield { type: 'result', subtype: 'success' } }
   const input: AgentSendMessageInput = { project_id: project.project_id, session_id: 'session', request_id: 'run', mode: 'longterm',

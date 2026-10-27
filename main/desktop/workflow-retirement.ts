@@ -11,5 +11,6 @@ export function workflowRetirementReason(project: Pick<Project, 'project_id' | '
     return '冻结实验的执行入口已退役；原始配置、事件、证据和账本保留，可只读查看或导出报告。'
   }
   if (project.workflow_version === undefined) return '旧版生成流程已退役。历史、产物和数据保留，可查看、启动已交付程序或导出；继续修改请在历史项目中选择“复制到新流程”。'
+  if (project.workflow_version === 'lean-v1') return 'lean-v1 制作流程已退役。现有程序、数据、会话和账本保留；继续修改请在历史项目中选择“复制到新流程”，新副本重新确认范围与验收。'
   if (!isModernWorkflowVersion(project.workflow_version)) return 'WORKFLOW_VERSION_UNSUPPORTED：无法执行未知版本，请先导出并核对来源。'
 }

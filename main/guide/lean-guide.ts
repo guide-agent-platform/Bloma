@@ -21,11 +21,14 @@ import { enterDesktopLine } from '../desktop/desktop-route'
 import { isSoftwareProject } from '../desktop/workflow-policy'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { adoptLeanSuggestions, parseLeanSuggestions } from './lean-suggestions'
+import { workflowRetirementReason } from '../desktop/workflow-retirement'
 
 /** One extraction includes optional ideas; no separate research or audit pipeline. */
 export async function handleLeanGuide(input: AgentSendMessageInput, publish: (event: AgentEvent) => void, model?: GuideModelOptions): Promise<void> {
   const emit = (type: AgentEvent['type'], payload: Record<string, unknown>) => publish({ event_id: randomUUID(),
     project_id: input.project_id, session_id: input.session_id, type, payload, created_at: new Date().toISOString() })
+  const retirement=workflowRetirementReason(findProject(input.project_id))
+  if(retirement){emit('message_delta',{text:retirement});emit('message_completed',{subtype:'incomplete'});return}
   if (!model) { emit('message_delta', { text: '模型渠道不可用，需求已保留，尚未开工。' }); emit('message_completed', { subtype: 'incomplete' }); return }
   const project = findProject(input.project_id)
   const brief = readPrdBackplane(input.project_id)

@@ -55,9 +55,12 @@ it('all guide and desktop message entry points return retirement before model or
   await runAgent({project_id:p.project_id,session_id:'s',request_id:'primary-entry',mode:'quick',current_stage:'clarifying',content:'继续'})
   expect(resolveChannel).not.toHaveBeenCalled();expect(JSON.stringify(findProject(p.project_id))).toBe(snapshot)
 })
-it('keeps lean-v1 short workflow available, while explicit migration creates a new unconfirmed software copy',async()=>{
+it('retires lean-v1 without model calls or data writes, while explicit copy requires fresh confirmation',async()=>{
   const p=createProject({request_id:'lean',mode:'quick'},{workflowVersion:'lean-v1'});writeFileSync(join(p.root_path,'app.py'),'print(5)')
-  expect(workflowRetirementReason(p)).toBeUndefined();expect(isLeanProject(p.project_id)).toBe(true)
+  expect(workflowRetirementReason(p)).toContain('lean-v1');expect(isLeanProject(p.project_id)).toBe(false)
+  const query=vi.fn(),deps={publish:vi.fn(),persistAssistant:vi.fn(),persistSystem:vi.fn(),complete:vi.fn()},before=JSON.stringify(findProject(p.project_id))
+  await enterDesktopLine({projectId:p.project_id,sessionId:'s',requestId:'retired-lean',content:'继续',maxTokens:1000},query,{},deps)
+  expect(query).not.toHaveBeenCalled();expect(JSON.stringify(findProject(p.project_id))).toBe(before)
   const copy=await migrateLegacyWorkflow(p.project_id);expect(copy.workflow_version).toBe('software-v1');expect(findProject(p.project_id).workflow_version).toBe('lean-v1')
 })
 it('does not consume or rewrite real historical confirmation envelopes, including damaged ones',async()=>{

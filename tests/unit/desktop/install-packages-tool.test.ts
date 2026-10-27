@@ -13,7 +13,7 @@ import { restorePromaHome } from '../../support/proma-home-guard'
 import type { DriverCommandRequest } from '../../../main/desktop/process-driver'
 import { buildInstallPackagesTool, venvPythonRelativePath } from '../../../main/desktop/install-packages-tool'
 import { buildChildScriptRunnerTool } from '../../../main/desktop/child-exec-tool'
-import { buildDesktopChildTools } from '../../../main/desktop/production-runtime-tools'
+
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { createProject, updateProject } from '../../../main/project/project-service'
 
@@ -158,14 +158,6 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     expect(command[0].endsWith(join('.venv', 'Scripts', 'python.exe'))).toBe(true)
   })
 
-  it('角色装配面：implement 同时有 run_project_script 与 install_packages，research 都没有', () => {
-    const impl = buildDesktopChildTools(projectId, 'implement', 'diff').map((tool) => tool.name)
-    expect(impl).toContain('run_project_script')
-    expect(impl).toContain('install_packages')
-    const research = buildDesktopChildTools(projectId, 'research', 'diff').map((tool) => tool.name)
-    expect(research).not.toContain('run_project_script')
-    expect(research).not.toContain('install_packages')
-  })
 
   it('语音资产：装 sherpa-onnx 时项目根自动落 speech_locator.py（幂等，其他包不落）', async () => {
     const spawn = makeSpawn([{ match: (cmd) => cmd.includes('pip'), code: 0 }])
