@@ -74,7 +74,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     void refresh()
     setLaunchState(null)
     // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
-  }, [refresh, desktopPhase, artifactsVersion, project?.current_stage, suggestionsVersion,longtermVersion])
+  }, [refresh, desktopPhase, artifactsVersion, project?.current_stage, suggestionsVersion,longtermVersion,running])
 
   const onLaunch = async (restart = false, snapshot?: string, previous = false, trial = false): Promise<void> => {
     if (!projectId) return
@@ -130,7 +130,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       <div className="theatre-program-bar" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
         {embedded && <LayoutTemplate size={14} />}
         <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500 }}>{project?.name ?? '你的软件'}</span>
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{project && longtermStatusLabel(project) || (liveUrl ? '程序试用 · 测试数据 · 尚未交付' : project?.current_stage === 'completed' ? '可以使用' : project?.desktop_blocked && !running ? '制作暂时停止' : desktopPhase ? '正在制作' : '等待想法成形')}</span>
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{data?.status_view?.goal.label ?? (project && longtermStatusLabel(project) || (liveUrl ? '程序试用 · 测试数据 · 尚未交付' : project?.current_stage === 'completed' ? '可以使用' : project?.desktop_blocked && !running ? '制作暂时停止' : desktopPhase ? '正在制作' : '等待想法成形'))}</span>
         <div style={{ flex: 1 }} />
         <button
           data-ai-id="delivery-refresh"
@@ -141,6 +141,13 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
           <RotateCw size={13} />
         </button>
       </div>
+
+      {data?.status_view && <div role="status" aria-label="执行与交付状态" style={{display:'flex',gap:12,flexWrap:'wrap',padding:'7px 14px',fontSize:'var(--font-size-xs)',color:'var(--color-text-muted)',borderBottom:'1px solid var(--line-2)'}}>
+        <span title={data.status_view.execution.reason}>执行：{data.status_view.execution.label}</span>
+        <span>检查：{data.status_view.verification.label}</span>
+        <span>交付：{data.status_view.goal.label}</span>
+        {data.status_view.active_commands>0&&<span>后台命令 {data.status_view.active_commands} 项</span>}
+      </div>}
 
       {(!embedded || data?.can_launch || data?.launch.declared || project?.current_stage === 'completed') && <div className="theatre-launch-row" style={{ display: 'flex', flexWrap:'wrap', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--color-border)' }}>
         <button

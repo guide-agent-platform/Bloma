@@ -296,7 +296,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         publishForRun(event)
       }, guideOptions, persistAssistant, persistSystem)
       if (guideIncomplete) receiptOutcome = 'failed'
-      persistTerminalMessage(input.session_id, 'completed')
+      persistTerminalMessage(input.session_id, guideIncomplete ? 'incomplete' : 'completed')
       publishForRun(makeEvent(input, 'completed', { subtype: guideIncomplete ? 'incomplete' : 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }

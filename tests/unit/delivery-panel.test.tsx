@@ -27,6 +27,7 @@ interface PanelState {
     supports_point_selection?: boolean
     can_trial?: boolean
     trial?: import('../../shared/types').SoftwareTrial
+    status_view?: import('../../shared/types').SoftwareStatusView
   }
   launchResult?: { ok: boolean; data?: { started: boolean; pid?: number }; error?: { message?: string } }
 }
@@ -48,6 +49,14 @@ function renderPanel(stage: string): void {
 }
 
 describe('DeliveryPanel', () => {
+  it('separates an ended execution and a historical passed check from an undelivered goal', async () => {
+    mockBloma({ deliverables: { files: [], launch: { declared: true, parse_ok: true }, can_launch: false,
+      status_view: { execution: { status: 'ended', label: '本轮已结束' }, verification: { status: 'last_passed', label: '最近检查通过（对应记录版本）' }, goal: { status: 'not_delivered', label: '本轮尚未交付' }, active_commands: 0 } } })
+    renderPanel('generating_mvp')
+    const status = await screen.findByRole('status', { name: '执行与交付状态' })
+    expect(status.textContent).toContain('本轮已结束'); expect(status.textContent).toContain('本轮尚未交付')
+    expect(screen.getByTestId('delivery-launch-button').hasAttribute('disabled')).toBe(true)
+  })
   it('keeps the independent trial visible when verification clears the debug preview and binds update requests to its version',async()=>{
     const trial: import('../../shared/types').SoftwareTrial={release_id:'a'.repeat(64),source:'b'.repeat(64),process_id:'owned',state:'running',data_dir:'isolated',url:'http://127.0.0.1:33441',qualification:'unverified_test_data',at:new Date().toISOString()}
     mockBloma({deliverables:{files:[],launch:{declared:true,parse_ok:true},can_launch:false,can_trial:true,trial}})

@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { commandProgressKey, createWorkProgress, pruneDuplicateReads, toolFailureKey } from '../../../main/agent/loop/work-progress'
+import { commandProgressKey, createWorkProgress, isPendingToolExecution, pruneDuplicateReads, toolFailureKey } from '../../../main/agent/loop/work-progress'
 import type { ConversationTurn } from '../../../main/orchestration/stages/orchestration-contracts'
 
 describe('writable executor progress', () => {
+  it('does not stop bounded polling of a real pending command or clear an unresolved verifier failure with pending feedback', () => {
+    expect(isPendingToolExecution('read_process', '{"kind":"command","execution_status":"running"}')).toBe(true)
+    expect(isPendingToolExecution('read_process', '{"kind":"command","execution_status":"completed"}')).toBe(false)
+    const progress = createWorkProgress()
+    for (let i = 0; i < 7; i++) progress.observe([{ name: 'verify_app', status: 'error', failureKey: 'same:x', turn: i }])
+    for (let i = 0; i < 30; i++) expect(progress.observe([{ name: 'read_process', status: 'ok', pending: true, turn: i }]).stalled).toBe(false)
+    progress.observe([{ name: 'verify_app', status: 'ok', pending: true, turn: 40 }])
+    expect(progress.observe([{ name: 'verify_app', status: 'error', failureKey: 'same:x', turn: 41 }]).stalled).toBe(true)
+  })
   it('does not clear a failed installation when a different print command succeeds', () => {
     const progress = createWorkProgress(), failed = { name: 'run_command', status: 'error' as const, failureKey: 'DEPENDENCY_INSTALL_TIMEOUT:hash', progressKey: commandProgressKey('run_command', { command: ['npm', 'ci'] }) }
     for (let turn = 1; turn <= 8; turn++) {

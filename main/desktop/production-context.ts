@@ -16,6 +16,8 @@ import { softwareResumeContext } from '../software/run-state'
 import { SOFTWARE_LAUNCH_GUIDANCE } from './launch-smoke'
 import { readIndependentDesign, readIndependentPolicy } from '../software/independent-design'
 import { readLongtermState, isLongtermSoftware } from '../software/longterm-state'
+import { SOFTWARE_CONTEXT_CATALOG } from '../software/context-catalog'
+import { softwareWorkingContext } from '../software/working-context'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -54,13 +56,21 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
 
 export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
-    description: '只读制作交接：overview看范围，features按编号读功能，prd读正文；launch看LAUNCH.json字段类型与示例，verification-gui/llm/speech看验证协议；resume看中断现场与账本引用，data-update/delivery看更新与交付约定。避免重复通读。',
+    description: '只读按需上下文：capabilities列能力目录；execution看命令会话，working-state看当前版本/目标/命令/历史失败摘要；overview/features看完整范围，launch看入口，verification-gui/llm/speech看具体协议，resume看执行索引，data-update/delivery看数据与交付约定。只加载当前需要的主题。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
+      topic: { type: 'string', enum: ['capabilities','execution','working-state','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
+        if (ctx.projectId !== projectId) throw Error('PRODUCTION_CONTEXT_PROJECT_MISMATCH')
+        if (isSoftwareProject(projectId) && input.topic === 'capabilities') return { output: JSON.stringify({ catalog: SOFTWARE_CONTEXT_CATALOG, note: '目录不代表本轮需求或环境已就绪；按topic读取需要的说明，不扩大目标。' }) }
+        if (isSoftwareProject(projectId) && input.topic === 'execution') return { output: JSON.stringify({
+          run: '短命令可同步；安装/构建/测试可run_command({command:[...],yield_ms:1000,timeout_ms:300000})。process_id表示同一命令继续运行，不应重复启动。',
+          read: 'read_process({process_id,since_seq:上次next_seq,wait_ms:10000})等待新增日志或退出。output_truncated表示旧输出截断；stdin用write_process({process_id,text,close_stdin})，bytes_queued不等于应用已处理。',
+          stop: 'stop_process仅终止本会话拥有的进程树。宿主重启后interrupted不会接管旧PID。单命令超时、用户取消和费用/请求保护保留。',
+          completion: '命令结束、本轮结束、最近验证和项目交付是不同事实。仍运行的命令先接续读取；命令成功不签发产品通过。' }) }
+        if (isSoftwareProject(projectId) && input.topic === 'working-state') return { output: JSON.stringify(softwareWorkingContext(projectId)) }
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
         if(input.topic==='longterm'){
           const state=isLongtermSoftware(projectId)?readLongtermState(projectId):undefined

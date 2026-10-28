@@ -18,6 +18,13 @@ export function toolFailureKey(name: string, output: string): string | undefined
 export function commandProgressKey(name: string, input: Record<string, unknown>): string | undefined {
   return name === 'run_command' ? createHash('sha256').update(JSON.stringify([input.command, input.cwd ?? '.'])).digest('hex').slice(0, 16) : undefined
 }
+export function isPendingToolExecution(name: string, output: string): boolean {
+  if (!['run_command','read_process','verify_app'].includes(name)) return false
+  try {
+    const body = JSON.parse(output.replace(/^<tool-feedback>[\s\S]*?<\/tool-feedback>\s*/, ''))
+    return body?.execution_status === 'running' && (body.kind === 'command' || body.code === 'COMMANDS_STILL_RUNNING')
+  } catch { return false }
+}
 
 /** Execution progress is a successful edit or a real verification attempt, not
  * an intention to edit. Read-only research does not opt into this policy. */
@@ -30,7 +37,7 @@ export function createWorkProgress() {
       const observedFailures = new Set<string>()
       for (const call of calls) {
         const scope = `${call.name}:${call.progressKey ?? ''}:`
-        if (call.status === 'ok') {
+        if (call.status === 'ok' && !call.pending) {
           for (const key of failures.keys()) if (key.startsWith(scope)) failures.delete(key)
         } else if (call.status === 'error' && call.failureKey) {
           const key = scope + call.failureKey, count = (failures.get(key) ?? 0) + 1
@@ -39,9 +46,9 @@ export function createWorkProgress() {
         }
       }
       repeated = Math.max(0, ...[...observedFailures].map(key => failures.get(key) ?? 0))
-      const waiting = calls.length > 0 && calls.every(call => call.status === 'ok' && ['wait_for_delegations', 'list_delegations'].includes(call.name))
+      const waiting = calls.length > 0 && calls.every(call => call.status === 'ok' && (call.pending || ['wait_for_delegations', 'list_delegations'].includes(call.name)))
       if (waiting) return { stalled: false, idleTurns, repeatedFailures: 0, nudge: undefined }
-      const acted = calls.some(call => call.status === 'ok' && ['write_file', 'edit_file', 'run_project_script', 'run_project_driver', 'drive_project_app', 'install_packages', 'delegate_agent', 'continue_delegation',
+      const acted = calls.some(call => call.status === 'ok' && !call.pending && ['write_file', 'edit_file', 'run_project_script', 'run_project_driver', 'drive_project_app', 'install_packages', 'delegate_agent', 'continue_delegation',
         'run_command', 'start_service', 'stop_process', 'inspect_app', 'verify_app', 'prepare_software_environment', 'register_gui_check', 'register_cli_check'].includes(call.name))
       idleTurns = acted ? 0 : idleTurns + 1
       return { stalled: idleTurns >= 24 || repeated >= 8, idleTurns, repeatedFailures: repeated,

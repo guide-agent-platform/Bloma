@@ -3,7 +3,7 @@ import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { guiSuitePath, parseGuiSuite } from '../desktop/gui-acceptance'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { closeDebugSessions } from './debug-sessions'
-import { stopSoftwareSession, redactSoftwareOutput } from './process-manager'
+import { stopSoftwareSession, redactSoftwareOutput, activeSoftwareCommands } from './process-manager'
 import { verifySoftwareCandidate } from './verification'
 import { registerNativeGuiTests } from './native-gui-registration'
 import { findProject } from '../project/project-service'
@@ -20,6 +20,10 @@ export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<ty
       try {
         policy.assertCommand(ctx)
         if (ctx.projectId !== projectId || input.force !== undefined && typeof input.force !== 'boolean') throw Error('SOFTWARE_VERIFY_INPUT_INVALID')
+        const commands = activeSoftwareCommands(projectId, ctx.sessionId)
+        if (commands.length) return { output: JSON.stringify({ code: 'COMMANDS_STILL_RUNNING', execution_status: 'running', commands,
+          next: '先用read_process等待已有命令结果，再验收；宿主没有停止命令或冻结当前草稿。' }),
+          feedback: { schema_version: 1, source: 'host', scope: 'command_wait', execution: 'running', verification: 'unverified', recovery: 'inspect' } }
         if(input.script===undefined&&input.restart!==undefined)throw Error('SOFTWARE_VERIFY_INPUT_INVALID: restart与script一起提供')
         const launch = requireLaunchDeclaration(findProject(projectId).root_path,'SOFTWARE_VERIFY_CONFIRMED_ENTRY_REQUIRED')
         assertSoftwareDelivery(readPrdBackplane(projectId), launch)

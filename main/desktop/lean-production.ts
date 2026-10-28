@@ -31,7 +31,7 @@ import { writeTextFileAtomic } from '../../storage/json-store'
 import { isSoftwareProject } from './workflow-policy'
 import { createSoftwareCollaborationPolicy } from '../software/collaboration-policy'
 import { buildSoftwareAgentTools, SOFTWARE_ENGINEERING_INSTRUCTIONS } from '../software/agent-tools'
-import { stopSoftwareSession } from '../software/process-manager'
+import { stopSoftwareSession, settleSoftwareCommands } from '../software/process-manager'
 import { closeDebugSessions, retainedDebugVersion } from '../software/debug-sessions'
 import { prepareSoftwareRelease, promoteSoftwareRelease, sealSoftwareRelease, verifyReleaseSource } from '../software/release-store'
 import { saveSoftwareRegressionBaseline } from '../software/regression-baseline'
@@ -45,6 +45,7 @@ import { recordEvaluationEvent } from '../software/harness-evaluation'
 import { isLongtermSoftware, ensureLongtermState, stageLongtermMilestone, longtermPendingDecision } from '../software/longterm-state'
 import { handleLongtermMessage } from '../software/longterm-message'
 import { workflowRetirementReason } from './workflow-retirement'
+import { renderSoftwareWorkingContext } from '../software/working-context'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -237,7 +238,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         materials: sessionMaterials(input.projectId, input.sessionId), images: initial ? input.images : undefined,
         initialMessagePersisted: initial ? input.initialMessagePersisted : false,
         shouldPause: () => scopePending,
-        beforeComplete: ctx => guardDispatcherCompletion(ctx), publish: emit }) }
+        beforeComplete: ctx => guardDispatcherCompletion(ctx), recoveryContext: () => renderSoftwareWorkingContext(input.projectId), publish: emit }) }
       catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         const detailedError = monetaryFailure instanceof Error && reason.includes(monetaryFailure.message) ? monetaryFailure : error
@@ -253,6 +254,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       if (scopePending) { checkpoint('waiting_user'); deps.complete(input.sessionId, input.projectId, 'incomplete'); return }
       if (!modelBudgetStop && result?.status !== 'completed') { blocked(result?.status === 'cancelled' ? '已停止，程序和现场已保留。' : `制作尚未完成（${result?.termination_detail?.reason ?? result?.status}），可沿当前现场继续。`, false, result?.status === 'cancelled' ? 'cancelled' : 'blocked'); return }
       // Integration checks own a quiet tree. Never race outstanding writers or dev servers.
+      await settleSoftwareCommands(input.projectId, input.sessionId, runSignal)
       stopDelegations(input.sessionId)
       { await closeDebugSessions(input.projectId, input.sessionId); await stopSoftwareSession(input.projectId, input.sessionId); emit('software_preview_changed', { preview_url: null }) }
       await settleParentDelegationRuns(input.sessionId)

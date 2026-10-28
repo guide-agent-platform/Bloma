@@ -151,8 +151,10 @@ describe('real upstream Pi AgentSession integration', () => {
   it('uses native compaction and routes summary requests through the guarded transport', async () => {
     let requests = 0
     const scopes: string[] = []
+    const loopInputs: string[] = []
     const query: SDKQuery = async function* (_prompt, options) {
       scopes.push(options.accounting?.scope ?? '')
+      if (options.accounting?.scope === 'loop') loopInputs.push(JSON.stringify(options.messages))
       requests += 1
       yield text(requests === 1 ? 'completed first task' : 'Preserved durable task facts')
       yield { type: 'result', stop_reason: 'end_turn', usage: { input_tokens: requests === 1 ? 110000 : 100, output_tokens: 10 } }
@@ -160,11 +162,14 @@ describe('real upstream Pi AgentSession integration', () => {
     const compaction = vi.fn()
     const historyTurns = Array.from({ length: 8 }, (_, index) => ({ role: index % 2 ? 'assistant' as const : 'user' as const,
       content: `history ${index}: ` + 'context fact '.repeat(5000) }))
-    const result = await runAgentLoop(input(query, { onCompaction: compaction, historyTurns }))
+    let recoveries = 0
+    const result = await runAgentLoop(input(query, { onCompaction: compaction, historyTurns, recoveryContext: () => 'CURRENT_HOST_FACTS_' + (++recoveries) }))
     expect(result.status).toBe('completed'); expect(compaction).toHaveBeenCalled()
     expect(scopes).toContain('handoff')
     expect(readFileSync(nativeFile(), 'utf8')).toContain('"type":"compaction"')
     expect(result.usage?.handoffCalls).toBeGreaterThan(0)
+    expect(recoveries).toBeGreaterThanOrEqual(2)
+    expect(loopInputs.some(text => text.includes('CURRENT_HOST_FACTS_2'))).toBe(true)
   })
 
   it('lets Pi retry a failed provider turn without replaying a completed write', async () => {

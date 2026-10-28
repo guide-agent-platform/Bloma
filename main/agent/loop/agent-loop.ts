@@ -23,7 +23,7 @@ import { userFacingWrapUp } from '../prompting/user-facing-output'
 import { isHostControlText } from '../../../shared/message-presentation'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from './steer-queue'
-import { commandProgressKey, createWorkProgress, pruneDuplicateReads, toolFailureKey } from './work-progress'
+import { commandProgressKey, createWorkProgress, isPendingToolExecution, pruneDuplicateReads, toolFailureKey } from './work-progress'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -142,6 +142,7 @@ export interface AgentLoopToolCallRecord {
   status?: 'ok' | 'error'
   failureKey?: string
   progressKey?: string
+  pending?: boolean
 }
 
 /** W1-E1（咨询 D3，2026-09-09）：竹节压缩观测信息——纯埋点零行为变更。
@@ -189,6 +190,8 @@ export interface AgentLoopInput {
   runtimeScope?: string
   /** Host prerequisite check after a no-tool final response; feedback keeps the loop open. */
   beforeComplete?: (ctx: ToolContext) => Promise<string | undefined>
+  /** Bounded current host facts after compaction; does not replay tools. */
+  recoveryContext?: () => string
   /** Host decision pending: end this turn before another tool or request. */
   shouldPause?: () => boolean
   parentSessionId?: string
@@ -1263,6 +1266,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         call.status = block.is_error === true ? 'error' : 'ok'
         const failureKey = call.status === 'error' && typeof block.content === 'string' ? toolFailureKey(call.name, block.content) : undefined
         if (failureKey) call.failureKey = failureKey
+        if (call.status === 'ok' && typeof block.content === 'string' && isPendingToolExecution(call.name, block.content)) call.pending = true
       }
     })
     appendLoopMessage(input.sessionId, 'user', resultBlocks)

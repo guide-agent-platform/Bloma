@@ -1,5 +1,6 @@
 import { listDelegations, waitForDelegations, getDelegationSummary } from '../agent/delegation/agent-collaboration'
 import type { ToolContext } from '../agent/loop/agent-loop'
+import { activeSoftwareCommands } from '../software/process-manager'
 
 interface Dependencies {
   list: typeof listDelegations
@@ -10,6 +11,8 @@ interface Dependencies {
  * model calls, then return the actual handoffs so the parent can decide its next step. */
 export async function guardDispatcherCompletion(ctx: ToolContext, limitMs = 1_800_000,
   deps: Dependencies = { list: listDelegations, wait: waitForDelegations, summary: getDelegationSummary }): Promise<string | undefined> {
+  const commands = activeSoftwareCommands(ctx.projectId, ctx.sessionId)
+  if (commands.length) return '【宿主完成条件】已有命令仍在运行，不能结束制作或重复启动。用read_process读取这些会话的实际结果：\n' + JSON.stringify(commands)
   let running = deps.list(ctx.sessionId).filter(r => r.status === 'running')
   if (!running.length) return undefined
   const deadline = Date.now() + limitMs

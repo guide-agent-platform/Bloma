@@ -11,6 +11,7 @@ import { recordEvaluationEvent } from './harness-evaluation'
 
 export type SoftwareRunStatus = 'running' | 'verifying' | 'repairing' | 'blocked' | 'waiting_user' | 'waiting_environment' | 'cancelled' | 'interrupted' | 'verified'
 export interface SoftwareRunState { version: 1; projectId: string; operationId?: string; sessionId: string; runId: string; status: SoftwareRunStatus; at: string;
+  last_failure?: { run_id: string; at: string; error: string }
   source?: string; candidateId?: string; error?: string; check?: { path: string; sha256: string };
   budget: { file?: string; request_ledger?: string; requests?: number; output?: number; error?: string }; failure?: { signature: string; runId: string; repeats: number; total: number } }
 function pathFor(id: string) {
@@ -30,10 +31,12 @@ export function saveSoftwareRunState(input: { projectId: string; sessionId: stri
   try { const state = leanBudget(input.projectId, 'desktop-implement').snapshot(); budget = { file: state.file, request_ledger: projectUsageLedgerPath(input.projectId), requests: state.requests, output: state.output } }
   catch (error) { budget = { error: redactSoftwareOutput(String(error)).slice(0, 500) } }
   const sameOperation = before?.operationId === project.lean_operation_id
+  const now = new Date().toISOString(), error = input.error ? redactSoftwareOutput(input.error).slice(0, 2400) : undefined
   const state: SoftwareRunState = { version: 1, projectId: input.projectId, sessionId: input.sessionId, runId: input.runId, status: input.status,
-    source: input.source ?? (sameOperation ? before?.source : undefined), check: input.check ?? (sameOperation ? before?.check : undefined), operationId: project.lean_operation_id, at: new Date().toISOString(), budget,
+    source: input.source ?? (sameOperation ? before?.source : undefined), check: input.check ?? (sameOperation ? before?.check : undefined), operationId: project.lean_operation_id, at: now, budget,
     candidateId: input.candidateId ?? (sameOperation ? before?.candidateId : undefined), failure: sameOperation ? before?.failure : undefined,
-    error: input.error ? redactSoftwareOutput(input.error).slice(0, 2400) : input.status === 'verified' ? undefined : sameOperation ? before?.error : undefined }
+    last_failure: error ? { run_id: input.runId, at: now, error } : sameOperation ? before?.last_failure ?? (before?.error ? { run_id: before.runId, at: before.at, error: redactSoftwareOutput(before.error) } : undefined) : undefined,
+    error: ['running','verifying','verified'].includes(input.status) ? undefined : error ?? (sameOperation && before?.runId === input.runId ? before.error : undefined) }
   writeTextFileAtomic(pathFor(input.projectId), JSON.stringify(state))
   recordEvaluationEvent(input.projectId,'run_state',{status:state.status,run_id:state.runId,error:state.error,candidate_id:state.candidateId})
   return state

@@ -19,6 +19,7 @@ import { resolveDriverVenvCommand } from '../desktop/process-driver'
 import { isVenvDirectory } from '../verification/security-scan'
 import { extractRequestId, requireFields, safeInvoke } from './shared'
 import type { ProjectDeliverablesInput, ProjectDeliverablesResult, ProjectLaunchAppInput, ProjectLaunchAppResult } from '../../shared/types'
+import { softwareStatusView } from '../software/state-view'
 import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration, readLaunchDeclaration } from '../desktop/launch-smoke'
 import { violatesCommandBlacklist } from '../desktop/contract-schema'
@@ -135,6 +136,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       }
       result.can_launch = (project.current_stage === 'completed' || Boolean(stable)) && result.launch.parse_ok
       if (isSoftwareProject(project.project_id)) {
+        result.status_view = softwareStatusView(project.project_id, hasRunForProject(project.project_id))
         if(isLongtermSoftware(project.project_id))try{result.longterm=readLongtermState(project.project_id)}catch(error){result.longterm_error=String(error)}
         result.improvement_suggestions = readSoftwareSuggestions(project.project_id)
         result.trial = softwareTrial(project.project_id)

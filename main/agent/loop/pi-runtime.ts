@@ -13,7 +13,7 @@ import { feedbackForTool } from './tool-feedback'
 import { persistentBudgetBlocked, retainedToolFeedback } from '../../../shared/tool-feedback-policy'
 import { formatToolFeedback, type ToolFeedback } from '../../../shared/tool-feedback'
 import { isDegenerateText } from '../../coding/output-integrity'
-import { commandProgressKey, createWorkProgress, pruneDuplicateReads, toolFailureKey } from './work-progress'
+import { commandProgressKey, createWorkProgress, isPendingToolExecution, pruneDuplicateReads, toolFailureKey } from './work-progress'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
 import { drainSteerQueue, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent, type SteerEntry } from './steer-queue'
 import { estimateTokenCount } from './usage-guard'
@@ -52,6 +52,11 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
   let errorMessage: string | undefined
   let invalidOutputRetries = 0, cutoffRetries = 0, budgetStalls = 0, budgetHitThisTurn = false
   let filter = createDsmlDisplayFilter()
+  const recoveryContext = () => {
+    if (!input.recoveryContext) return ''
+    try { return input.recoveryContext().slice(0, 8000) }
+    catch { return '【宿主工作状态摘要】当前索引不可读；先读公开working-state/resume上下文，不能据历史记录推断当前成功或重放副作用。' }
+  }
   const validation = () => ({ gwt_runs: ctx.state.gwt_runs ?? 0, api_contract_runs: ctx.state.api_contract_runs ?? 0,
     last_gwt_failures: [...(ctx.state.last_gwt_failures ?? [])], gwt_all_passed: ctx.state.gwt_all_passed,
     api_all_passed: ctx.state.api_all_passed, security_all_passed: ctx.state.security_all_passed,
@@ -245,6 +250,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         if (call) call.status = event.isError ? 'error' : 'ok'
         const details = event.result.details as { feedback?: ToolFeedback; budgetExhausted?: boolean } | undefined
         const result = event.result as AgentToolResult<unknown>
+        if (call?.status === 'ok' && isPendingToolExecution(call.name, result.content.filter(b => b.type === 'text').map(b => b.text).join('\n'))) call.pending = true
         if (call?.status === 'error') {
           const failureKey = toolFailureKey(call.name, result.content.filter(b => b.type === 'text').map(b => b.text).join('\n'))
           if (failureKey) call.failureKey = failureKey
@@ -271,13 +277,15 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
             removed_turns: 0, handoff_chars: event.result.summary.length, handoff_fallback: false,
             trigger: event.reason === 'manual' ? 'explicit' : 'auto' })
           checkpoint('compaction')
+          const restored = recoveryContext()
+          if (restored) activeSession.agent.steer({ role: 'user', content: restored, timestamp: Date.now() })
         }
       }
     })
     const [prepared, recall] = await Promise.all([prepareTaskWithSkills(input.task, cwd),
       prepareRecallBlock(input.task, input.delegationDepth ?? 0, `${input.sessionId}.jsonl`, { projectId: input.projectId })])
     const learnings = (input.delegationDepth ?? 0) === 0 ? renderLearningsSection(input.projectId) : ''
-    const task = [learnings ? `<untrusted-memory source="learnings" trust="advisory">\n${learnings}\n</untrusted-memory>` : '', recall, prepared.content].filter(Boolean).join('\n')
+    const task = [learnings ? `<untrusted-memory source="learnings" trust="advisory">\n${learnings}\n</untrusted-memory>` : '', recall, prepared.content, recoveryContext()].filter(Boolean).join('\n')
     input.signal.throwIfAborted()
     await activeSession.prompt(task, { source: 'rpc', expandPromptTemplates: false, images: input.images?.map(piImage) })
     await activeSession.waitForIdle()

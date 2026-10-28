@@ -83,7 +83,8 @@ it('stops repeated unchanged observations, permits actual improvement and retain
   const stored = readSoftwareRunState(project.project_id)!
   expect(JSON.stringify(stored)).not.toContain('SECRET_TOKEN'); expect(stored).not.toHaveProperty('observations')
   saveSoftwareRunState({ ...base, runId: 'resume', status: 'running' })
-  expect(readSoftwareRunState(project.project_id)?.error).toContain('REDACTED')
+  expect(readSoftwareRunState(project.project_id)?.error).toBeUndefined()
+  expect(readSoftwareRunState(project.project_id)?.last_failure?.error).toContain('REDACTED')
 })
 it('heartbeats the active lease, aborts on accounting corruption and releases its in-memory ownership even when the final read fails', async () => {
   vi.useFakeTimers(); const project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' })
