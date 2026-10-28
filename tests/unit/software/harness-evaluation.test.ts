@@ -7,7 +7,8 @@ import { createProject } from '../../../main/project/project-service'
 import { readPrdBackplane, markPrdUserConfirmed } from '../../../main/project/prd-store'
 import { parseLeanBrief } from '../../../main/guide/lean-brief'
 import { syncDocuments } from '../../../main/project/document-sync'
-import { createEvaluationProtocol, bindEvaluationRun, recordEvaluationEvent, summarizeEvaluation, evaluationReport, type EvaluationBinding, type EvaluationEvent, type EvaluationTask } from '../../../main/software/harness-evaluation'
+import { createEvaluationProtocol, bindEvaluationRun, stageEvaluationRun, activatePendingEvaluation, recordEvaluationEvent, summarizeEvaluation, evaluationReport, type EvaluationBinding, type EvaluationEvent, type EvaluationTask } from '../../../main/software/harness-evaluation'
+import { configureIndependentPolicy } from '../../../main/software/independent-policy'
 import { saveSoftwareRunState, recordSoftwareRepair } from '../../../main/software/run-state'
 
 let home:string,old:string|undefined,project:ReturnType<typeof createProject>
@@ -20,6 +21,23 @@ beforeEach(()=>{old=process.env.PROMA_HOME;home=mkdtempSync(join(tmpdir(),'bloma
 })
 afterEach(()=>{if(old===undefined)delete process.env.PROMA_HOME;else process.env.PROMA_HOME=old;rmSync(home,{recursive:true,force:true,maxRetries:5,retryDelay:100})})
 function bind(){return bindEvaluationRun(project.project_id,createEvaluationProtocol([task]),task.id,'single','single-1')}
+it('stages without executing, binds at confirmed entry and resumes the same run without replacing its records',()=>{
+  configureIndependentPolicy(project.project_id,{version:1,enabled:false})
+  expect(stageEvaluationRun(project.project_id,createEvaluationProtocol([task]),task.id,'single','staged')).toMatchObject({status:'awaiting_confirmed_target',admission:'not_checked'})
+  expect(()=>configureIndependentPolicy(project.project_id,{version:1,enabled:false})).toThrow('RUN_ALREADY_BOUND')
+  const first=activatePendingEvaluation(project.project_id)!
+  expect(first.run_id).toBe('staged');expect(activatePendingEvaluation(project.project_id)).toEqual(first)
+  const events=readFileSync(join(home,'harness-evaluation',project.project_id,'events.jsonl'),'utf8').trim().split('\n')
+  expect(events).toHaveLength(1)
+})
+it('rejects staged target or policy changes and paid staging without authorization',()=>{
+  expect(()=>stageEvaluationRun(project.project_id,createEvaluationProtocol([task],'paid',1),task.id,'single','paid')).toThrow('NEW_BUDGET_REQUIRED')
+  stageEvaluationRun(project.project_id,createEvaluationProtocol([{...task,goal:'different'}]),task.id,'single','mismatch')
+  expect(()=>activatePendingEvaluation(project.project_id)).toThrow('TARGET_MISMATCH')
+  const file=join(home,'harness-evaluation',project.project_id,'pending.json'),record=JSON.parse(readFileSync(file,'utf8'))
+  record.independent_policy_digest='changed';writeFileSync(file,JSON.stringify(record))
+  expect(()=>activatePendingEvaluation(project.project_id)).toThrow('PENDING_CHANGED')
+})
 function evidence(binding:EvaluationBinding,directory=home){
   mkdirSync(directory,{recursive:true})
   const ledger=join(directory,'ledger.jsonl'),cost=join(directory,'cost.json'),audit=join(directory,'audit.json')
@@ -40,7 +58,7 @@ function trace(binding:EvaluationBinding,success=true,directory=home):Evaluation
     [4000,success?'delivery_final':'run_state',{status:success?'delivered':'cancelled'}],
     [4100,'accounting_snapshot',proof.accounting],[4200,'defect_audit',proof.audit]
   ]
-  return data.map(([at,kind,data],index)=>({version:1,seq:index+1,event_id:`event-${index}`,host_id:'owned-host',at,kind,data:{...data,scope_current:binding.scope,variant_current:binding.variant}}))
+  return data.map(([at,kind,data],index)=>({version:1,seq:index+1,event_id:`event-${index}`,host_id:'owned-host',at,kind,data:{...data,scope_current:binding.scope,variant_current:binding.variant,independent_policy_digest_current:binding.independent_policy_digest,design_current:binding.design_hash}}))
 }
 it('seals fixed goals/budgets and rejects changed protocols, unknown routes, repeated binding and paid studies without fresh authorization',()=>{
   const protocol=createEvaluationProtocol([task]);const changed=structuredClone(protocol);changed.tasks[0].requirements[0].expected='99'
@@ -61,7 +79,10 @@ it('captures actual host run/repair hooks and deduplicates retried user messages
   expect(events.filter(event=>event.kind==='user_intervention')).toHaveLength(1)
 })
 it('reports exact trace intervals, raw failure history, evidence-derived request counts, audit results and explicit offline boundaries',()=>{
-  const binding=bind(),events=trace(binding),summary=summarizeEvaluation(binding,events)
+  const binding=bind(),events=trace(binding)
+  events.find(event=>event.kind==='accounting_snapshot')!.host_id='annotation-cli-1'
+  events.find(event=>event.kind==='defect_audit')!.host_id='annotation-cli-2'
+  const summary=summarizeEvaluation(binding,events)
   expect(summary).toMatchObject({comparable:true,first_trial_ms:500,delivery_ms:3000,product_repair_ms:500,harness_repair_ms:300,physical_requests:2,cost_rmb:0,missed_defects:0,false_positives:0})
   expect(summary.failures).toHaveLength(2);expect(summary.note).toContain('离线工程样例')
 })
@@ -87,6 +108,21 @@ it('uses the final audit snapshot without adding overlapping reviews and rejects
   events.push({...audit,event_id:'repeat-audit',seq:events.length+1,at:4300})
   expect(summarizeEvaluation(binding,events)).toMatchObject({missed_defects:2,false_positives:1})
   events[2].data.variant_current='independent';expect(summarizeEvaluation(binding,events).comparable).toBe(false)
+})
+it('separates actual B requests from the total and rejects a disguised single-model or same-model run',()=>{
+  const binding=bind(),events=trace(binding),file=join(home,'ledger.jsonl'),costFile=join(home,'cost.json')
+  const entries=readFileSync(file,'utf8').trim().split('\n').map(line=>JSON.parse(line))
+  entries.push({project_id:binding.project_id,event:'query_started',query_id:'b',role:'acceptance_designer',model:'fixture-b',endpoint_host:'b.invalid'},
+    {project_id:binding.project_id,event:'transport_started',query_id:'b',transport_index:1})
+  const update=()=>{
+    writeFileSync(file,entries.map(entry=>JSON.stringify(entry)).join('\n'))
+    const cost=JSON.parse(readFileSync(costFile,'utf8'));cost.covered_requests=3;writeFileSync(costFile,JSON.stringify(cost))
+    events.find(event=>event.kind==='accounting_snapshot')!.data.evidence={ledger_path:file,ledger_sha256:hash(readFileSync(file)),cost_path:costFile,cost_sha256:hash(readFileSync(costFile))}
+  }
+  update();expect(summarizeEvaluation(binding,events)).toMatchObject({physical_requests:3,acceptance_physical_requests:1,acceptance_models:['fixture-b'],acceptance_hosts:['b.invalid'],comparable:false})
+  expect(summarizeEvaluation(binding,events).issues).toContain('single run used acceptance designer')
+  entries[entries.length-2].model='fixture-a';update()
+  expect(summarizeEvaluation(binding,events).issues).toContain('acceptance designer model is not distinct')
 })
 it('retains failed offline peers and rejects unmatched task/budget/design pairings; exports reproducible CLI report inputs',()=>{
   const single=bind(),other:EvaluationBinding={...single,project_id:'offline-peer',run_id:'independent-1',variant:'independent'}

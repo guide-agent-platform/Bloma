@@ -19,7 +19,7 @@ export function independentAdapterVersion(root:string){
  * come from the host-frozen B design, never from implementer-authored code. */
 export function independentSuite(projectId:string,root:string):GuiAcceptanceSuite{
   const record=readIndependentDesign(projectId),project=findProject(projectId)
-  const policy=readIndependentPolicy()
+  const policy=readIndependentPolicy(projectId)
   if(record?.status!=='frozen'||!record.contract||record.scope!==prdScopeFingerprint(readPrdBackplane(projectId))
     ||record.operation!==(project.lean_operation_id??'initial')||record.design_hash!==project.ux_confirmation?.design_hash
     ||policy?.enabled&&(record.channel_id!==policy.channel_id||record.model!==policy.model))throw Error('INDEPENDENT_CURRENT_DESIGN_REQUIRED')
@@ -41,7 +41,7 @@ export function independentSuite(projectId:string,root:string):GuiAcceptanceSuit
   }))}
 }
 export async function verifyIndependentDesign(projectId:string,candidate:SoftwareRelease,signal?:AbortSignal){
-  const policy=readIndependentPolicy()
+  const policy=readIndependentPolicy(projectId)
   if(!policy&&readIndependentDesign(projectId))throw Error('INDEPENDENT_POLICY_MISSING')
   if(!policy?.enabled)return{status:'disabled' as const}
   const suite=independentSuite(projectId,candidate.root)

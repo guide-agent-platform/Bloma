@@ -77,7 +77,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
           return{output:JSON.stringify({enabled:isLongtermSoftware(projectId),current:state?.milestones.find(item=>item.id===state.current_id),backlog:state?.backlog.slice(-20),decisions:state?.decisions.slice(-12),
             note:'待办和历史决策是上下文，不是当前范围或通过证据。只有已确认的当前任务单可实现；复杂能力/接口/数据变化时记录影响、兼容和迁移决定，不重做整套旧架构流程。'})}
         }
-        if(input.topic==='independent-design')return{output:JSON.stringify({enabled:readIndependentPolicy()?.enabled??false,design:readIndependentDesign(projectId)??{status:'disabled',reason:'未启用第二模型验收设计；当前为单模型验收。'},
+        if(input.topic==='independent-design')return{output:JSON.stringify({enabled:readIndependentPolicy(projectId)?.enabled??false,design:readIndependentDesign(projectId)??{status:'disabled',reason:'未启用第二模型验收设计；当前为单模型验收。'},
           adapter:'启用时，在项目根INDEPENDENT_ADAPTER.json提供{version:1,design_digest:冻结设计digest,controls:{逻辑控件名:静态CSS选择器}}。不得包含输入、预期或脚本；宿主按冻结业务设计编排并执行，B的文字不能签发PASS。'})}
         if(input.topic==='verification-speech'&&isSoftwareProject(projectId))return{output:JSON.stringify({protocol:SPEECH_VERIFICATION_BRIEF,
           prepare:'先inspect_software_capabilities；准备用prepare_software_capability({capability:"speech"})，缺资源可显式download_models:true下载固定公开资产；普通pip不会物化平台组件。',

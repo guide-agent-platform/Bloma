@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { findProject } from '../project/project-service'
@@ -13,10 +13,8 @@ import { leanBudget } from '../desktop/lean-budget'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
 
-export interface IndependentDesignPolicy {
-  version:1; enabled:boolean; channel_id:string; model:string; monetary_policy_path:string; authorization_path:string
-  timeout_ms:number; max_tokens:number
-}
+import { readIndependentPolicy, type IndependentDesignPolicy } from './independent-policy'
+export { readIndependentPolicy, type IndependentDesignPolicy } from './independent-policy'
 export type IndependentStep = {kind:'fill';control:string;value:string}|{kind:'click';control:string}|{kind:'expect';control:string;equals:string}|{kind:'restart'}
 export interface IndependentCases { cases:Array<{id:string;feature:string;steps:IndependentStep[]}> }
 export interface IndependentDesignRecord {
@@ -27,17 +25,6 @@ export interface IndependentDesignRecord {
 }
 const sha=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 function directory(projectId:string){if(!/^[A-Za-z0-9_-]+$/.test(projectId))throw Error('INDEPENDENT_PROJECT_INVALID');return join(getPromaHome(),'software-independent-design',projectId)}
-export function readIndependentPolicy():IndependentDesignPolicy|undefined{
-  const path=join(getPromaHome(),'software-independent-design','policy.json')
-  if(!existsSync(path))return
-  const value=JSON.parse(readFileSync(path,'utf8')) as IndependentDesignPolicy
-  if(value.version!==1||typeof value.enabled!=='boolean')throw Error('INDEPENDENT_POLICY_INVALID')
-  if(!value.enabled)return value
-  if(!value.channel_id||!value.model||!isAbsolute(value.monetary_policy_path)||!isAbsolute(value.authorization_path)
-    ||!Number.isSafeInteger(value.timeout_ms)||value.timeout_ms<100||value.timeout_ms>60000
-    ||!Number.isSafeInteger(value.max_tokens)||value.max_tokens<512||value.max_tokens>4096)throw Error('INDEPENDENT_POLICY_INVALID')
-  return value
-}
 export function parseIndependentCases(text:string,features:string[]):IndependentCases{
   if(Buffer.byteLength(text)>64*1024)throw Error('INDEPENDENT_CASES_TOO_LARGE')
   const value=JSON.parse(text) as IndependentCases
@@ -63,7 +50,7 @@ export function readIndependentDesign(projectId:string):IndependentDesignRecord|
   return value
 }
 export function independentDesignVersion(projectId:string){
-  const policy=readIndependentPolicy(),record=readIndependentDesign(projectId)
+  const policy=readIndependentPolicy(projectId),record=readIndependentDesign(projectId)
   return sha({policy:policy??null,record:record??null})
 }
 function save(projectId:string,value:IndependentDesignRecord){
@@ -81,7 +68,7 @@ export async function prepareIndependentDesign(input:{projectId:string;sessionId
   let attempted=false,authorizationHash:string|undefined
   try{
     input.signal.throwIfAborted()
-    const policy=readIndependentPolicy()
+    const policy=readIndependentPolicy(input.projectId)
     if(!policy?.enabled){
       if(!policy&&readIndependentDesign(input.projectId))throw Error('INDEPENDENT_POLICY_MISSING')
       return {...base,status:'disabled',reason:'第二模型验收设计未启用；当前保持单模型验收。'}
@@ -135,7 +122,7 @@ export async function prepareIndependentDesign(input:{projectId:string;sessionId
     input.signal.throwIfAborted()
     if(!result)throw Error(deadline.signal.aborted?'INDEPENDENT_DESIGN_TIMEOUT':'INDEPENDENT_DESIGN_INVALID')
     if(prdScopeFingerprint(readPrdBackplane(input.projectId))!==scope||findProject(input.projectId).ux_confirmation?.design_hash!==base.design_hash
-      ||(findProject(input.projectId).lean_operation_id??'initial')!==operation||sha(readIndependentPolicy())!==sha(policy))throw Error('INDEPENDENT_SCOPE_CHANGED')
+      ||(findProject(input.projectId).lean_operation_id??'initial')!==operation||sha(readIndependentPolicy(input.projectId))!==sha(policy))throw Error('INDEPENDENT_SCOPE_CHANGED')
     return save(input.projectId,{...base,status:'frozen',channel_id:policy.channel_id,model:policy.model,primary_model:input.primaryEnv.ANTHROPIC_MODEL,contract:result,digest:sha(result),attempted,authorization_hash:authorizationHash})
   }catch(error){
     const failure={...base,status:'blocked' as const,reason:String(error),attempted,authorization_hash:authorizationHash}

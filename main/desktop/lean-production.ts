@@ -41,7 +41,7 @@ import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type 
 import { monetaryStopMessage, monetaryInputBlocked } from '../platform/llm/monetary-budget'
 import { trialFeedbackText } from '../software/trial'
 import { prepareIndependentDesign } from '../software/independent-design'
-import { recordEvaluationEvent } from '../software/harness-evaluation'
+import { recordEvaluationEvent, activatePendingEvaluation } from '../software/harness-evaluation'
 import { isLongtermSoftware, ensureLongtermState, stageLongtermMilestone, longtermPendingDecision } from '../software/longterm-state'
 import { handleLongtermMessage } from '../software/longterm-message'
 import { workflowRetirementReason } from './workflow-retirement'
@@ -96,8 +96,9 @@ export async function runLeanProduction(input: DesktopRouteInput, deps: DesktopR
       } }
     }
   }
-  recordEvaluationEvent(input.projectId,'operation_started',{session_id:input.sessionId,request_id:input.requestId})
   try {
+    activatePendingEvaluation(input.projectId)
+    recordEvaluationEvent(input.projectId,'operation_started',{session_id:input.sessionId,request_id:input.requestId})
     const finish = await withLeanRuntime(input.projectId, 'desktop-implement', input.signal,
       signal => runLeanProductionInner({ ...input, signal }, deps))
     await finish?.()
