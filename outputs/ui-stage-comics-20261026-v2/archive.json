@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "source_revision": "4ddf814",
+  "archive_relative_to_project": "../guide-agent-platform-archives/20261028-cleanup/stage-comics-v2-originals-4ddf814.zip",
+  "archive_sha256": "abaa57ffcfea089e09decf82eb519b01edaeee0585544b54498cf79773f53f76",
+  "note": "Archive is a sibling of the project. Original bytes are also retained in Git history; active software uses resources/studio/stage-comics-v2/*.webp.",
+  "files": [
+    {
+      "path": "outputs/ui-stage-comics-20261026-v2/requirements.png",
+      "entry": "requirements.png",
+      "bytes": 2726762,
+      "sha256": "83af82f816a578de7be43d21f273c81738430ce2a83609870590e90cd856fe03"
+    },
+    {
+      "path": "outputs/ui-stage-comics-20261026-v2/design.png",
+      "entry": "design.png",
+      "bytes": 2553597,
+      "sha256": "6b1093fd503284a4b1d5155e4f5f98493f473d2f9d54e1c1b89dadebeb1380ae"
+    },
+    {
+      "path": "outputs/ui-stage-comics-20261026-v2/build.png",
+      "entry": "build.png",
+      "bytes": 2541539,
+      "sha256": "291b7294044580e5bdc96b3c223969849fd9999ce6555f6df87d1d2236efb1cb"
+    },
+    {
+      "path": "outputs/ui-stage-comics-20261026-v2/verify.png",
+      "entry": "verify.png",
+      "bytes": 2586417,
+      "sha256": "063a53002de63a0673adde10ec238c519e97a2875b90bf18026a5f8127b70676"
+    },
+    {
+      "path": "outputs/ui-stage-comics-20261026-v2/deliver.png",
+      "entry": "deliver.png",
+      "bytes": 2676276,
+      "sha256": "83324805cd2c79f7a7e120f0358bbefdc30123cca8d2d23fb4becb3a7acbd01d"
+    }
+  ]
+}

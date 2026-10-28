@@ -1,4 +1,0 @@
-export function cancelExperimentProject(input: { projectId: string; sessionId: string }): Promise<{ cancelled: boolean; session_id: string }>
-export function nativeProcessReceipt(input: { at: string; driver_pid: number; driver_ppid: number; electron_pid: number; home: string; run_id?: string }): { at: string; driver_pid: number; driver_ppid: number; electron_pid: number; home: string; run_id: string | null }
-export function nativeHeartbeat(input: { at: string; project_id?: string; run_id?: string; current_stage?: string; desktop_phase?: string; state?: string; electron_exit_code: number | null; electron_killed: boolean; driver_pid: number; electron_pid: number }): Record<string, unknown>
-export function nativeProcessEvent(input: { at: string; event: 'exit' | 'close'; exit_code: number | null; signal: string | null; driver_pid: number; electron_pid: number }): Record<string, unknown>

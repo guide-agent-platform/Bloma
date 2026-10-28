@@ -21,7 +21,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true })
 })
 it.each(['incomplete', 'error', 'success'] as const)('preserves downstream %s after an earlier successful confirmation', async outcome => {
-  const project = createProject({ request_id: 'create', mode: 'quick' }), events: AgentEvent[] = []
+  const project = createProject({ request_id: 'create', mode: 'quick' },{workflowVersion:'software-v1'}), events: AgentEvent[] = []
   setAgentStreamPublisher(event => events.push(event))
   vi.mocked(handleGuideMessage).mockImplementationOnce(async (input, publish) => {
     for (const subtype of ['success', outcome, 'success']) publish({ event_id: 'event', session_id: input.session_id, project_id: input.project_id,

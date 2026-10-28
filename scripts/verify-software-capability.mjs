@@ -8,11 +8,11 @@ import { join, resolve, dirname, basename, relative, isAbsolute } from 'node:pat
 import { spawn } from 'node:child_process'
 const root=resolve('.'),folder=join(root,'run-artifacts/capability-native-20261027'),home=mkdtempSync(join(tmpdir(),'bcap-'))
 mkdirSync(folder,{recursive:true})
-const helper=join(root,'dist-main/main/capability-fixture-runtime.mjs')
+const helper=join(folder,'fixture/main/capability-fixture-runtime.mjs')
 const seed=process.env.BLOMA_CAPABILITY_FIXTURE_SEED
 if(seed){const rel=relative(tmpdir(),resolve(seed));if(isAbsolute(rel)||rel.startsWith('..')||!/^bcap-/.test(basename(dirname(dirname(resolve(seed))))))throw Error('Only owned short-home fixture dependencies may be reused')}
-mkdirSync(join(root,'dist-main/main'),{recursive:true})
-cpSync(join(root,'main/templates'),join(root,'dist-main/main/templates'),{recursive:true})
+mkdirSync(dirname(helper),{recursive:true})
+cpSync(join(root,'main/templates'),join(dirname(helper),'templates'),{recursive:true,filter:path=>!path.split(/[\\/]/).includes('__pycache__')})
 await build({stdin:{resolveDir:root,sourcefile:'capability-real-fixture.ts',contents:`
 import{mkdirSync,writeFileSync,readFileSync,copyFileSync,cpSync}from'node:fs';import{join}from'node:path';import{createServer}from'node:net';
 import{createProject,updateProject}from'./main/project/project-service';import{readPrdBackplane,markPrdUserConfirmed}from'./main/project/prd-store';

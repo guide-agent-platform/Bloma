@@ -48,11 +48,20 @@ function selfTest(){
   assert.equal(result.dynamic.length,1);assert.equal(result.imports.some(item=>item.specifier==='speech_runtime.py'),false)
   assert.equal(result.calls.some(item=>item.name==='run'),true);assert.equal(result.strings.some(item=>item.value==='speech_runtime.py'),true)
   assert.equal(inside(root,resolve(root,'..')),false)
-  console.log(JSON.stringify({self_test:'passed',checks:['type versus value imports','mixed imports','reexports','literal versus computed dynamic imports','require','asset references are not module edges','artifact output bounds']}))
+  assert.equal(declarationWithoutRuntime('fixture.d.mts','static_runtime'),true)
+  assert.equal(declarationWithoutRuntime('fixture.d.ts','reexport_runtime'),true)
+  assert.equal(declarationWithoutRuntime('fixture.d.mts','type'),false)
+  assert.equal(declarationWithoutRuntime('fixture.ts','static_runtime'),false)
+  assert.equal(runtimeTarget('fixture.d.mts','fixture.mjs','static_runtime',true),'fixture.mjs')
+  assert.equal(runtimeTarget('fixture.d.mts','fixture.mjs','static_runtime',false),undefined)
+  assert.equal(runtimeTarget('fixture.d.mts','fixture.mjs','type',false),'fixture.d.mts')
+  console.log(JSON.stringify({self_test:'passed',checks:['type versus value imports','mixed imports','reexports','literal versus computed dynamic imports','require','asset references are not module edges','artifact output bounds','declaration-only runtime imports rejected']}))
 }
+function declarationWithoutRuntime(path,kind){return kind!=='type'&&/\.d\.[cm]?ts$/i.test(path??'')}
+function runtimeTarget(module,asset,kind,exists){return(!declarationWithoutRuntime(module,kind)?module:undefined)??(exists&&!declarationWithoutRuntime(asset,kind)?asset:undefined)}
 if(args.includes('--self-test')){selfTest();process.exit(0)}
 const tracked=[...new Set(execFileSync('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:root}).toString('utf8').split('\0').filter(Boolean).map(slash))].filter(path=>existsSync(join(root,path))).sort()
-const sourcePaths=tracked.filter(path=>/\.(?:[cm]?js|tsx?)$/.test(path)&&/^(main|preload|renderer|shared|storage|tests|scripts)\//.test(path))
+const sourcePaths=tracked.filter(path=>/\.(?:[cm]?js|[cm]?ts|tsx)$/.test(path)&&/^(main|preload|renderer|shared|storage|tests|scripts)\//.test(path))
 const scope=JSON.parse(readFileSync(resolve(root,arg('--scope')??'docs/05_PROJECT_PLAN/workflow-retirement-scope-20261027.json'),'utf8'))
 for(const item of scope.retired_files??[])if(existsSync(join(root,item.path)))throw Error(`AUDIT_RETIRED_FILE_PRESENT: ${item.path}`)
 const inputHashes=new Map()
@@ -65,9 +74,13 @@ for(const [from,record]of records)for(const item of record.imports){
   if(!item.specifier.startsWith('.'))continue
   const module=ts.resolveModuleName(item.specifier,join(root,from),options,ts.sys).resolvedModule?.resolvedFileName
   const asset=resolve(root,dirname(from),item.specifier.split('?')[0])
-  const found=module??(inside(root,asset)&&existsSync(asset)&&lstatSync(asset).isFile()?asset:undefined)
-  graph.push({from,to:found&&inside(root,found)?slash(relative(root,found)):null,resolution:module?'module':found?'asset':'missing',...item})
+  const declarationOnly=declarationWithoutRuntime(module,item.kind)
+  const found=runtimeTarget(module,asset,item.kind,inside(root,asset)&&existsSync(asset)&&lstatSync(asset).isFile())
+  const code=found&&/\.[cm]?[jt]sx?$/.test(found)
+  graph.push({from,to:found&&inside(root,found)?slash(relative(root,found)):null,resolution:found?(module&&!declarationOnly||code?'module':'asset'):declarationOnly?'missing_runtime':'missing',...(declarationOnly&&!found?{declaration_only:slash(relative(root,module))}:{}),...item})
 }
+const missing=graph.filter(edge=>!edge.to)
+if(missing.length)throw Error('AUDIT_IMPORT_MISSING: '+JSON.stringify({count:missing.length,edges:missing.slice(0,24)}))
 const incoming=path=>graph.filter(edge=>edge.to===path)
 const walk=entries=>{const result=new Set(entries),queue=[...entries];while(queue.length){const current=queue.shift();for(const edge of graph)if(edge.from===current&&edge.to&&edge.kind!=='type'&&!result.has(edge.to)){result.add(edge.to);queue.push(edge.to)}}return result}
 const entrypoints=['main/index.ts','preload/bridge.ts','renderer/main.tsx']

@@ -125,31 +125,31 @@ describe('P2 盲区·ipc 入参清洗（validateAgentSend / validateConfirmRequi
 
   // ── validateConfirmRequirements：adopted_ideas 清洗 ────────────────────
 
-  it('adopted_ideas 非字符串项/空串剔除后透传给 resolveRequirementConfirm', async () => {
+  it('旧确认载荷即使字段有效也拒绝执行，保留来源意见', async () => {
     const confirm = captureHandlers().get(IPC_CHANNELS.AGENT_CONFIRM_REQUIREMENTS)!
-    await confirm({}, {
+    const result=await confirm({}, {
       request_id: 'req-adopted',
       session_id: 's-adopted',
       project_id: 'p-adopted',
       decision: 'confirm',
       adopted_ideas: ['想法A', '', '   ', 42, '想法B'],
     })
-    expect(resolveRequirementConfirmMock).toHaveBeenCalledTimes(1)
-    const input = resolveRequirementConfirmMock.mock.calls[0]?.[0]
-    expect(input?.adopted_ideas).toEqual(['想法A', '想法B'])
+    expect(result.ok).toBe(false)
+    expect(result.error?.message).toContain('LEGACY_REQUIREMENT_CONFIRMATION_RETIRED')
+    expect(resolveRequirementConfirmMock).not.toHaveBeenCalled()
   })
 
-  it('adopted_ideas 非数组 → 整体删除（透传 undefined，不坏下游）', async () => {
+  it('旧让渡确认不得通过附加字段恢复退役流程', async () => {
     const confirm = captureHandlers().get(IPC_CHANNELS.AGENT_CONFIRM_REQUIREMENTS)!
-    await confirm({}, {
+    const result=await confirm({}, {
       request_id: 'req-adopted-arr',
       session_id: 's-adopted-arr',
       project_id: 'p-adopted-arr',
       decision: 'delegate',
       adopted_ideas: 'not-an-array',
     })
-    expect(resolveRequirementConfirmMock).toHaveBeenCalledTimes(1)
-    const input = resolveRequirementConfirmMock.mock.calls[0]?.[0]
-    expect(input?.adopted_ideas).toBeUndefined()
+    expect(result.ok).toBe(false)
+    expect(result.error?.message).toContain('LEGACY_REQUIREMENT_CONFIRMATION_RETIRED')
+    expect(resolveRequirementConfirmMock).not.toHaveBeenCalled()
   })
 })

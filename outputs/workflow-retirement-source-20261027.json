@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "c096a50d0b6c2b91d0e38a2d9353c42f5eb66392",
-  "scope_version": 8,
-  "scanner_sha256": "e4369a6fe2ce260f9b12487ceddb7f75a369f262b31fb8bd71a8daaba23b472a",
-  "scope_sha256": "621de6ce906ba8d15ab321091335dff461c906e8011b33939d6bba152ae10d1c",
-  "source_input_digest": "d60c3f254c0823e32cee112ab3408a38f2fdd4da6da2f051fbbdc4b459ff8740",
+  "source_revision": "5ae0bc0d641a635d816d3ec0019a9e5c32817ebd",
+  "scope_version": 9,
+  "scanner_sha256": "32dd2ea79859d4a0d9332a849b988caf48659d9cbcee3c13b51620835663693a",
+  "scope_sha256": "5545d2d4c81c9c45451043eb82b3caaad329c5c888d5885a982feba92b7535e2",
+  "source_input_digest": "ae9601b069e58efaf49ab4e3cfc6a2822341a78660dcfbb446796e8d47287d7a",
   "method": "existing tracked and unignored working files + TypeScript AST static/type/reexport/literal dynamic/require imports; retired paths must remain absent; no app execution or symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,8 +19,8 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 805,
-    "module_edges": 2973,
+    "scanned_sources": 802,
+    "module_edges": 2965,
     "asset_edges": 38,
     "scoped_modules": 81,
     "groups": {
@@ -72,7 +72,7 @@
     {
       "id": "modern_workflow_keep",
       "action": "keep",
-      "reason": "Current software-v1 and lean-v1 entry points; never inferred legacy from directory names.",
+      "reason": "Current software-v1 execution, short-guide storage, project-owned verification and delivery; lean-v1 is readable history with explicit copy migration only.",
       "paths": [
         "main/desktop/lean-production.ts",
         "main/desktop/lean-budget.ts",
@@ -175,7 +175,7 @@
     {
       "id": "historical_schema_and_shared_diagnostics",
       "action": "keep_readers_no_execution",
-      "reason": "Pure historical schema, prompt-setting defaults, conversation reading and independent diagnostics survive old executor removal.",
+      "reason": "Typed shared verification diagnostics; no retired workflow executor or automatic legacy production.",
       "paths": [
         "main/desktop/verification-outcome.ts"
       ]
@@ -787,7 +787,7 @@
           "resolution": "module",
           "specifier": "../../../main/desktop/desktop-route",
           "kind": "static_runtime",
-          "line": 36
+          "line": 41
         },
         {
           "from": "tests/unit/software/budget-host-completion.test.ts",
@@ -3134,14 +3134,6 @@
       "type_importers": [],
       "test_importers": [
         {
-          "from": "tests/unit/guide-first-turn.test.ts",
-          "to": "main/guide/guide-agent-service.ts",
-          "resolution": "module",
-          "specifier": "../../main/guide/guide-agent-service",
-          "kind": "static_runtime",
-          "line": 32
-        },
-        {
           "from": "tests/unit/guide-run-outcome.test.ts",
           "to": "main/guide/guide-agent-service.ts",
           "resolution": "module",
@@ -3780,7 +3772,7 @@
           "resolution": "module",
           "specifier": "../../../main/guide/ux-confirm",
           "kind": "static_runtime",
-          "line": 41
+          "line": 46
         },
         {
           "from": "tests/unit/guide/ux-confirm.test.ts",
@@ -3788,7 +3780,7 @@
           "resolution": "module",
           "specifier": "../../../main/guide/ux-confirm",
           "kind": "dynamic_runtime",
-          "line": 236
+          "line": 243
         },
         {
           "from": "tests/unit/sketch-correction.test.ts",
@@ -4016,13 +4008,7 @@
           "line": 14
         }
       ],
-      "string_references": [
-        {
-          "from": "tests/unit/web-line-ux-gate-anchor.test.ts",
-          "line": 12,
-          "kind": "test_string"
-        }
-      ],
+      "string_references": [],
       "asset_terms": [],
       "computed_imports": [],
       "deletion_authorized": false
@@ -5314,7 +5300,7 @@
           "resolution": "module",
           "specifier": "../../../main/project/prd-store",
           "kind": "static_runtime",
-          "line": 38
+          "line": 43
         },
         {
           "from": "tests/unit/prd-document-reconcile.test.ts",
@@ -6404,14 +6390,6 @@
           "line": 8
         },
         {
-          "from": "tests/unit/guide-first-turn.test.ts",
-          "to": "main/project/project-service.ts",
-          "resolution": "module",
-          "specifier": "../../main/project/project-service",
-          "kind": "static_runtime",
-          "line": 33
-        },
-        {
           "from": "tests/unit/guide-run-outcome.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6465,7 +6443,7 @@
           "resolution": "module",
           "specifier": "../../../main/project/project-service",
           "kind": "static_runtime",
-          "line": 37
+          "line": 42
         },
         {
           "from": "tests/unit/guide/ux-sketch.test.ts",
@@ -10052,12 +10030,22 @@
         },
         {
           "path": "tests/unit/software/harness-continuity.test.ts",
-          "line": 57,
+          "line": 47,
           "kind": "test"
         },
         {
           "path": "tests/unit/software/harness-continuity.test.ts",
-          "line": 83,
+          "line": 60,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/harness-continuity.test.ts",
+          "line": 86,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/harness-continuity.test.ts",
+          "line": 90,
           "kind": "test"
         },
         {
@@ -10376,7 +10364,7 @@
         },
         {
           "path": "scripts/software-agent-acceptance.mjs",
-          "line": 68,
+          "line": 69,
           "kind": "source"
         },
         {
@@ -11125,7 +11113,7 @@
         },
         {
           "path": "scripts/audit-workflow-retirement.mjs",
-          "line": 150,
+          "line": 163,
           "value": "pending-confirmations"
         },
         {
@@ -12018,6 +12006,36 @@
       "from_revision": "c096a50",
       "git_blob": "4d282e7546749995691faf1270d597f12f00e1bf",
       "reason": "Obsolete discovery interface had no runtime callers after lean-v1 retirement; current capability inspection/preparation and speech verifiers retained."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-control.d.mts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "a455d1ebbdd9df0b96b80279623390c32925914e",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-control.test.mjs",
+      "from_revision": "5ae0bc0",
+      "git_blob": "802bd07e567e758dea666bcc5fbe79eb89dda83b",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment-native-control.test.ts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "6dfd3fb0e910ea7c53f63b0611ca89e58dd1040e",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "tests/unit/guide-first-turn.test.ts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "b2c78fb30c8c980962e463c47199bca4f6cf3be0",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "tests/unit/web-line-ux-gate-anchor.test.ts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "5e27da82b207d6557b64253d023db49de1044fd7",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
     }
   ],
   "unresolved_relative_imports": [],
@@ -12049,12 +12067,12 @@
     },
     {
       "path": "scripts/software-agent-acceptance.mjs",
-      "line": 27,
+      "line": 28,
       "expression": "import(pathToFileURL(runtime).href)"
     },
     {
       "path": "scripts/software-paid-smoke.mjs",
-      "line": 16,
+      "line": 19,
       "expression": "import(pathToFileURL(runtime).href)"
     },
     {

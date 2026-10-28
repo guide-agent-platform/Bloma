@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -35,7 +35,7 @@
     {
       "id": "modern_workflow_keep",
       "action": "keep",
-      "reason": "Current software-v1 and lean-v1 entry points; never inferred legacy from directory names.",
+      "reason": "Current software-v1 execution, short-guide storage, project-owned verification and delivery; lean-v1 is readable history with explicit copy migration only.",
       "paths": [
         "main/desktop/lean-production.ts",
         "main/desktop/lean-budget.ts",
@@ -138,7 +138,7 @@
     {
       "id": "historical_schema_and_shared_diagnostics",
       "action": "keep_readers_no_execution",
-      "reason": "Pure historical schema, prompt-setting defaults, conversation reading and independent diagnostics survive old executor removal.",
+      "reason": "Typed shared verification diagnostics; no retired workflow executor or automatic legacy production.",
       "paths": [
         "main/desktop/verification-outcome.ts"
       ]
@@ -954,6 +954,36 @@
       "from_revision": "c096a50",
       "git_blob": "4d282e7546749995691faf1270d597f12f00e1bf",
       "reason": "Obsolete discovery interface had no runtime callers after lean-v1 retirement; current capability inspection/preparation and speech verifiers retained."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-control.d.mts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "a455d1ebbdd9df0b96b80279623390c32925914e",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "scripts/dispatch-experiment-native-control.test.mjs",
+      "from_revision": "5ae0bc0",
+      "git_blob": "802bd07e567e758dea666bcc5fbe79eb89dda83b",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment-native-control.test.ts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "6dfd3fb0e910ea7c53f63b0611ca89e58dd1040e",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "tests/unit/guide-first-turn.test.ts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "b2c78fb30c8c980962e463c47199bca4f6cf3be0",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "tests/unit/web-line-ux-gate-anchor.test.ts",
+      "from_revision": "5ae0bc0",
+      "git_blob": "5e27da82b207d6557b64253d023db49de1044fd7",
+      "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
     }
   ]
 }

@@ -78,11 +78,11 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.some(row => row.message.includes('real-renderer-bug'))).toBe(true)
   const logs = JSON.stringify(readDebugSession(project.project_id, 's', id)); expect(logs).not.toMatch(/PRIVATE_BEARER|PRIVATE_KEY|PRIVATE_TOKEN|QUERY_SECRET/)
   if (ui === 'browser') {
-    await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error')?.duration_ms).toBeGreaterThanOrEqual(100)
-    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error')).toMatchObject({ action: 'trigger', version: 3, method: 'GET', status: 500, url: `${url}/fail` })
+    await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error' && row.url === `${url}/fail`)?.duration_ms).toBeGreaterThanOrEqual(100)
+    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.error' && row.url === `${url}/fail`)).toMatchObject({ action: 'trigger', version: 3, method: 'GET', status: 500, url: `${url}/fail` })
     await tool.execute({ mode: 'act', debug_session_id: id, steps: [{ id: 'slow-request', kind: 'click', selector: '#slow' }] }, context)
-    await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow')?.duration_ms, { timeout: 5000 }).toBeGreaterThanOrEqual(1000)
-    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow')).toMatchObject({ action: 'slow-request', version: 3, status: 200, url: `${url}/slow` })
+    await expect.poll(() => readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow' && row.url === `${url}/slow`)?.duration_ms, { timeout: 5000 }).toBeGreaterThanOrEqual(1000)
+    expect(readDebugSession(project.project_id, 's', id).observations.find(row => row.kind === 'network.slow' && row.url === `${url}/slow`)).toMatchObject({ action: 'slow-request', version: 3, status: 200, url: `${url}/slow` })
     expect(JSON.stringify(readDebugSession(project.project_id, 's', id))).not.toContain('PRIVATE_QUERY')
   }
   writeFileSync(join(root, ui === 'electron' ? 'main.cjs' : 'server.cjs'), ui === 'electron' ? mainSource('v2') : serverSource('v2'))

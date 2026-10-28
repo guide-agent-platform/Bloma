@@ -1,3 +1,4 @@
+import {mkdirSync,cpSync} from 'node:fs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -7,7 +8,8 @@ import { build } from 'esbuild'
 import { expect, it } from 'vitest'
 
 it.skipIf(process.platform !== 'win32' || !existsSync(resolve('node_modules/electron/dist/electron.exe')))('recovers actual debug data and browser storage after killing the Electron host, without taking over its process', async () => {
-  const root = process.cwd(), home = mkdtempSync(join(tmpdir(), 'bloma-debug-crash-')), runtime = join(root, 'dist-main/main/software-debug-crash-fixture.mjs')
+  const root = process.cwd(), home = mkdtempSync(join(tmpdir(), 'bloma-debug-crash-')), runtime = join(root, 'run-artifacts/compiled-fixtures/main/software-debug-crash-fixture.mjs')
+  mkdirSync(dirname(runtime),{recursive:true});cpSync(join(root,'main/templates'),join(dirname(runtime),'templates'),{recursive:true,filter:p=>!p.includes('__pycache__')})
   await build({ stdin: { contents: "export {main} from './tests/fixtures/software-recovery/debug-worker'", resolveDir: root }, outfile: runtime, platform: 'node', bundle: true, format: 'esm', packages: 'external' })
   const probe = createServer(); await new Promise<void>(done => probe.listen(0, '127.0.0.1', done)); const address = probe.address(); if (!address || typeof address === 'string') throw Error('port')
   const port = address.port; await new Promise<void>(done => probe.close(() => done()))

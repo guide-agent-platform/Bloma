@@ -14,7 +14,7 @@ afterEach(() => { setAgentStreamPublisher(() => {}); vi.unstubAllEnvs() })
 describe('recovered run stream isolation', () => {
   it('suppresses delayed events from the previous generation while publishing the current one', async () => {
     vi.stubEnv('PROMA_HOME', mkdtempSync(join(tmpdir(), 'bloma-generation-events-')))
-    const project = createProject({ request_id: 'r', mode: 'quick' })
+    const project = createProject({ request_id: 'r', mode: 'quick' },{workflowVersion:'software-v1'})
     const events: AgentEvent[] = [], publishers: Array<(event: AgentEvent) => void> = []
     let failOld!: (error: Error) => void, finishNew!: () => void
     handle.mockImplementationOnce((_input, publish) => { publishers.push(publish); return new Promise((_resolve, reject) => { failOld = reject }) })

@@ -330,10 +330,6 @@ describe('drive_project_app webview 腿（批8 下半）', () => {
   })
 })
 
-describe('拒收续接指令携带门禁拒因（批8 下半狗粮第三跑实锤）', () => {
-
-
-})
 
 describe('drive-app-webview 单元件', () => {
   it('matchDriveServerLine：就绪行解析（含首尾空白容忍）与杂散行拒绝', async () => {

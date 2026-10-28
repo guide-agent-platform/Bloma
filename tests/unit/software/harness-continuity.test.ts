@@ -43,6 +43,9 @@ it('runs real Pi tools beyond both old 96-turn and 160-request cutoffs, then ver
   }
   await enterDesktopLine(input, query, {}, deps)
   expect(calls, JSON.stringify(findProject(project.project_id).desktop_blocked)).toBe(164)
+  expect(findProject(project.project_id)).toMatchObject({status:'active',longterm_summary:{status:'awaiting_confirmation'}})
+  await enterDesktopLine({...input,requestId:'user-confirm',content:'确认本阶段'},query,{},deps)
+  expect(calls).toBe(164)
   expect(findProject(project.project_id).status).toBe('completed')
   expect(readFileSync(join(project.root_path, 'parts/step-163.txt'), 'utf8')).toBe('completed 163')
   expect(leanBudget(project.project_id, 'desktop-implement').snapshot()).toMatchObject({ requests: 164, limits: { requests: 256, phaseRequests: 256 } })
@@ -81,6 +84,11 @@ it.each([5, 999])('checks already registered behavior after a fully exhausted co
   writeFileSync(budget.snapshot().file, JSON.stringify({ version: 1, requests: 256, output: 12000, phases: { 'desktop-implement': 253, prepare: 3 }, runtimeMs: 99 }))
   const query = vi.fn(async function* () { throw Error('must-not-call-provider') })
   await enterDesktopLine({ ...input, content: '继续' }, query, {}, deps)
+  expect(query).not.toHaveBeenCalled()
+  if(actual===5){
+    expect(findProject(project.project_id)).toMatchObject({status:'active',longterm_summary:{status:'awaiting_confirmation'}})
+    await enterDesktopLine({...input,requestId:'user-confirm',content:'确认本阶段'},query,{},deps)
+  }
   expect(query).not.toHaveBeenCalled()
   expect(findProject(project.project_id).status === 'completed').toBe(actual === 5)
   expect(budget.snapshot()).toMatchObject({ requests: 256, output: 12000 })

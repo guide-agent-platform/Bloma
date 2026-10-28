@@ -4,15 +4,15 @@
 
 本组已按用户指令接入正式工作区顶部阶段条。悬停/聚焦显示对应漫画，点击可以固定和放大。完整图保留供精修；`*.thumb.webp` 为运行时使用的 1086×362 缩略图。
 
-| 阶段 | 小剧情 | WebP 素材 | 原始 PNG |
-| --- | --- | --- | --- |
-| 需求 | 一点点想法 → 清单越拉越长 → 区分本次和以后 | [requirements.webp](requirements.webp) | [requirements.png](../../../outputs/ui-stage-comics-20261026-v2/requirements.png) |
-| 界面 | 对齐画稿 → 用力调整 → 界面齐了，帽子歪了 | [design.webp](design.webp) | [design.png](../../../outputs/ui-stage-comics-20261026-v2/design.png) |
-| 制作 | 拼上最后一块 → 软件长出腿 → 还真会跑 | [build.webp](build.webp) | [build.png](../../../outputs/ui-stage-comics-20261026-v2/build.png) |
-| 验证 | 发现异常 → 追赶 bug → 抓住它 | [verify.webp](verify.webp) | [verify.png](../../../outputs/ui-stage-comics-20261026-v2/verify.png) |
-| 交付 | 打包 → 搬运大包裹 → 取出小小的作品夹 | [deliver.webp](deliver.webp) | [deliver.png](../../../outputs/ui-stage-comics-20261026-v2/deliver.png) |
+| 阶段 | 小剧情 | WebP 素材 |
+| --- | --- | --- |
+| 需求 | 一点点想法 → 清单越拉越长 → 区分本次和以后 | [requirements.webp](requirements.webp) |
+| 界面 | 对齐画稿 → 用力调整 → 界面齐了，帽子歪了 | [design.webp](design.webp) |
+| 制作 | 拼上最后一块 → 软件长出腿 → 还真会跑 | [build.webp](build.webp) |
+| 验证 | 发现异常 → 追赶 bug → 抓住它 | [verify.webp](verify.webp) |
+| 交付 | 打包 → 搬运大包裹 → 取出小小的作品夹 | [deliver.webp](deliver.webp) |
 
-所有素材为 2172×724（3:1）；WebP 仅作同尺寸格式转换，未裁切或重画。原始 PNG 保留供后续精修。
+所有素材为 2172×724（3:1）；WebP 仅作同尺寸格式转换，未裁切或重画。原始 PNG 已逐文件校验并归档到仓库同级目录，供后续精修；位置、大小与 SHA-256 见 [归档清单](../../../outputs/ui-stage-comics-20261026-v2/archive.json)。原始字节也可从 Git 提交 `4ddf814` 的同名路径恢复。
 
 - [本次四条的完整提示词与来源](prompts.json)
 - [尺寸、状态和校验值](manifest.json)

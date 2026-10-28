@@ -1,3 +1,4 @@
+import {cpSync} from 'node:fs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -6,7 +7,8 @@ import { build } from 'esbuild'
 import { expect, it } from 'vitest'
 
 it.skipIf(process.platform !== 'win32' || !existsSync(resolve('node_modules/electron/dist/electron.exe')))('kills a real Electron host, reaps its owned service and resumes durable Pi state in a new host without replay or stale PASS', async () => {
-  const root = process.cwd(), home = mkdtempSync(join(tmpdir(), 'bloma-crash-host-')), runtime = join(root, 'dist-main/main/software-crash-fixture.mjs')
+  const root = process.cwd(), home = mkdtempSync(join(tmpdir(), 'bloma-crash-host-')), runtime = join(root, 'run-artifacts/compiled-fixtures/main/software-crash-fixture.mjs')
+  mkdirSync(dirname(runtime),{recursive:true});cpSync(join(root,'main/templates'),join(dirname(runtime),'templates'),{recursive:true,filter:p=>!p.includes('__pycache__')})
   await build({ stdin: { contents: "export {main} from './tests/fixtures/software-recovery/worker'", resolveDir: root }, outfile: runtime, platform: 'node', bundle: true, format: 'esm', packages: 'external' })
   const { createServer } = await import('node:net'), portProbe = createServer(); await new Promise<void>(done => portProbe.listen(0, '127.0.0.1', done)); const address = portProbe.address(); if (!address || typeof address === 'string') throw Error('port'); const port = address.port; await new Promise<void>(done => portProbe.close(() => done()))
   let child: ChildProcess | undefined, exit: Promise<number | null> | undefined, errors = ''

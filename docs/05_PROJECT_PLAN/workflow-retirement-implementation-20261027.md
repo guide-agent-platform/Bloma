@@ -1,5 +1,7 @@
 # 旧流程退役实施记录（批次 D）
 
+本页记录 D 批时点；后续兼容退出、辅助删除和产物归档见 [2026-10-28 清理记录](workflow-cleanup-20261028.md)。其中 lean-v1 已停止制作，不能把本页的历史保留描述作为当前执行策略。
+
 ## D0：迁出共享代码
 
 长期型批次 C 的提交为 `ab4afab`。开始删除旧执行前，将新制作流程依赖的工具装配、子任务完成等待、运行时工具及宿主验收门/输入输出类型迁至独立模块：`production-tool-assembly.ts`、`production-completion.ts`、`production-runtime-tools.ts`、`production-contracts.ts`。

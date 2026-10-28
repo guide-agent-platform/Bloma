@@ -1,3 +1,7 @@
+import {mkdtempSync,rmSync} from 'node:fs'
+import {join} from 'node:path'
+import {tmpdir} from 'node:os'
+let uxHome:string,previousUxHome:string|undefined
 /**
  * UX 草图确认门测试（2026-10-04 确认门新规）——生命周期/回传拦截/调整轮次/回门。
  *
@@ -11,6 +15,7 @@ vi.mock('../../../main/guide/ux-sketch', () => ({
   generateUxSketch: vi.fn(),
   stageUxSketch: vi.fn(),
   freezeConfirmedUxSketch: vi.fn(),
+  freezeLeanUxSketch: vi.fn(),
 }))
 
 vi.mock('../../../main/desktop/desktop-route', () => ({
@@ -32,7 +37,7 @@ vi.mock('../../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
-import { freezeConfirmedUxSketch, generateUxSketch, stageUxSketch } from '../../../main/guide/ux-sketch'
+import { freezeLeanUxSketch, generateUxSketch, stageUxSketch } from '../../../main/guide/ux-sketch'
 import { enterDesktopLine } from '../../../main/desktop/desktop-route'
 import { findProject } from '../../../main/project/project-service'
 import { readPrdBackplane } from '../../../main/project/prd-store'
@@ -111,17 +116,19 @@ function plainInput(content: string) {
 }
 
 beforeEach(() => {
+  previousUxHome=process.env.PROMA_HOME;uxHome=mkdtempSync(join(tmpdir(),'blcurrent-ux-'));process.env.PROMA_HOME=uxHome
   vi.clearAllMocks()
   resetUxConfirmForTests()
   mockGenerate.mockResolvedValue({ html: '<!DOCTYPE html><html></html>', source: 'llm', design: {
     version: 1, summary: '计算器界面', pages: [], flows: [], interactions: [], non_ui_features: [],
   } } as never)
   mockStage.mockResolvedValue({ preview_url: 'http://localhost:41000/00_UX/ux-sketch.html', sketch_path: '/tmp/ux-sketch.html', html_hash: 'mock-hash' } as never)
-  mockFindProject.mockImplementation(() => ({ project_id: 'p1', template_type: 'desktop_tool', mode: 'quick', name: '计算器' }) as never)
-  mockReadPrd.mockImplementation(() => ({ project_id: 'p1', name: '计算器', user_confirmed_at: '2026-10-04T00:00:00Z', positioning: 'x', requirements: [{ id: 'F-001', description: '做一个计算器' }], acceptance: {}, assumptions: [], out_of_scope: [] }) as never)
+  mockFindProject.mockImplementation(() => ({ project_id: 'p1', workflow_version:'software-v1', template_type: 'desktop_tool', mode: 'quick', name: '计算器' }) as never)
+  mockReadPrd.mockImplementation(() => ({ project_id: 'p1', lean_brief:{version:1,ui:'required',source_session_id:'s1',source_sha256:'a'.repeat(64)}, name: '计算器', user_confirmed_at: '2026-10-04T00:00:00Z', positioning: 'x', requirements: [{ id: 'F-001', description: '做一个计算器' }], acceptance: {}, assumptions: [], out_of_scope: [] }) as never)
 })
 
 afterEach(() => {
+  resetUxConfirmForTests();if(previousUxHome===undefined)delete process.env.PROMA_HOME;else process.env.PROMA_HOME=previousUxHome;rmSync(uxHome,{recursive:true,force:true,maxRetries:5,retryDelay:100})
   vi.restoreAllMocks()
 })
 
@@ -187,7 +194,7 @@ describe('确认/让渡/调整回传', () => {
   it('a failed confirmed-sketch write preserves pending and allows retry', async () => {
     const { events, publish } = makePublish()
     await runUxConfirmGate({ ...basePending({ publish }) })
-    vi.mocked(freezeConfirmedUxSketch).mockImplementationOnce(() => { throw new Error('disk failure') })
+    vi.mocked(freezeLeanUxSketch).mockImplementationOnce(() => { throw new Error('disk failure') })
     await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)
     expect(mockEnter).not.toHaveBeenCalled()
     expect(events.some(event => String(event.payload.text).includes('保存已确认草图失败'))).toBe(true)

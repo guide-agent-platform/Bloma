@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createServer } from 'node:net'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const runtime = join(root, 'dist-main/main/software-acceptance-runtime.mjs')
+const runtime = join(root, 'run-artifacts/compiled-fixtures/main/software-acceptance-runtime.mjs')
 if (!process.versions.electron) {
+  mkdirSync(dirname(runtime),{recursive:true});cpSync(join(root,'main/templates'),join(dirname(runtime),'templates'),{recursive:true,filter:p=>!p.includes('__pycache__')})
   const { build } = await import('esbuild')
   await build({ stdin: { contents: `export {registerProjectsIpc} from './main/ipc/projects';export {handleGuideMessage} from './main/guide/stages/guide-pipeline';export {findProject} from './main/project/project-service';export {runCoreVerification} from './main/desktop/core-verification';export {IPC_CHANNELS} from './shared/types'`, resolveDir: root },
     outfile: runtime, bundle: true, platform: 'node', format: 'esm', packages: 'external' })
