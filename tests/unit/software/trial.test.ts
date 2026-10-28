@@ -48,7 +48,7 @@ it('keeps a versioned real trial usable and data isolated throughout successful 
   registerNativeGuiTests(project.project_id,'tests/acceptance.mjs')
   let requests=0
   const timer=setInterval(()=>{void fetch(trial.url!).then(response=>{if(response.ok)requests++}).catch(()=>{})},100)
-  try{expect((await verifySoftwareCandidate(project.project_id,'r',AbortSignal.timeout(90000))).status).toBe('passed')}finally{clearInterval(timer)}
+  try{const checked=await verifySoftwareCandidate(project.project_id,'r',AbortSignal.timeout(90000));expect(checked.status,JSON.stringify({summary:checked.summary,gui:checked.core?.host_gui,launch:checked.launch})).toBe('passed')}finally{clearInterval(timer)}
   const observations=readFileSync(join(home,'harness-evaluation',project.project_id,'events.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line))
   expect(observations.some(event=>event.kind==='trial_ready'&&event.data.release_id===trial.release_id)).toBe(true)
   expect(observations.some(event=>event.kind==='verification_started')).toBe(true)

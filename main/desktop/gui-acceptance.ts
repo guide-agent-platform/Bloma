@@ -35,6 +35,7 @@ export interface GuiAcceptanceResult {
   method?: 'action_steps' | 'node:test'
   native_evidence?: {interactions:number;assertions:number}
   evidence_dir?: string
+  evidence_warnings?: string[]
   suite_hash: string; covers: string[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string
   scope_hash?: string; source_fingerprint?: string; source_unchanged?: boolean
 }

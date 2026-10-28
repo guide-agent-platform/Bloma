@@ -27,6 +27,7 @@ import { recordEvaluationEvent } from './harness-evaluation'
 import { capabilityBindingVersion } from './capability-bindings'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
+  native_plan?: { suite_hash: string; execution: 'not_started' | 'attempted' }
   independent?:Awaited<ReturnType<typeof verifyIndependentDesign>>
   core?: CoreVerificationResult; security?: SecurityScanResult; launch?: LaunchSmokeResult | null; reused?: boolean; report_path?: string; failure?: VerificationFailure }
 interface Receipt { version: 1; state: 'running' | 'complete'; key: string; at: number; result?: SoftwareVerification; result_hash?: string; reusable?: boolean }
@@ -86,10 +87,13 @@ const active = new Set<string>()
 export function canRepairUnexecutedNativePlan(projectId:string,suiteHash:string){
   try{
     const receipt=JSON.parse(readFileSync(receiptPath(projectId),'utf8')) as Receipt
-    if(receipt.state!=='complete'||receipt.result?.status!=='unverified'||digest(receipt.result)!==receipt.result_hash)return false
+    if(receipt.state!=='complete'||!receipt.result||digest(receipt.result)!==receipt.result_hash)return false
+    if (['failed','unverified'].includes(receipt.result.status) && !receipt.result.core?.host_gui
+      && receipt.result.native_plan?.suite_hash === suiteHash && receipt.result.native_plan.execution === 'not_started') return true
+    if (receipt.result.status !== 'unverified') return false
     const gui=receipt.result.core?.host_gui
     if(gui?.method!=='node:test'||gui.suite_hash!==suiteHash)return false
-    if(!gui.steps.length)return Boolean(gui.error?.startsWith('GUI_NATIVE_CASE_NOT_RUN')&&gui.native_evidence?.assertions===0
+    if(!gui.steps.length)return Boolean((gui.error?.startsWith('GUI_NATIVE_CASE_NOT_RUN')||gui.error?.startsWith('GUI_NATIVE_BOOTSTRAP_FAILED'))&&gui.native_evidence?.assertions===0
       ||gui.error?.startsWith('GUI_NATIVE_REPORT_MISSING')&&!/\bF-\d+\b/.test(gui.error))
     return gui.native_evidence?.assertions===0&&gui.error?.startsWith('GUI_NATIVE_ASSERTIONS_MISSING')===true
   }catch{return false}
@@ -107,12 +111,17 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
   try {
     writeTextFileAtomic(file, JSON.stringify({ version: 1, state: 'running', key: '', at: Date.now() } satisfies Receipt))
     version = await inputs(projectId, requestId, signal)
+    if (existsSync(guiSuitePath(projectId))) {
+      const bytes = readFileSync(guiSuitePath(projectId));
+      if (parseGuiSuite(JSON.parse(bytes.toString('utf8'))).native_tests) result.native_plan = { suite_hash: createHash('sha256').update(bytes).digest('hex'), execution: 'not_started' }
+    }
     writeTextFileAtomic(file, JSON.stringify({ version: 1, state: 'running', key: version.key, at: Date.now() } satisfies Receipt))
     if(ownedCandidate){if(ownedCandidate.projectId!==projectId)throw Error('SOFTWARE_VERIFY_CANDIDATE_OWNER_MISMATCH');await verifyReleaseSource(ownedCandidate,signal)}
     const candidate = result.candidate = ownedCandidate??await prepareSoftwareRelease(projectId, findProject(projectId).root_path, signal)
     const security = result.security = runSecurityScan({ project_id: projectId, root_path: candidate.root, profile: 'local-software' })
     writeTextFileAtomic(join(candidate.root, '00_VERIFY/security-scan.json'), JSON.stringify(security))
     if (!security.passed) { result.status = 'failed'; result.summary = security.issues.filter(issue => ['high', 'critical'].includes(issue.severity)).map(issue => `${issue.file}:${issue.line} ${issue.user_visible_summary}`).join('\n'); return result }
+    if (result.native_plan) result.native_plan.execution = 'attempted'
     const core = result.core = await runCoreVerification({ projectId, sandboxRoot: candidate.root, signal })
     const localPending = core.local_status === 'passed' && core.distribution?.status === 'environment_blocked'
     if (core.status !== 'passed' && !localPending) { result.status = core.status; result.summary = [core.summary, ...core.missing].join('\n'); return result }

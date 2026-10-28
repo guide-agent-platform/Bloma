@@ -6,6 +6,7 @@ import type { LaunchDeclaration } from '../desktop/launch-smoke';
 import { openDebugSession, actDebugSession, closeDebugSessions } from './debug-sessions';
 import { debugWorkspace } from './debug-workspace';
 import { frozenNativeGuiEntry, nativeGuiObservations } from './native-gui-tests';
+import { prepareNativeTestRuntime } from './native-test-runtime';
 export async function runNativeGuiTests(input: {
     projectId: string;
     root: string;
@@ -13,21 +14,26 @@ export async function runNativeGuiTests(input: {
     suite: GuiAcceptanceSuite;
     signal?: AbortSignal;
 }) {
-    const native = input.suite.native_tests!, file = frozenNativeGuiEntry(input.projectId, native, input.root);
+    const native = input.suite.native_tests!;
     const sessionId = `host-native-${randomUUID()}`, signal = input.signal ?? new AbortController().signal;
     const workspace=debugWorkspace(input.projectId,sessionId)
+    const runtime = prepareNativeTestRuntime(input.projectId, native, input.root, workspace), file = runtime.file
     const reports: Array<{
         code: number;
         events: string;
         trace: string;
     }> = [];
     const runtimeFailures:string[]=[]
+    const evidenceWarnings: string[] = []
     try {
         for (const phase of native.restart ? ['initial', 'reopened'] : ['initial']) {
             signal.throwIfAborted();
+            runtime.verify();
             const opened = await openDebugSession({ projectId: input.projectId, sessionId, root: input.root, launch: input.launch, signal, formal:true });
             const directory = debugWorkspace(input.projectId, sessionId), report = join(directory, `native-${phase}.jsonl`), trace = join(directory, `native-${phase}-trace.json`);
             const observed = await actDebugSession({ projectId: input.projectId, sessionId, id: opened.id, signal, nativeTests: { file, phase, report, trace } });
+            runtime.verify();
+            if (observed.screenshot_error) evidenceWarnings.push(observed.screenshot_error)
             const outcome = observed.steps.find(step => step.id === 'native-tests')?.actual as {
                 exit_code?: number;
                 stderr?: string;
@@ -44,11 +50,12 @@ export async function runNativeGuiTests(input: {
         frozenNativeGuiEntry(input.projectId, native, input.root);
         const result=nativeGuiObservations(input.suite,reports)
         const evidence_dir = join(workspace, 'evidence', 'acceptance')
-        return runtimeFailures.length?{...result,evidence_dir,status:'failed' as const,error:`GUI_NATIVE_RUNTIME_ERROR: ${runtimeFailures[0]}`,
-          steps:[...result.steps,{id:'native-runtime',passed:false,actual:runtimeFailures.slice(0,3)}]}:{...result,evidence_dir}
+        return runtimeFailures.length?{...result,evidence_dir,evidence_warnings:evidenceWarnings,status:'failed' as const,error:`GUI_NATIVE_RUNTIME_ERROR: ${runtimeFailures[0]}`,
+          steps:[...result.steps,{id:'native-runtime',passed:false,actual:runtimeFailures.slice(0,3)}]}:{...result,evidence_dir,evidence_warnings:evidenceWarnings}
     }
     finally {
         await closeDebugSessions(input.projectId, sessionId);
+        runtime.close();
         // Reports and synthetic data remain inspectable; don't retain a large
         // Chromium profile for every finished formal test run. These are owned
         // isolated test directories, never a user's daily browser profile.

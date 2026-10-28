@@ -6,7 +6,7 @@ import { readPrdBackplane } from '../project/prd-store'
 import { requirementEvidenceHash } from '../project/requirement-contract'
 import { guiSuitePath, type GuiAcceptanceSuite } from '../desktop/gui-acceptance'
 import { cliSuitePath } from '../desktop/lean-cli-check'
-import { sameNativeTestBytes } from './native-gui-tests'
+import { nativeTestContractChanges } from './native-gui-tests'
 
 interface CliSuite { cases: Array<{ name: string; covers: string[]; args: string[]; stdout: string; exit_code: number }> }
 interface Baseline { version: string; requirements: Record<string, string>; gui?: GuiAcceptanceSuite; cli?: CliSuite }
@@ -32,8 +32,7 @@ export function assertRetainedSoftwareBehavior(projectId: string, kind: 'gui' | 
     const before = baseline.gui, after = suite as GuiAcceptanceSuite
     if(before.native_tests){
       const old=before.native_tests,next=after.native_tests
-      if(!next||!sameNativeTestBytes(old,next)&&(old.cases.some(c=>retained.has(c.feature)&&!next.cases.some(n=>n.feature===c.feature&&n.signature===c.signature))
-        ||old.files.some(f=>!next.files.some(n=>n.path===f.path&&(f.support?n.support===f.support:n.sha256===f.sha256)))))throw Error('GUI_RETAINED_NATIVE_TESTS_CHANGED: 保留原生测试的既有输入、断言和公共逻辑；可修定位并追加新功能测试')
+      if(!next||nativeTestContractChanges(old,next,retained).length)throw Error('GUI_RETAINED_NATIVE_TESTS_CHANGED: 保留原生测试的既有输入、断言和公共逻辑；可修定位并追加新功能测试')
     }
     // CSS identities can change with a legitimate redesign; the old observed
     // outputs and their retained feature references cannot silently disappear.

@@ -163,6 +163,23 @@ it('attaches only an owned ready browser service and never kills the borrowed se
   writeFileSync(join(root, 'server.cjs'), serverSource('v2'))
   expect((await tool.execute({ mode: 'open' }, context)).output).toContain('DEBUG_PROCESS_SOURCE_CHANGED')
 }, 90000)
+it('switches to an explicitly requested current owned service without killing either borrowed backend', async () => {
+  const root = project.root_path, one = await freePort(), two = await freePort()
+  writeFileSync(join(root, 'index.html'), html); writeFileSync(join(root, 'server.cjs'), serverSource('switch'))
+  writeFileSync(join(root, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, ui: 'browser', command: ['node', 'server.cjs', String(one)], url: `http://127.0.0.1:${one}` }))
+  const first = await startSoftwareProcess({ projectId: project.project_id, sessionId: 's', root, command: ['node', 'server.cjs', String(one)], url: `http://127.0.0.1:${one}` })
+  const next = await startSoftwareProcess({ projectId: project.project_id, sessionId: 's', root, command: ['node', 'server.cjs', String(two)], url: `http://127.0.0.1:${two}` })
+  const tool = buildSoftwareInspectTool(project.project_id, createSoftwareCollaborationPolicy(project.project_id, root, 's'))
+  const before = await tool.execute({ process_id: first.id }, ctx()); expect(before.isError, before.output).not.toBe(true)
+  const oldId = JSON.parse(before.output).debug_session_id
+  const explicitConflict = await tool.execute({ debug_session_id: oldId, process_id: next.id }, ctx())
+  expect(explicitConflict.isError).toBe(true); expect(readDebugSession(project.project_id, 's', oldId).state).toBe('ready')
+  const after = await tool.execute({ process_id: next.id }, ctx()); expect(after.isError, after.output).not.toBe(true)
+  expect(JSON.parse(after.output).debug_session_id).not.toBe(oldId)
+  expect(JSON.parse(after.output).url).toBe(`http://127.0.0.1:${two}/`)
+  expect(await (await fetch(`http://127.0.0.1:${one}/version`)).text()).toBe('switch')
+  expect(await (await fetch(`http://127.0.0.1:${two}/version`)).text()).toBe('switch')
+}, 90000)
 it('isolates retained development data by operation and session, and rejects a redirected data directory without touching its target', () => {
   const first = debugWorkspace(project.project_id, 's')
   mkdirSync(join(first, 'data')); writeFileSync(join(first, 'data/count'), 'kept old operation')

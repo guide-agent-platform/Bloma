@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import ts from 'typescript';
 import { getPromaHome } from '../../storage/config-paths';
 import type { GuiAcceptanceSuite } from '../desktop/gui-acceptance';
+import { nativeTestInputs } from './native-test-inputs';
 export interface NativeGuiTests {
+    layout?: 'project';
     entry: string;
     directory: string;
     digest: string;
@@ -23,8 +25,28 @@ export interface NativeGuiTests {
     }>;
 }
 export function sameNativeTestBytes(a: NativeGuiTests, b: NativeGuiTests) {
-    return a.entry === b.entry && a.directory === b.directory && a.restart === b.restart
+    return a.layout === b.layout && a.entry === b.entry && a.directory === b.directory && a.restart === b.restart
         && a.files.length === b.files.length && a.files.every((f, i) => f.path === b.files[i].path && f.sha256 === b.files[i].sha256 && f.size === b.files[i].size);
+}
+export class NativeTestContractError extends Error {
+    constructor(public readonly paths: string[]) {
+        super(`GUI_EXISTING_EXPECTATIONS_CHANGED: ${JSON.stringify({ paths: paths.slice(0, 24), omitted: Math.max(0, paths.length - 24), next: '开发探针可自由修改；正式案例保留已执行的业务输入、断言和共享业务逻辑。未执行的引导计划可依据宿主失败凭据修复。' })}`);
+    }
+}
+/** Compare business contracts, allowing extra checks and layout-only migration.
+ * Support logic/fixture bytes remain semantic because they can change inputs. */
+export function nativeTestContractChanges(before: NativeGuiTests, after: NativeGuiTests, retained?: Set<string>): string[] {
+    if (sameNativeTestBytes(before, after)) return [];
+    const source = (native: NativeGuiTests, file: string) => native.layout === 'project' ? file : native.directory + '/' + file;
+    const paths: string[] = [];
+    if (source(before, before.entry) !== source(after, after.entry)) paths.push('entry');
+    if (before.restart && !after.restart) paths.push('restart');
+    for (const c of before.cases) if ((!retained || retained.has(c.feature)) && !after.cases.some(n => n.name === c.name && n.feature === c.feature && n.signature === c.signature)) paths.push(`case:${c.feature}:${c.name}`);
+    for (const f of before.files) {
+        const match = after.files.find(n => source(after, n.path) === source(before, f.path));
+        if (!match || (f.support ?? f.sha256) !== (match.support ?? match.sha256)) paths.push(source(before, f.path));
+    }
+    return paths;
 }
 const sha = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
 export function isNativeGuiTestModule(path: string) {
@@ -69,12 +91,12 @@ function fileWithin(root: string, path: string) {
     return file;
 }
 export function validateNativeGuiTests(value: NativeGuiTests) {
-    if (!value || typeof value.restart !== 'boolean' || !/^[a-f0-9]{64}$/.test(value.digest) || !/^[a-f0-9]{64}$/.test(value.contract)
+    if (!value || value.layout !== undefined && value.layout !== 'project' || typeof value.restart !== 'boolean' || !/^[a-f0-9]{64}$/.test(value.digest) || !/^[a-f0-9]{64}$/.test(value.contract)
         || !Array.isArray(value.cases) || !value.cases.length || new Set(value.cases.map(c => c.name)).size !== value.cases.length || value.cases.some(c => !c.name || !/^F-\d+$/.test(c.feature) || !/^[a-f0-9]{64}$/.test(c.signature))
         || !Array.isArray(value.files) || !value.files.length || value.files.length > 1000 || Buffer.byteLength(JSON.stringify(value)) > 96 * 1024)
         throw Error('GUI_NATIVE_SUITE_INVALID');
     safe(value.entry);
-    safe(value.directory);
+    if (value.layout !== 'project' || value.directory !== '.') safe(value.directory);
     if (!value.files.some(f => f.path === value.entry) || new Set(value.files.map(f => f.path)).size !== value.files.length)
         throw Error('GUI_NATIVE_FILES_INVALID');
     let bytes = 0;
@@ -85,7 +107,7 @@ export function validateNativeGuiTests(value: NativeGuiTests) {
     }
     if (sha(JSON.stringify(value.files)) !== value.digest)
         throw Error('GUI_NATIVE_DIGEST_INVALID');
-    if (sha(JSON.stringify({ entry: value.entry, directory: value.directory, restart: value.restart, cases: value.cases, files: value.files.map(f => ({ path: f.path, semantic: f.support ?? f.sha256 })) })) !== value.contract)
+    if (sha(JSON.stringify({ ...(value.layout ? { layout: value.layout } : {}), entry: value.entry, directory: value.directory, restart: value.restart, cases: value.cases, files: value.files.map(f => ({ path: f.path, semantic: f.support ?? f.sha256 })) })) !== value.contract)
         throw Error('GUI_NATIVE_CONTRACT_INVALID');
 }
 export function freezeNativeGuiTests(projectId: string, root: string, script: string, covers: string[], restart = false): NativeGuiTests {
@@ -93,26 +115,15 @@ export function freezeNativeGuiTests(projectId: string, root: string, script: st
     if (!/\.(?:m|c)?js$/i.test(script))
         throw Error('GUI_NATIVE_JS_REQUIRED');
     const directory = dirname(script).replaceAll('\\', '/');
-    if (directory === '.')
-        throw Error('GUI_NATIVE_TEST_DIRECTORY_REQUIRED: 测试放在独立目录，例如tests/acceptance.mjs，业务源码可以独立修复');
-    safe(directory);
-    const absolute = realpathSync(root), testRoot = fileWithin(absolute, directory), rel = relative(absolute, realpathSync(testRoot));
-    if (rel === '..' || rel.startsWith('..\\') || rel.startsWith('../') || isAbsolute(rel))
-        throw Error('GUI_NATIVE_PATH_OUTSIDE_PROJECT');
+    if (directory !== '.') safe(directory);
+    const testRoot = realpathSync(root), selected = nativeTestInputs(testRoot, script);
     const files: NativeGuiTests['files'] = [], contents = new Map<string, Buffer>(), ids = new Set<string>(), cases: NativeGuiTests['cases'] = [];
     let bytes = 0, reopened = false;
-    const visit = (folder: string, prefix = '') => {
-        for (const entry of readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-            if (entry.name === 'node_modules' || entry.name === '.git')
-                continue;
-            const path = prefix + entry.name, file = join(folder, entry.name);
+        for (const path of selected) {
+            const file = fileWithin(testRoot, path);
             safe(path);
-            if (entry.isSymbolicLink())
+            if (lstatSync(file).isSymbolicLink())
                 throw Error('GUI_NATIVE_LINK_UNSUPPORTED');
-            if (entry.isDirectory()) {
-                visit(file, path + '/');
-                continue;
-            }
             const size = lstatSync(file).size;
             if (size > 8 * 1024 * 1024 || (bytes += size) > 32 * 1024 * 1024 || files.length >= 1000)
                 throw Error('GUI_NATIVE_SIZE_LIMIT');
@@ -214,14 +225,12 @@ export function freezeNativeGuiTests(projectId: string, root: string, script: st
                 descriptor.support = sha(normalize(parsed, true));
             }
         }
-    };
-    visit(testRoot);
     if (covers.some(id => !ids.has(id)) || [...ids].some(id => !covers.includes(id)))
         throw Error(`GUI_NATIVE_COVERAGE_REQUIRED: 用node:test测试名称覆盖${covers.join(',')}，未知编号不接受`);
     restart = restart || reopened;
-    const entry = relative(testRoot, resolve(root, script)).replaceAll('\\', '/');
-    const contract = sha(JSON.stringify({ entry, directory, restart, cases, files: files.map(f => ({ path: f.path, semantic: f.support ?? f.sha256 })) }));
-    const value: NativeGuiTests = { directory, entry, files, cases, contract, restart, digest: sha(JSON.stringify(files)) };
+    const entry = script;
+    const contract = sha(JSON.stringify({ layout: 'project', entry, directory, restart, cases, files: files.map(f => ({ path: f.path, semantic: f.support ?? f.sha256 })) }));
+    const value: NativeGuiTests = { layout: 'project', directory, entry, files, cases, contract, restart, digest: sha(JSON.stringify(files)) };
     validateNativeGuiTests(value);
     const destination = base(projectId, value.digest);
     for (const item of files) {
@@ -248,7 +257,7 @@ export function frozenNativeGuiVersion(projectId: string, native?: NativeGuiTest
         if (lstatSync(frozen).isSymbolicLink() || lstatSync(frozen).size !== file.size || sha(readFileSync(frozen)) !== file.sha256)
             throw Error('GUI_NATIVE_FROZEN_INPUT_CHANGED');
         if (sourceRoot) {
-            const source = fileWithin(sourceRoot, native.directory + '/' + file.path);
+            const source = fileWithin(sourceRoot, native.layout === 'project' ? file.path : native.directory + '/' + file.path);
             if (!existsSync(source) || lstatSync(source).isSymbolicLink() || sha(readFileSync(source)) !== file.sha256)
                 throw Error('GUI_NATIVE_TEST_SOURCE_CHANGED: 输入和预期已冻结；定位修复可重新verify_app(script)，不能改断言过关');
         }
@@ -258,6 +267,10 @@ export function frozenNativeGuiVersion(projectId: string, native?: NativeGuiTest
 export function frozenNativeGuiEntry(projectId: string, native: NativeGuiTests, sourceRoot: string) {
     frozenNativeGuiVersion(projectId, native, sourceRoot);
     return join(base(projectId, native.digest), native.entry);
+}
+export function frozenNativeGuiRoot(projectId: string, native: NativeGuiTests, sourceRoot: string) {
+    frozenNativeGuiVersion(projectId, native, sourceRoot);
+    return base(projectId, native.digest);
 }
 export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<{
     code: number;
@@ -270,6 +283,7 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
         actual: unknown;
     }> = [], covered = new Set<string>(), executed = new Set<string>();
     let interactions = 0, assertions = 0, failed = false;
+    const bootstrapErrors: string[] = [];
     for (const report of reports) {
         if (report.code !== 0)
             failed = true;
@@ -283,6 +297,7 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
             if (!['test:pass', 'test:fail'].includes(event.type))
                 continue;
             const ids = String(event.name).match(/\bF-\d+\b/g) ?? [];
+            if (event.type === 'test:fail' && !ids.length && event.error) bootstrapErrors.push(String(event.error));
             if (ids.some((id: string) => !suite.covers.includes(id)))
                 throw Error('GUI_NATIVE_UNKNOWN_REQUIREMENT');
             const observed = trace.cases.find((c: {
@@ -305,6 +320,8 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
     }
     const missing = suite.covers.filter(id => !covered.has(id));
     const finish=<T>(value:T)=>({...value,native_evidence:{interactions,assertions}})
+    if (!steps.length && !assertions && failed && bootstrapErrors.length) return finish({ status: 'unverified' as const, steps,
+        error: `GUI_NATIVE_BOOTSTRAP_FAILED: ${bootstrapErrors[0].slice(0, 4000)}` });
     if(!assertions&&steps.length&&steps.every(step=>!step.passed&&String((step.actual as {error?:string}).error).includes('GUI_NATIVE_ASSERTION_REQUIRED')))return finish({status:'unverified' as const,steps,error:'GUI_NATIVE_ASSERTIONS_MISSING: 没有实际业务断言，需修正测试计划，不能据此交付'})
     if (failed && steps.some(step => !step.passed))
         return finish({ status: 'failed' as const, steps, error: '原生应用测试的真实断言失败，见测试结果' });

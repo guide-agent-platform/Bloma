@@ -14,6 +14,7 @@ import type { SoftwareTrial, ProjectLaunchAppResult } from '../../shared/types'
 import { recordEvaluationEvent } from './harness-evaluation'
 import { isLongtermSoftware, readLongtermState } from './longterm-state'
 import { executeSoftwareCommand } from './command-runtime'
+import { assertSoftwareDelivery } from './launch-contract'
 
 const live = new Map<string, SoftwareTrial>(), busy = new Set<string>()
 function directory(projectId: string) {
@@ -56,8 +57,7 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
     const sealed=current&&['awaiting_confirmation','confirming'].includes(current.status)&&current.candidate_id?await loadSoftwareRelease(projectId,current.candidate_id):undefined
     if(sealed)await verifyReleaseSource(sealed)
     const release = sealed??await prepareSoftwareRelease(projectId, project.root_path)
-    const target = release.launch.mode === 'command' ? 'command' : release.launch.ui === 'browser' ? 'browser' : 'desktop'
-    if (brief.lean_brief?.delivery && brief.lean_brief.delivery !== target) throw Error('SOFTWARE_DELIVERY_TARGET_MISMATCH: 试用形态必须与已确认目标一致')
+    assertSoftwareDelivery(brief, release.launch)
     if (!['browser', 'electron'].includes(release.launch.ui ?? '')&&release.launch.mode!=='command') throw Error('TRIAL_RUNTIME_UNSUPPORTED: 当前独立试用支持Electron/浏览器及一次性命令')
     const scan = runSecurityScan({ project_id: projectId, root_path: release.root, profile: 'local-software' })
     if (!scan.passed) throw Error('TRIAL_SECURITY_FAILED: 修复安全扫描问题后再试用')

@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { startSoftwareProcess, stopSoftwareSession, softwareProcess, ownedSoftwarePreview, matchingOwnedSoftwarePreview, restartOwnedSoftwarePreview, redactSoftwareOutput } from './process-manager'
 import { softwareVerificationFingerprint as verificationFingerprint } from '../desktop/verification-fingerprint'
 import { materializeGuiFixtures } from '../desktop/gui-fixtures'
-import { observeSoftwareUi } from './ui-observation'
+import { observeSoftwareUi, captureDiagnosticScreenshot } from './ui-observation'
 import { debugWorkspace } from './debug-workspace'
 import { saveSourceCheckpoint } from './source-checkpoints'
 import { isNativeGuiTestModule } from './native-gui-tests'
@@ -28,7 +28,7 @@ export interface DebugObservation { seq: number; at: string; version: number; ac
   duration_ms?: number; method?: string; url?: string; status?: number }
 export interface DebugSnapshot { id: string; projectId: string; sessionId: string; state: 'opening' | 'ready' | 'closed' | 'failed' | 'interrupted'; version: number; source?: string;
   ui?: Awaited<ReturnType<typeof observeSoftwareUi>>; data_dir?: string; resumed_from?: string;
-  stale: boolean; url?: string; screenshot?: string; source_checkpoint?: { id: string; files?: number }; checkpoint_error?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
+  stale: boolean; url?: string; screenshot?: string; screenshot_error?: string; source_checkpoint?: { id: string; files?: number }; checkpoint_error?: string; fixtures?: GuiAcceptanceSuite['fixtures']; log_cursor?: number; observations_omitted?: number; observations: DebugObservation[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string }
 interface DebugSession { snapshot: DebugSnapshot; root: string; temporary: string; workspace: string; data: string; file: string; owner: string; page?: Page;
   child?: ChildProcess; nativeRoot?: number; browser?: BrowserContext; browserClient?: Browser; browserServer?: BrowserServer; externalProcessId?: string; ownedProcessId?: string; stdout?: string; stderr?: string; signal: AbortSignal; abort: () => void;
   activeAction?: string; formal?:boolean; cdpEndpoint?: string; seq: number; logBytes: number; closing?: Promise<void>; finished?: boolean; timer?: ReturnType<typeof setTimeout>; busy: boolean; launch: LaunchDeclaration }
@@ -367,8 +367,9 @@ export async function actDebugSession(input: { projectId: string; sessionId: str
       writeTextFileAtomic(join(session.workspace, 'browser-state.json'), JSON.stringify(await session.browser.storageState()))
     }
     const screenshotDir = join(session.workspace, 'evidence', session.formal ? 'acceptance' : 'development'); mkdirSync(screenshotDir, { recursive: true })
-    session.snapshot.screenshot = join(screenshotDir, `v${session.snapshot.version}-${Date.now()}.png`)
-    await session.page.screenshot({ path: session.snapshot.screenshot })
+    const screenshot = await captureDiagnosticScreenshot(session.page, join(screenshotDir, `v${session.snapshot.version}-${Date.now()}.png`), input.signal)
+    session.snapshot.screenshot = screenshot.path; session.snapshot.screenshot_error = screenshot.error
+    if (screenshot.error) log(session, 'evidence.screenshot_failed', screenshot.error)
     if (!input.nativeTests && !session.snapshot.steps.some(step => !step.passed)
       && !session.snapshot.observations.some(row => row.version === session.snapshot.version && /^renderer\.(?:error|startup_error)$/.test(row.kind))) {
       try {

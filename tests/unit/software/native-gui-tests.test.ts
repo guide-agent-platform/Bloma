@@ -2,7 +2,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
-import { beforeEach, afterEach, it, expect } from 'vitest';
+import { beforeEach, afterEach, it, expect, vi } from 'vitest';
+import * as uiObservation from '../../../main/software/ui-observation';
 import { createProject, updateProject } from '../../../main/project/project-service';
 import { readPrdBackplane, markPrdUserConfirmed } from '../../../main/project/prd-store';
 import { parseLeanBrief } from '../../../main/guide/lean-brief';
@@ -49,7 +50,7 @@ beforeEach(async () => {
     mkdirSync(join(project.root_path, 'tests'));
     writeFileSync(join(project.root_path, 'tests/acceptance.mjs'), script);
 });
-afterEach(async () => { await closeAllDebugSessions(); if (previous === undefined)
+afterEach(async () => { vi.restoreAllMocks(); await closeAllDebugSessions(); if (previous === undefined)
     delete process.env.PROMA_HOME;
 else
     process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }, 30000);
@@ -64,6 +65,66 @@ it('does not freeze a native draft before its application launch declaration is 
     writeFileSync(launchFile,original)
     writeFileSync(join(project.root_path,'tests/acceptance.mjs'),script.replace('create Alice','create Alice from repaired draft'))
     expect(()=>registerNativeGuiTests(project.project_id,'tests/acceptance.mjs')).not.toThrow()
+})
+it('reports a missing support module before freezing a draft or starting the app', async () => {
+    writeFileSync(join(project.root_path, 'tests/acceptance.mjs'), `import '../tools/missing-fixture.cjs';\n` + script)
+    const tool = buildSoftwareVerifyTool(project.project_id, createSoftwareCollaborationPolicy(project.project_id, project.root_path, 's'))
+    const result = await tool.execute({ script: 'tests/acceptance.mjs' }, { projectId: project.project_id, sessionId: 's', requestId: 'r', signal: new AbortController().signal, state: createToolState() })
+    expect(result.isError).toBe(true); expect(result.output).toContain('GUI_NATIVE_DEPENDENCY_MISSING'); expect(result.output).toContain('missing-fixture.cjs')
+    expect(existsSync(guiSuitePath(project.project_id))).toBe(false)
+})
+it('keeps actual business assertions and exposes a diagnostic image warning when host capture fails', async () => {
+    vi.spyOn(uiObservation, 'captureDiagnosticScreenshot').mockResolvedValue({ path: undefined, error: 'diagnostic font capture timeout' })
+    registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs')
+    const result = await verifySoftwareCandidate(project.project_id, 'diagnostic-only-failure', AbortSignal.timeout(90000))
+    expect(result.status, result.summary).toBe('passed')
+    expect(result.core?.host_gui?.native_evidence?.assertions).toBeGreaterThan(0)
+    expect(result.core?.host_gui?.evidence_warnings).toContain('diagnostic font capture timeout')
+}, 120000)
+it('allows changing an unrelated probe and appending checks without invalidating the original business expectations', () => {
+    const first = registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!
+    writeFileSync(join(project.root_path, 'tests/probe-dom.mjs'), 'not valid JavaScript; unrelated development probe')
+    const same = registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!
+    expect(same.digest).toBe(first.digest)
+    const extended = script.replace(/\n}$/, `\n await test('F-002 extra blank result',async()=>{await expect(page.locator('#list')).toHaveText('Alice')});\n}`)
+    writeFileSync(join(project.root_path, 'tests/acceptance.mjs'), extended)
+    expect(registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!.cases).toHaveLength(4)
+})
+it('executes a frozen relative helper outside tests with a real project dependency and retains all original inputs', async () => {
+    const root = project.root_path
+    mkdirSync(join(root, 'tools')); mkdirSync(join(root, 'node_modules/native-fixture-helper'), { recursive: true })
+    writeFileSync(join(root, 'node_modules/native-fixture-helper/package.json'), '{"name":"native-fixture-helper","main":"index.cjs"}')
+    writeFileSync(join(root, 'node_modules/native-fixture-helper/index.cjs'), 'module.exports={value:"Alice"}')
+    writeFileSync(join(root, 'tools/helper.cjs'), `module.exports=require('native-fixture-helper')`)
+    writeFileSync(join(root, 'tests/acceptance.mjs'), `import helper from '../tools/helper.cjs';if(helper.value!=='Alice')throw Error('fixture mismatch');\n` + script)
+    registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs', true)
+    const result = await verifySoftwareCandidate(project.project_id, 'helper-runtime', AbortSignal.timeout(120000))
+    expect(result.status, result.summary).toBe('passed')
+    expect(result.core?.host_gui?.native_evidence?.interactions).toBe(4)
+    expect(readFileSync(join(root, 'node_modules/native-fixture-helper/index.cjs'), 'utf8')).toBe('module.exports={value:"Alice"}')
+}, 150000)
+it('does not lock an unexecuted draft permanently after a pre-GUI security failure; audits its repair', async () => {
+    const file = join(project.root_path, 'tests/acceptance.mjs')
+    writeFileSync(file, `const render=data=>{document.body.innerHTML=data};\n` + script)
+    const before = registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!
+    const failed = await verifySoftwareCandidate(project.project_id, 'security-draft', AbortSignal.timeout(30000))
+    expect(failed.status).toBe('failed'); expect(failed.core).toBeUndefined()
+    expect(failed.native_plan?.execution).toBe('not_started')
+    writeFileSync(file, script.replace('create Alice', 'create Alice after bootstrap repair'))
+    const repaired = registerNativeGuiTests(project.project_id, 'tests/acceptance.mjs').native_tests!
+    expect(repaired.digest).not.toBe(before.digest)
+    const audit = JSON.parse(readFileSync(join(home, 'gui-native-adapters', project.project_id, repaired.digest + '.json'), 'utf8'))
+    expect(audit.previous).toBe(before.digest); expect(audit.changes.length).toBeGreaterThan(0)
+    expect(readFileSync(join(home, 'gui-native-tests', project.project_id, before.digest, before.entry), 'utf8')).toContain('innerHTML')
+}, 60000)
+it('rejects the wrong delivery form before freezing the script or preparing a release', async () => {
+    const brief = readPrdBackplane(project.project_id); brief.lean_brief!.delivery = 'desktop'
+    syncDocuments({ request_id: 'desktop-goal', project_id: project.project_id, session_id: 's', checkpoint: 'requirement_confirmed' }, brief)
+    markPrdUserConfirmed(project.project_id)
+    const tool = buildSoftwareVerifyTool(project.project_id, createSoftwareCollaborationPolicy(project.project_id, project.root_path, 's'))
+    const result = await tool.execute({ script: 'tests/acceptance.mjs' }, { projectId: project.project_id, sessionId: 's', requestId: 'r', signal: new AbortController().signal, state: createToolState() })
+    expect(result.isError).toBe(true); expect(result.output).toContain('SOFTWARE_DELIVERY_TARGET_MISMATCH')
+    expect(existsSync(guiSuitePath(project.project_id))).toBe(false)
 })
 it('verify_app directly freezes and actually runs node:test UI checks, including relative navigation and a real restart, without an action table', async () => {
     const tool = buildSoftwareVerifyTool(project.project_id, createSoftwareCollaborationPolicy(project.project_id, project.root_path, 's'));

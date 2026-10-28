@@ -17,6 +17,7 @@ import { coreVerificationCacheKey, withCoreVerificationCache } from './core-veri
 import { isSoftwareProject } from './workflow-policy'
 import { readLaunchDeclaration } from './launch-smoke'
 import { qualifySoftwareArtifact, type ArtifactQualification } from '../software/artifact-qualification'
+import { assertSoftwareDelivery } from '../software/launch-contract'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
@@ -218,9 +219,7 @@ async function verifyLeanBehavior(options: CoreVerificationOptions, root: string
   if (isSoftwareProject(options.projectId)) {
     const declared = readLaunchDeclaration(root)
     if (!declared?.ok) throw new Error('SOFTWARE_LAUNCH_DECLARATION_REQUIRED')
-    const target = brief.lean_brief!.delivery ?? (brief.lean_brief!.ui === 'none' ? 'command' : 'desktop')
-    const actual = declared.launch.ui === 'browser' ? 'browser' : declared.launch.mode === 'command' ? 'command' : 'desktop'
-    if (target !== actual) throw new Error(`SOFTWARE_DELIVERY_TARGET_MISMATCH: 已确认${target}，实际入口${actual}；改变使用方式需先确认`)
+    assertSoftwareDelivery(brief, declared.launch)
   }
   const scope = prdScopeFingerprint(brief)
   const states = new Map(brief.requirements.map(row => [row.id, 'unverified' as CoreVerificationStatus]))

@@ -51,12 +51,17 @@ const llmVerifier: CapabilityVerifier = { id: 'llm', async run(ctx) {
   const needed = required.length > 0 || !!ctx.backplane.shape && !['none', 'preview'].includes(ctx.backplane.shape.llm_role)
   if (!needed && !spec) return
   const ids = new Set(ctx.backplane.requirements.map(item => item.id))
-  if (spec && (!Array.isArray(spec.covers) || !spec.covers.length || spec.covers.some(id => !ids.has(id)) || required.some(item => !spec.covers.includes(item.id)))) throw new Error('模型入口覆盖声明缺失、悬空或漏掉模型需求')
+  if (spec && (!Array.isArray(spec.covers) || !spec.covers.length || spec.covers.some(id => !ids.has(id)) || required.some(item => !spec.covers.includes(item.id)))) {
+    const declared = Array.isArray(spec.covers) ? spec.covers.filter(id => typeof id === 'string' && /^F-\d+$/.test(id)) : []
+    throw Error(`MODEL_COVERAGE_INVALID: 模型入口覆盖声明缺失、悬空或漏掉模型需求 ${JSON.stringify({ required: required.map(item => item.id), declared,
+      missing: required.filter(item => !declared.includes(item.id)).map(item => item.id), unknown: declared.filter(id => !ids.has(id)),
+      next: '在CORE_CHECK.json的llm.covers登记实际客户端覆盖的对应需求；入口必须由产品实际使用，不要更改需求或添加探针专用替身。' })}`)
+  }
   const result = spec ? await runHostLlmProbe(ctx.root, spec, undefined, ctx.signal, ctx.projectId) : undefined
   const status = result?.status ?? 'unverified'
   return { status, features: Object.fromEntries([...new Set([...required.map(item => item.id), ...(spec?.covers ?? [])])].map(id => [id, status])),
     report: result ? { llm: result } : undefined,
-    missing: !spec ? ['缺少真实模型功能入口登记 llm；mock 或固定 network_error 不能证明请求链路已实现'] : status === 'passed' ? [] :
+    missing: !spec ? [`缺少真实模型功能入口登记 llm（需求：${required.map(item => item.id).join(',') || '模型角色声明'}）；mock 或固定 network_error 不能证明请求链路已实现`] : status === 'passed' ? [] :
       [`模型功能本机 HTTP 探针未通过：${result?.error ?? result?.tests?.filter(test => !test.passed).map(test => test.name).join('、')}`] }
 } }
 export const BUILTIN_CAPABILITY_VERIFIERS: readonly CapabilityVerifier[] = [speechVerifier, fileVerifier, llmVerifier]

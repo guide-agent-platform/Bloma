@@ -1,4 +1,13 @@
 import type { Page } from 'playwright'
+import { redactSoftwareOutput } from './process-manager'
+
+/** A diagnostic PNG is separate from business assertions or an explicitly
+ * requested visual check. A missing PNG never becomes visual PASS evidence. */
+export async function captureDiagnosticScreenshot(page: Page, path: string, signal: AbortSignal) {
+  signal.throwIfAborted()
+  try { await page.screenshot({ path, timeout: 10000 }); signal.throwIfAborted(); return { path, error: undefined } }
+  catch (error) { signal.throwIfAborted(); return { path: undefined, error: redactSoftwareOutput(String(error)).slice(-2000) } }
+}
 
 /** A bounded DOM observation, never injected business logic or a PASS script.
  * Prefer editable controls before long lists, as in Proma observation policy. */

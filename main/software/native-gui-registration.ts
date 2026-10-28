@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { freezeNativeGuiTests, sameNativeTestBytes } from './native-gui-tests';
+import { freezeNativeGuiTests, nativeTestContractChanges, NativeTestContractError } from './native-gui-tests';
 import { findProject, updateProject } from '../project/project-service';
 import { readPrdBackplane } from '../project/prd-store';
 import { prdScopeFingerprint } from '../project/requirement-contract';
@@ -19,8 +19,8 @@ export function registerNativeGuiTests(projectId: string, script: string, restar
     if (existsSync(guiSuitePath(projectId))) {
         const bytes=readFileSync(guiSuitePath(projectId)),previous = parseGuiSuite(JSON.parse(bytes.toString('utf8')));
         const repairable=Boolean(previous.native_tests)&&canRepairUnexecutedNativePlan(projectId,createHash('sha256').update(bytes).digest('hex'))
-        if (previous.scope_hash === scope && (!previous.native_tests || previous.native_tests.contract !== native_tests.contract && !sameNativeTestBytes(previous.native_tests, native_tests))&&!repairable)
-            throw Error('GUI_EXISTING_EXPECTATIONS_CHANGED: 同目标只允许修正定位，不能改输入、断言或测试逻辑过关');
+        const changes = previous.native_tests ? nativeTestContractChanges(previous.native_tests, native_tests) : ['existing-action-suite'];
+        if (previous.scope_hash === scope && changes.length && !repairable) throw new NativeTestContractError(changes);
     }
     assertRetainedSoftwareBehavior(projectId, 'gui', suite);
     // Immutable identity pair records every accepted adapter revision. No model
@@ -28,7 +28,8 @@ export function registerNativeGuiTests(projectId: string, script: string, restar
     const previous = existsSync(guiSuitePath(projectId)) ? parseGuiSuite(JSON.parse(readFileSync(guiSuitePath(projectId), 'utf8'))) : undefined;
     writeTextFileAtomic(join(getPromaHome(), 'gui-native-adapters', projectId, `${native_tests.digest}.json`), JSON.stringify({
         version: 1, at: new Date().toISOString(), scope, previous: previous?.native_tests?.digest, current: native_tests.digest, contract: native_tests.contract,
-        rule: 'static-locators-and-bounded-wait-options-v1'
+        changes: previous?.native_tests ? nativeTestContractChanges(previous.native_tests, native_tests) : [],
+        rule: 'reachable-inputs-and-retained-business-cases-v2'
     }));
     installGuiAcceptanceSuite(projectId, suite);
     updateProject(projectId, { gui_acceptance: { status: 'sealed', scope_hash: scope } });

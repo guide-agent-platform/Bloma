@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { findProject } from '../project/project-service'
@@ -12,7 +12,7 @@ import { savePastedImage, MAX_PASTED_IMAGE_BYTES } from '../platform/shell/paste
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { guiInputFailure, guiStepsSchema, SOFTWARE_GUI_ACTION_KINDS } from '../desktop/gui-tool-contract'
 import { actDebugSession, closeDebugSession, closeDebugSessions, openDebugSession, readDebugSession, installDebugFixtures, activeDebugSessionId, assertDebugSessionProcess, retainedDebugFixtures } from './debug-sessions'
-import { activeSoftwarePreview, stopSoftwareSession } from './process-manager'
+import { activeSoftwarePreview, stopSoftwareSession, ownedSoftwarePreview } from './process-manager'
 import { restoreSourceFiles, sourceCheckpointChanges } from './source-checkpoints'
 import { GUI_FIXTURE_SCHEMA, materializeGuiFixtures, sealGuiFixtures } from '../desktop/gui-fixtures'
 import { guiVerificationReadiness } from './verification-readiness'
@@ -43,14 +43,34 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
         }
         if (input.script !== undefined && (typeof input.script !== 'string' || !input.script || input.steps !== undefined || ['once', 'read', 'close'].includes(String(input.mode)))) throw Error('BROWSER_SCRIPT_INPUT_INVALID: script需项目内JS模块路径，与steps二选一；不能用于once/read/close')
         let mode = input.mode
+        const explicitDebugSession = Boolean(input.debug_session_id)
         if (mode === undefined || ['open', 'act', 'reload'].includes(String(mode))) {
           const existing = input.debug_session_id as string | undefined ?? activeDebugSessionId(projectId, ctx.sessionId)
           if (existing) {
             const snapshot = readDebugSession(projectId, ctx.sessionId, existing)
             if (!['opening', 'ready'].includes(snapshot.state)) { input = { ...input, debug_session_id: undefined }; mode = 'open' }
             else {
-              input = { ...input, debug_session_id: existing }
-              if (mode === undefined || mode === 'open' || mode === 'act') mode = snapshot.stale ? 'reload' : 'act'
+              let switched = false
+              if (!explicitDebugSession && input.process_id) {
+                try { assertDebugSessionProcess(projectId, ctx.sessionId, existing, String(input.process_id)) }
+                catch (mismatch) {
+                  // An explicit process_id is a request to inspect that owned
+                  // service. Validate it before closing the old debug window;
+                  // never adopt foreign/stale PIDs or stop borrowed backends.
+                  const root = findProject(projectId).root_path
+                  try {
+                    const launch = requireLaunchDeclaration(root, 'DEBUG_LAUNCH_REQUIRED')
+                    const target = ownedSoftwarePreview(projectId, ctx.sessionId, String(input.process_id))
+                    if (launch.ui !== 'browser' || target.root !== resolve(root) || !target.data_dir || target.source !== verificationFingerprint(root)) throw mismatch
+                  } catch { throw mismatch }
+                  await closeDebugSession(projectId, ctx.sessionId, existing)
+                  input = { ...input, debug_session_id: undefined }; mode = 'open'; switched = true
+                }
+              }
+              if (!switched) {
+                input = { ...input, debug_session_id: existing }
+                if (mode === undefined || mode === 'open' || mode === 'act') mode = snapshot.stale ? 'reload' : 'act'
+              }
             }
           } else mode = 'open'
         }
@@ -102,7 +122,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
             verification_readiness: guiVerificationReadiness(projectId),
             version: snapshot.version, resumed_from: snapshot.resumed_from, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
             observations_omitted: snapshot.observations_omitted, data_dir: snapshot.data_dir, url: snapshot.url, screenshot: snapshot.screenshot,
-            visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
+            screenshot_error: snapshot.screenshot_error, visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
             isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed)
               || snapshot.observations.some(row => row.version === snapshot.version && /^renderer\.(?:error|startup_error)$/.test(row.kind)) }
         }
