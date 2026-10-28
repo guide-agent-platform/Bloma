@@ -30,7 +30,7 @@ it('recovers the last heartbeat plus a bounded tail, records unmeasured downtime
   const restarted = createProductionBudget('p', 'same-operation', 'desktop-implement', undefined, 'lease')
   expect(restarted.snapshot()).toMatchObject({ requests: 2, output: 4096, runtimeMs: 29000 })
 })
-it('refuses a fresh foreign lease and gives software continuation another time slice without clearing its accumulated usage', async () => {
+it('refuses a fresh foreign lease and allows software continuation without clearing its accumulated usage', async () => {
   const foreign = createProductionBudget('p', 'foreign', 'desktop-implement', undefined, 'lease'), file = foreign.snapshot().file, now = Date.now()
   mkdirSync(join(home, 'harness-budgets'), { recursive: true })
   writeFileSync(file, JSON.stringify({ version: 1, requests: 1, output: 8192, phases: {}, runtimeStartedAt: now - 500, runtimeHeartbeatAt: now - 100, runtimeOwner: '22222222-2222-2222-2222-222222222222' }))
@@ -39,6 +39,38 @@ it('refuses a fresh foreign lease and gives software continuation another time s
   const saved = budget.snapshot(); writeFileSync(saved.file, JSON.stringify({ version: 1, requests: 7, output: 3000, phases: { 'desktop-implement': 7 }, runtimeMs: 3600000 }))
   await withLeanRuntime(project.project_id, 'desktop-implement', undefined, async () => 'continued')
   expect(budget.snapshot()).toMatchObject({ requests: 7, output: 3000 }); expect(budget.snapshot().runtimeMs).toBeGreaterThanOrEqual(3600000)
+})
+it('keeps software running beyond 30 minutes while heartbeating and retaining request/output reservations', async () => {
+  vi.useFakeTimers()
+  const project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' }), budget = leanBudget(project.project_id, 'desktop-implement')
+  mkdirSync(join(home, 'harness-budgets'), { recursive: true })
+  const saved = budget.snapshot(); writeFileSync(saved.file, JSON.stringify({ version: 1, requests: 7, output: 3000, phases: { 'desktop-implement': 7 }, runtimeMs: 3600000 }))
+  let active: AbortSignal | undefined
+  const running = withLeanRuntime(project.project_id, 'desktop-implement', undefined, async signal => {
+    active = signal
+    await new Promise<void>(done => setTimeout(done, 31 * 60_000))
+    signal.throwIfAborted(); return 'finished after 31 minutes'
+  })
+  const completion = expect(running).resolves.toBe('finished after 31 minutes')
+  await vi.advanceTimersByTimeAsync(31 * 60_000)
+  await completion; expect(active?.aborted).toBe(false)
+  expect(budget.snapshot()).toMatchObject({ requests: 7, output: 3000, runtimeMs: 3600000 + 31 * 60_000 })
+  expect(budget.snapshot().runtimeOwner).toBeUndefined()
+})
+it('still cancels software explicitly after 30 minutes and releases its lease', async () => {
+  vi.useFakeTimers()
+  const project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' })
+  const abort = new AbortController(), reason = Error('explicit user stop')
+  let active: AbortSignal | undefined
+  const running = withLeanRuntime(project.project_id, 'desktop-implement', abort.signal, async signal => {
+    active = signal
+    await new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
+  })
+  const completion = expect(running).rejects.toBe(reason)
+  await vi.advanceTimersByTimeAsync(31 * 60_000)
+  expect(active?.aborted).toBe(false)
+  abort.abort(reason); await completion
+  expect(leanBudget(project.project_id, 'desktop-implement').snapshot().runtimeOwner).toBeUndefined()
 })
 it('stops repeated unchanged observations, permits actual improvement and retains counts across explicit continuation', () => {
   const project = createProject({ request_id: 'c', mode: 'quick' }, { workflowVersion: 'software-v1' }), base = { projectId: project.project_id, sessionId: 's', runId: 'one', error: 'GUI result incorrect; token=SECRET_TOKEN' }

@@ -21,13 +21,15 @@ export async function withLeanRuntime<T>(projectId: string, phase: string, signa
   work: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const budget = leanBudget(projectId, phase)
   const total = budget.startRuntime()
-  // A new human continuation grants another active time slice, never new
-  // requests/output/money. Historical workflows retain their cumulative limit.
-  const remaining = productionDeadlineMs('desktop-implement') - (findProject(projectId).workflow_version === 'software-v1' ? 0 : total)
-  if (remaining <= 0) { budget.finishRuntime(); throw new Error('HARNESS_DEADLINE_EXCEEDED') }
-  const deadline = new AbortController(), timer = setTimeout(() => deadline.abort(new Error('HARNESS_DEADLINE_EXCEEDED')), remaining)
-  const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal
-  const heartbeat = setInterval(() => { try { budget.heartbeatRuntime() } catch (error) { deadline.abort(error) } }, RUNTIME_HEARTBEAT_MS)
+  // Software work has no fixed overall deadline. Runtime leases/accounting,
+  // request/output/money guards and per-tool timeouts remain authoritative.
+  // Historical workflows retain their cumulative deadline for compatibility.
+  const remaining = findProject(projectId).workflow_version === 'software-v1' ? undefined : productionDeadlineMs('desktop-implement') - total
+  if (remaining !== undefined && remaining <= 0) { budget.finishRuntime(); throw new Error('HARNESS_DEADLINE_EXCEEDED') }
+  const guard = new AbortController(), timer = remaining === undefined ? undefined
+    : setTimeout(() => guard.abort(new Error('HARNESS_DEADLINE_EXCEEDED')), remaining)
+  const active = signal ? AbortSignal.any([signal, guard.signal]) : guard.signal
+  const heartbeat = setInterval(() => { try { budget.heartbeatRuntime() } catch (error) { guard.abort(error) } }, RUNTIME_HEARTBEAT_MS)
   try { active.throwIfAborted(); const result = await work(active); active.throwIfAborted(); return result }
   finally { clearTimeout(timer); clearInterval(heartbeat); budget.finishRuntime() }
 }
