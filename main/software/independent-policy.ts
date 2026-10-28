@@ -52,9 +52,10 @@ export function independentPolicyDigest(projectId: string) {
   return createHash('sha256').update(JSON.stringify(readIndependentPolicy(projectId) ?? null)).digest('hex')
 }
 /** Host-only setup, before execution/binding. Does not create spending proof. */
-export function configureIndependentPolicy(projectId: string, input: unknown) {
-  const project = findProject(projectId), policy = validateIndependentPolicy(input), operation = project.lean_operation_id ?? 'initial'
+export function assertIndependentPolicyMutable(projectId: string) {
+  const project = findProject(projectId), operation = project.lean_operation_id ?? 'initial'
   if (project.workflow_version !== 'software-v1') throw Error('INDEPENDENT_SOFTWARE_PROJECT_REQUIRED')
+  if (['archived','abandoned'].includes(project.status)) throw Error('INDEPENDENT_PROJECT_READ_ONLY')
   for (const file of [join(directory(projectId), 'current.json'), join(getPromaHome(), 'software-run-states', projectId + '.json')]) {
     if (!existsSync(file)) continue
     const record = JSON.parse(readFileSync(file, 'utf8'))
@@ -62,6 +63,10 @@ export function configureIndependentPolicy(projectId: string, input: unknown) {
     if ((record.operation ?? record.operationId ?? 'initial') === operation) throw Error('INDEPENDENT_POLICY_RUN_ALREADY_STARTED')
   }
   if (['binding.json','pending.json'].some(name => existsSync(join(getPromaHome(), 'harness-evaluation', projectId, name)))) throw Error('INDEPENDENT_POLICY_RUN_ALREADY_BOUND')
+  return project
+}
+export function configureIndependentPolicy(projectId: string, input: unknown) {
+  const policy = validateIndependentPolicy(input), project = assertIndependentPolicyMutable(projectId), operation = project.lean_operation_id ?? 'initial'
   const record = { version: 1, project_id: projectId, operation_id: operation, policy }
   const digest = createHash('sha256').update(JSON.stringify(record)).digest('hex')
   writeTextFileAtomic(join(directory(projectId), 'policies', digest + '.json'), JSON.stringify(record))

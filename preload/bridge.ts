@@ -207,6 +207,8 @@ const electronAPI: ElectronAPI = {
   dom: {
   },
   projectDeliverables: {
+    modelSettings: (input:import('../shared/types').ProjectDeliverablesInput) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_MODEL_SETTINGS_GET,input),
+    saveModelSettings: (input:import('../shared/types').SoftwareModelSettingsSave) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_MODEL_SETTINGS_SAVE,input),
     longtermAction: (input:import('../shared/types').LongtermActionInput) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_LONGTERM_ACTION,input),
     decideSuggestion: (input: import('../shared/types').SoftwareSuggestionDecisionInput) => ipcRenderer.invoke(IPC_CHANNELS.SOFTWARE_SUGGESTIONS_DECIDE, input),
     get: (input: import('../shared/types').ProjectDeliverablesInput) =>

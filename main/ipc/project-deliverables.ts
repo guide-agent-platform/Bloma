@@ -35,6 +35,7 @@ import { hasRunForProject, registerBackgroundRun, unregisterBackgroundRun, backg
 import { randomUUID } from 'node:crypto'
 import { isLongtermSoftware, readLongtermState } from '../software/longterm-state'
 import { performLongtermAction } from '../software/longterm-control'
+import { softwareModelSettings, saveSoftwareModelSettings } from '../software/independent-settings'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -75,6 +76,16 @@ function listFiles(rootPath: string): string[] {
 }
 
 export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: BrowserWindow): void {
+  ipcMain.handle(IPC_CHANNELS.SOFTWARE_MODEL_SETTINGS_GET, (_event,payload:unknown)=>safeInvoke(extractRequestId(payload),()=>{
+    const input=requireFields<ProjectDeliverablesInput>(payload,['request_id','project_id'])
+    const state=softwareModelSettings(input.project_id)
+    return hasRunForProject(input.project_id)?{...state,locked:true,lock_reason:'INDEPENDENT_POLICY_RUN_ACTIVE'}:state
+  }))
+  ipcMain.handle(IPC_CHANNELS.SOFTWARE_MODEL_SETTINGS_SAVE, (_event,payload:unknown)=>safeInvoke(extractRequestId(payload),()=>{
+    const input=requireFields<import('../../shared/types').SoftwareModelSettingsSave>(payload,['request_id','project_id','revision','variant'])
+    if(hasRunForProject(input.project_id))throw Error('项目正在运行，请结束本轮后再检查配置。')
+    return saveSoftwareModelSettings(input)
+  }))
   ipcMain.handle(IPC_CHANNELS.SOFTWARE_LONGTERM_ACTION,(_event,payload:unknown)=>safeInvoke(extractRequestId(payload),async()=>{
     const input=requireFields<import('../../shared/types').LongtermActionInput>(payload,['request_id','project_id','session_id','revision','action'])
     const emit=(type:import('../../shared/types').AgentEvent['type'],data:Record<string,unknown>)=>_mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT,{event_id:randomUUID(),project_id:input.project_id,session_id:input.session_id,type,payload:data,created_at:new Date().toISOString()})

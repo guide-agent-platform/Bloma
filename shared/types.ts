@@ -99,6 +99,8 @@ export const IPC_CHANNELS = {
   PROJECT_LAUNCH_APP: 'project:launch-app',
   SOFTWARE_SUGGESTIONS_DECIDE: 'software:suggestions-decide',
   SOFTWARE_LONGTERM_ACTION: 'software:longterm-action',
+  SOFTWARE_MODEL_SETTINGS_GET: 'software:model-settings-get',
+  SOFTWARE_MODEL_SETTINGS_SAVE: 'software:model-settings-save',
   /** 点选纠错会话（批11 MVP-E，2026-10-08）：修改预览实例拉起/选区轮询/收口 */
   CORRECTION_START: 'correction:start',
   CORRECTION_PICKS: 'correction:picks',
@@ -249,6 +251,20 @@ export interface ChannelModel {
   /** 编辑格式能力位（Aider 结论：弱渠道用 diff 编辑不可靠）：
    *  diff = old_string/new_string 精确替换（默认）；whole = 整文件重写。 */
   edit_format?: 'diff' | 'whole'
+}
+
+export interface SoftwareModelSettings {
+  project_id: string; revision: string; variant: 'single'|'independent'; locked: boolean; lock_reason?: string
+  channels: Array<{ id: string; name: string; models: string[] }>
+  channel_id?: string; model?: string
+  budget?: { cap_rmb: number; accounted_upper_rmb: number; remaining_rmb: number }
+  pricing?: { context_tokens: number; input_rmb_per_million: number; output_rmb_per_million: number }
+  budget_error?: string; design_status: string; admission: 'not_checked'
+}
+export interface SoftwareModelSettingsSave extends RequestEnvelope {
+  project_id: string; revision: string; variant: 'single'|'independent'
+  channel_id?: string; model?: string; authorize_budget?: boolean
+  budget?: { cap_rmb: number; context_tokens: number; input_rmb_per_million: number; output_rmb_per_million: number }
 }
 
 export interface Channel {
@@ -1916,6 +1932,8 @@ export type ElectronAPI = {
     onArtifactEvent(listener: (payload: DesktopArtifactEventPayload) => void): () => void
   }
   projectDeliverables: {
+    modelSettings(input:ProjectDeliverablesInput):Promise<ApiResult<SoftwareModelSettings>>
+    saveModelSettings(input:SoftwareModelSettingsSave):Promise<ApiResult<SoftwareModelSettings>>
     longtermAction(input:LongtermActionInput):Promise<ApiResult<{state:LongtermProjectState;detail:string}>>
     decideSuggestion(input: SoftwareSuggestionDecisionInput): Promise<ApiResult<{suggestions:SoftwareSuggestions;detail:string}>>
     /** 交付面板（2026-10-04）：项目文件清单 + DELIVERY.md + 启动声明快照 */
