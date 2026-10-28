@@ -10,6 +10,7 @@ import { buildSoftwareImageTool } from './image-tool'
 import { buildSoftwareInspectTool } from './inspect-tool'
 import { prepareSoftwareRuntime, projectRuntimeRequest } from './runtime-manager'
 import { runtimeBindingVersion } from './runtime-bindings'
+import { inspectProjectDependencies } from './dependency-state'
 import { buildRepositoryContextTool } from './repository-context'
 import { buildSoftwareVerifyTool } from './verification-tool'
 import { buildImprovementSuggestionTool } from './improvement-suggestions'
@@ -69,7 +70,9 @@ function environmentTool(projectId: string): AgentLoopTool {
           execution_boundary: '受管理的项目执行环境，不是OS沙箱；上游渠道密钥不传入命令环境' }
         version = current
       }
-      return { output: JSON.stringify(known) }
+      // Dependency files change during implementation; do not cache their state
+      // alongside the relatively stable runtime version probes.
+      return { output: JSON.stringify({ ...known as object, dependencies: inspectProjectDependencies(root) }) }
     } }
 }
 

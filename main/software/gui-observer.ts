@@ -13,20 +13,8 @@ import { selectOwnedNativeFile } from './native-file-dialog'
 import { closeOwnedGui } from './gui-cleanup'
 import type { ChildProcess } from 'node:child_process'
 
-/** A real Electron runtime is required; a packaged Bloma.exe is not a generic
- * Electron executable and must never be recursively launched as the product. */
-export function electronEntry(root: string, command: readonly string[]): { executablePath: string; args: string[] } {
-  let [head, ...args] = command
-  if (head === 'npm' && args.length <= 2 && (args[0] === 'start' || args[0] === 'run' && args[1] === 'start')) {
-    // Keep the actual normal entry explicit; do not reinterpret arbitrary scripts.
-    throw new Error('ELECTRON_DIRECT_ENTRY_REQUIRED: LAUNCH.command填写项目node_modules/electron/dist/electron.exe与实际应用路径，或已打包exe')
-  }
-  if (head === 'electron') head = join(root, 'node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : process.platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron' : 'electron')
-  const executablePath = isAbsolute(head) ? head : resolve(root, head)
-  if (!existsSync(executablePath)) throw new Error('ELECTRON_EXECUTABLE_MISSING: 请先安装工程依赖或使用实际打包入口')
-  if (!args.length && basename(executablePath).toLowerCase() === 'electron.exe') args = ['.']
-  return { executablePath, args }
-}
+import { electronEntry } from './electron-entry'
+export { electronEntry } from './electron-entry'
 
 async function selectGuiOption(locator: Locator, choice: { value?: string; label?: string }, allowLabelFallback = false): Promise<string> {
   const options = await locator.evaluate(element => element instanceof HTMLSelectElement

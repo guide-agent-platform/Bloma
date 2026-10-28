@@ -8,6 +8,8 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createProject } from '../../../main/project/project-service'
 import { executeSoftwareCommand, projectDirectory, resolveSoftwareCommand, softwareEnvironment, validateSoftwareCommand } from '../../../main/software/command-runtime'
 import { startSoftwareProcess, softwareProcess, stopSoftwareSession } from '../../../main/software/process-manager'
+import { buildSoftwareExecutionTools } from '../../../main/software/execution-tools'
+import { createToolState } from '../../../main/agent/loop/agent-loop'
 
 let home: string, previous: string | undefined, project: ReturnType<typeof createProject>
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-software-exec-')); process.env.PROMA_HOME = home;
@@ -16,6 +18,34 @@ afterEach(async () => { await stopSoftwareSession(project.project_id, 's'); if (
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 async function port() { const server = createServer(); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address();
   if (!address || typeof address === 'string') throw Error('fixture'); await new Promise<void>(resolve => server.close(() => resolve())); return address.port }
+it('shares only verified Electron download cache while retaining per-project npm/data directories', () => {
+  const a = softwareEnvironment(project.project_id), b = softwareEnvironment('another-project')
+  expect(a.electron_config_cache).toBe(b.electron_config_cache)
+  expect(a.electron_config_cache).toBe(join(home, 'software-runtimes', 'electron-cache'))
+  expect(a.npm_config_cache).not.toBe(b.npm_config_cache); expect(a.APP_DATA_DIR).not.toBe(b.APP_DATA_DIR)
+})
+it('preserves timeout logs, redacts secrets and identifies a partial Electron download through the actual command tool', async () => {
+  writeFileSync(join(project.root_path, 'package.json'), '{"devDependencies":{"electron":"32.3.3"}}')
+  const dir = join(project.root_path, 'node_modules/electron'); mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), '{"name":"electron","version":"32.3.3"}')
+  writeFileSync(join(dir, 'install.js'), 'console.log("download started");console.error("ETIMEDOUT Authorization: Bearer PRIVATE_DOWNLOAD_TOKEN");setInterval(()=>{},1000)')
+  const run = buildSoftwareExecutionTools(project.project_id).find(tool => tool.name === 'run_command')!
+  const result = await run.execute({ command: ['node', 'node_modules/electron/install.js'], timeout_ms: 1500 }, {
+    projectId: project.project_id, sessionId: 's', requestId: 'r', signal: new AbortController().signal, state: createToolState() })
+  expect(result.isError).toBe(true); expect(result.output).not.toContain('PRIVATE_DOWNLOAD_TOKEN')
+  expect(JSON.parse(result.output)).toMatchObject({ code: 'DEPENDENCY_DOWNLOAD_ERROR', stdout: expect.stringContaining('download started'),
+    dependencies: { electron: { state: 'binary_missing' } }, input_version: expect.any(String) })
+}, 15000)
+it('installs a local package offline using the normal npm tool and reports metadata without claiming verification', async () => {
+  const local = join(project.root_path, 'fixture-dependency'); mkdirSync(local)
+  writeFileSync(join(local, 'package.json'), '{"name":"audit-local-package","version":"1.0.0"}')
+  writeFileSync(join(project.root_path, 'package.json'), '{"name":"offline-install-check","dependencies":{"audit-local-package":"file:./fixture-dependency"}}')
+  const run = buildSoftwareExecutionTools(project.project_id).find(tool => tool.name === 'run_command')!
+  const result = await run.execute({ command: ['npm', 'install', '--offline', '--ignore-scripts'], timeout_ms: 30000 }, {
+    projectId: project.project_id, sessionId: 's', requestId: 'r', signal: new AbortController().signal, state: createToolState() })
+  expect(result.isError, result.output).toBe(false)
+  expect(JSON.parse(result.output)).toMatchObject({ exit_code: 0, dependencies: { state: 'metadata_present_unverified', missing_count: 0 } })
+}, 40000)
 it('resolves bare Electron to a real executable, prefers the project runtime and removes Node mode',()=>{
   const environment={...softwareEnvironment(project.project_id),ELECTRON_RUN_AS_NODE:'1'}
   const bundled=resolveSoftwareCommand(project.root_path,['electron','main.cjs'],environment)
@@ -24,6 +54,8 @@ it('resolves bare Electron to a real executable, prefers the project runtime and
   const name=process.platform==='win32'?'electron.exe':process.platform==='darwin'?'Electron.app/Contents/MacOS/Electron':'electron'
   const local=join(project.root_path,'node_modules/electron/dist',name);mkdirSync(join(local,'..'),{recursive:true});writeFileSync(local,'fixture executable')
   expect(resolveSoftwareCommand(project.root_path,['electron','main.cjs'],environment).command[0]).toBe(realpathSync(local))
+  const alias = resolveSoftwareCommand(project.root_path, ['npx', 'electron', 'main.cjs'], environment)
+  expect(alias.command).toEqual([realpathSync(local), 'main.cjs']); expect(alias.env.ELECTRON_RUN_AS_NODE).toBeUndefined()
 })
 it('runs Node with literal arguments and real exit/output, without Python wrappers', async () => {
   const result = await executeSoftwareCommand({ projectId: project.project_id, root: project.root_path, command: ['node', '-e', 'require("fs").writeFileSync("actual file.txt",process.argv[1]);console.log("实际输出");process.exit(7)', 'literal & $(no command)'] })

@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand } from '../desktop/process-driver'
 import { managedRuntime, managedRuntimeDirectories } from './runtime-bindings'
 import { capabilityEnvironment } from './capability-bindings'
+import { electronEntry, isLocalElectronAlias } from './electron-entry'
 
 /** Project execution policy, NOT an OS sandbox. Arguments are passed directly;
  * Windows package-manager shims are resolved to their Node entry, never cmd /c. */
@@ -53,13 +54,21 @@ export function softwareEnvironment(projectId: string, dataDir?: string, root?:s
     HOME: home, USERPROFILE: home, APPDATA: join(home, 'appdata'), LOCALAPPDATA: join(home, 'localappdata'),
     APP_DATA_DIR: dataDir ?? join(home, 'test-data'), BROWSER: 'none', CI: '1',
     npm_config_cache: join(toolsHome, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false',
+    // Electron's installer validates cached archive checksums. Cache downloads,
+    // never share mutable node_modules or substitute another runtime version.
+    electron_config_cache: join(getPromaHome(), 'software-runtimes', 'electron-cache'),
     PIP_DISABLE_PIP_VERSION_CHECK: '1', PIP_NO_INPUT: '1', PYTHONDONTWRITEBYTECODE: '1' }
 }
 
 export function resolveSoftwareCommand(root: string, value: unknown, environment: Record<string, string>): { command: string[]; env: Record<string, string> } {
   let command = validateSoftwareCommand(value)
+  if (isLocalElectronAlias(command)) {
+    const entry = electronEntry(root, command)
+    command = [entry.executablePath, ...entry.args]
+  }
   const name = basename(command[0]).replace(/\.(exe|cmd|bat)$/i, '').toLowerCase()
   const env = { ...environment }
+  if (isLocalElectronAlias(value as string[])) delete env.ELECTRON_RUN_AS_NODE
   const runtimeProject = environment.BLOMA_RUNTIME_PROJECT
   const node = runtimeProject ? managedRuntime(runtimeProject, 'node')?.executable : undefined
   if (['python', 'python3'].includes(name)) {

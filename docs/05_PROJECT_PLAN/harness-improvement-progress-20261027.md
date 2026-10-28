@@ -1,5 +1,7 @@
 # Harness 改进实施记录
 
+2026-10-28 后续：依据真实会话失败样本，已实施 [依赖、启动诊断与重复失败保护](harness-runtime-reliability-20261028.md)。该批延续单模型主导与按需验证，不新增强制前序阶段；具体范围与验证见该记录。
+
 日期：2026-10-27，Asia/Shanghai。接手基线 `sprint2 / ee4891c`（以 Git 实际父提交校正）。按 [执行交接](harness-improvement-handoff-20261027.md) 继续；用户原有 `production-workflow-v2-20261020.md` 两行改动不纳入提交。不 push，不发付费模型请求，不修改真实 home 的项目、账本或进程。
 
 ## 批次 1：验收证据隔离与诊断

@@ -13,7 +13,7 @@ import { feedbackForTool } from './tool-feedback'
 import { persistentBudgetBlocked, retainedToolFeedback } from '../../../shared/tool-feedback-policy'
 import { formatToolFeedback, type ToolFeedback } from '../../../shared/tool-feedback'
 import { isDegenerateText } from '../../coding/output-integrity'
-import { createWorkProgress, pruneDuplicateReads } from './work-progress'
+import { commandProgressKey, createWorkProgress, pruneDuplicateReads, toolFailureKey } from './work-progress'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
 import { drainSteerQueue, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent, type SteerEntry } from './steer-queue'
 import { estimateTokenCount } from './usage-guard'
@@ -183,7 +183,8 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         if (feedback) queue(feedback)
       }
       const observed = toolResults.length ? progress?.observe(calls) : undefined
-      if (observed?.stalled) { status = 'budget_exhausted'; termination = { reason: 'no_progress', limit: 24, observed: observed.idleTurns }; return true }
+      if (observed?.stalled) { status = 'budget_exhausted'; termination = { reason: 'no_progress',
+        limit: observed.repeatedFailures >= 8 ? 8 : 24, observed: observed.repeatedFailures >= 8 ? observed.repeatedFailures : observed.idleTurns }; return true }
       if (observed?.nudge) activeSession.agent.steer({ role: 'user', content: observed.nudge, timestamp: Date.now() })
       if (turns >= input.maxTurns && (toolResults.length > 0 || activeSession.agent.hasQueuedMessages() || pendingSteerCount(input.sessionId) > 0)) {
         status = 'turn_limit'; return true
@@ -236,13 +237,18 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         }
       } else if (event.type === 'tool_execution_start') {
         const path = typeof event.args?.path === 'string' ? event.args.path : undefined
-        toolCalls.push({ name: event.toolName, turn: turns, ...(path ? { path } : {}) })
+        const progressKey = commandProgressKey(event.toolName, event.args ?? {})
+        toolCalls.push({ name: event.toolName, turn: turns, ...(progressKey ? { progressKey } : {}), ...(path ? { path } : {}) })
         input.publish('tool_call_started', { tool: event.toolName, tool_call_id: event.toolCallId, turn: turns, input_summary: JSON.stringify(event.args).slice(0, 500) })
       } else if (event.type === 'tool_execution_end') {
         const call = [...toolCalls].reverse().find(call => call.name === event.toolName && call.turn === turns && !call.status)
         if (call) call.status = event.isError ? 'error' : 'ok'
         const details = event.result.details as { feedback?: ToolFeedback; budgetExhausted?: boolean } | undefined
         const result = event.result as AgentToolResult<unknown>
+        if (call?.status === 'error') {
+          const failureKey = toolFailureKey(call.name, result.content.filter(b => b.type === 'text').map(b => b.text).join('\n'))
+          if (failureKey) call.failureKey = failureKey
+        }
         input.publish('tool_call_completed', { tool: event.toolName, tool_call_id: event.toolCallId, turn: turns,
           status: details?.budgetExhausted ? 'budget' : event.isError ? 'error' : 'ok', is_error: event.isError,
           feedback: details?.feedback, output_summary: result.content.filter(b => b.type === 'text').map(b => b.text).join('\n').slice(0, 500),

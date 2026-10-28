@@ -22,6 +22,7 @@ import { observeSoftwareUi } from './ui-observation'
 import { debugWorkspace } from './debug-workspace'
 import { saveSourceCheckpoint } from './source-checkpoints'
 import { isNativeGuiTestModule } from './native-gui-tests'
+import { softwareStartupError, waitForSoftwareWindow } from './startup-diagnostics'
 
 export interface DebugObservation { seq: number; at: string; version: number; action?: string; kind: string; message: string;
   duration_ms?: number; method?: string; url?: string; status?: number }
@@ -131,12 +132,14 @@ async function openManagedElectron(session: DebugSession, signal: AbortSignal) {
     url: `${origin}/json/version`, dataDir: session.data, signal, internal: true, visibleDesktop:true, purpose: session.formal ? 'acceptance' : 'development' })
   session.ownedProcessId = process.id
   session.nativeRoot = process.pid
+  if (!process.ready || process.state !== 'running') throw softwareStartupError('process', process, '调试端口未就绪')
   const { chromium } = await import('playwright')
-  session.browserClient = await chromium.connectOverCDP(origin, { isLocal: true, artifactsDir: join(session.data, 'browser-downloads') })
+  try { session.browserClient = await chromium.connectOverCDP(origin, { isLocal: true, artifactsDir: join(session.data, 'browser-downloads'), timeout: 15000 }) }
+  catch (error) { signal.throwIfAborted(); throw softwareStartupError('debug_connection', softwareProcess(session.snapshot.projectId, process.id, session.owner), error) }
   session.browser = session.browserClient.contexts()[0]
   if (!session.browser) throw Error('DEBUG_BROWSER_CONTEXT_MISSING')
   session.browser.on('page', page => observePage(session, page))
-  session.page = session.browser.pages().find(page => !page.url().startsWith('devtools:')) ?? await session.browser.waitForEvent('page', { timeout: 15000 })
+  session.page = await waitForSoftwareWindow(session.browser, () => softwareProcess(session.snapshot.projectId, process.id, session.owner), signal)
   observePage(session, session.page)
 }
 export function hasDebugSession(projectId: string, sessionId: string): boolean {

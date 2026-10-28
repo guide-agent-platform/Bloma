@@ -42,6 +42,18 @@ function tool(name: string, execute: AgentLoopTool['execute']): AgentLoopTool {
 function nativeFile() { return piSessionPath('test-project', 'test-session', 'desktop-implement:', process.cwd()) }
 
 describe('real upstream Pi AgentSession integration', () => {
+  it.each(['pi', undefined] as const)('stops repeated host failures despite intervening successful commands (runtime=%s)', async runtime => {
+    const scripts: SDKMessage[][] = Array.from({ length: 8 }, (_, i) => [call('print-' + i, 'run_command'), call('failed-' + i, 'verify_app')])
+    const source = scripted([...scripts, [text('must not reach completion')]])
+    const result = await runAgentLoop(input(source.query, { runtime, maxTurns: 30, workMode: 'implementation', tools: [
+      tool('run_command', async () => ({ output: '{"exit_code":0}' })),
+      tool('verify_app', async () => ({ output: '{"failure":{"code":"GUI_EXISTING_EXPECTATIONS_CHANGED"}}', isError: true })),
+    ] }))
+    expect(result.status).toBe('budget_exhausted')
+    expect(result.termination_detail).toMatchObject({ reason: 'no_progress', limit: 8, observed: 8 })
+    expect(source.received).toHaveLength(8)
+    expect(result.toolCalls.filter(c => c.name === 'verify_app').every(c => c.failureKey?.startsWith('GUI_EXISTING_EXPECTATIONS_CHANGED:'))).toBe(true)
+  }, 60000)
   it('executes tools through Pi, pairs transport results, persists native history and reports real usage', async () => {
     const write = vi.fn(async () => ({ output: 'written', detail: { path: 'main.py' } }))
     const check = vi.fn(async () => ({ output: 'verified' }))

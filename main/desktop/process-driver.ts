@@ -52,6 +52,8 @@ export class DriverExecutionError extends Error {
   constructor(
     public readonly kind: DriverFailureKind,
     message: string,
+    public readonly stdout = '',
+    public readonly stderr = '',
   ) {
     super(message)
   }
@@ -442,7 +444,7 @@ export function execFileDriverSpawn(request: DriverCommandRequest): Promise<{ co
       { cwd: request.cwd, env: request.env, windowsHide: true, maxBuffer: 1024 * 512, encoding: 'utf8' },
       (error, stdout, stderr) => {
         cleanup()
-        if (forced) { reject(new DriverExecutionError(forced, `执行${forced === 'timeout' ? '超时' : '已取消'}，已终止受控进程树`)); return }
+        if (forced) { reject(new DriverExecutionError(forced, `执行${forced === 'timeout' ? '超时' : '已取消'}，已终止受控进程树`, (stdout ?? '').slice(-8000), (stderr ?? '').slice(-8000))); return }
         if (error) {
           const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string }
           if (err.code === 'ENOENT') {

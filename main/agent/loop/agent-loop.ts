@@ -23,7 +23,7 @@ import { userFacingWrapUp } from '../prompting/user-facing-output'
 import { isHostControlText } from '../../../shared/message-presentation'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from './steer-queue'
-import { createWorkProgress, pruneDuplicateReads } from './work-progress'
+import { commandProgressKey, createWorkProgress, pruneDuplicateReads, toolFailureKey } from './work-progress'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -140,6 +140,8 @@ export interface AgentLoopToolCallRecord {
   turn: number
   path?: string
   status?: 'ok' | 'error'
+  failureKey?: string
+  progressKey?: string
 }
 
 /** W1-E1（咨询 D3，2026-09-09）：竹节压缩观测信息——纯埋点零行为变更。
@@ -1154,7 +1156,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     const turnCalls: AgentLoopToolCallRecord[] = turnToolUses.map((use) => {
       const rawPath = use.input?.path
       const path = typeof rawPath === 'string' && rawPath.trim() ? rawPath.trim() : undefined
-      return { name: use.name, turn, ...(path ? { path } : {}) }
+      const progressKey = commandProgressKey(use.name, use.input ?? {})
+      return { name: use.name, turn, ...(progressKey ? { progressKey } : {}), ...(path ? { path } : {}) }
     })
     toolCalls.push(...turnCalls)
     // B3 状态推进：写类调用清零失速计数并登记触达文件；验证类工具标记已自测
@@ -1256,7 +1259,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     resultBlocks.forEach((block, i) => {
       if (block.type !== 'tool_result') return
       const call = turnCalls[i]
-      if (call) call.status = block.is_error === true ? 'error' : 'ok'
+      if (call) {
+        call.status = block.is_error === true ? 'error' : 'ok'
+        const failureKey = call.status === 'error' && typeof block.content === 'string' ? toolFailureKey(call.name, block.content) : undefined
+        if (failureKey) call.failureKey = failureKey
+      }
     })
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
@@ -1266,8 +1273,10 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     if (workProgress) pruneDuplicateReads(messages)
     const progress = workProgress?.observe(turnCalls)
     if (progress?.stalled) return attachUsage({ status: 'budget_exhausted', turns,
-      finalText: '本轮连续只读或失败操作，未产生有效修改或执行验证；已停止空转。请按已有失败和文件位置继续最小修复。', toolCalls,
-      termination_detail: { reason: 'no_progress', limit: 24, observed: progress.idleTurns } })
+      finalText: progress.repeatedFailures >= 8 ? '同一工具错误多次重现，期间其它操作未解除该阻塞；已停止重复尝试，现场和用量保留。请按具体错误修复后继续。'
+        : '本轮连续只读或失败操作，未产生有效修改或执行验证；已停止空转。请按已有失败和文件位置继续最小修复。', toolCalls,
+      termination_detail: { reason: 'no_progress', limit: progress.repeatedFailures >= 8 ? 8 : 24,
+        observed: progress.repeatedFailures >= 8 ? progress.repeatedFailures : progress.idleTurns } })
     if (progress?.nudge) {
       appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: progress.nudge }])
       messages.push({ role: 'user', content: progress.nudge })
