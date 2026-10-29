@@ -14,6 +14,8 @@
 
 > [通用AI服务与效率支持](docs/05_PROJECT_PLAN/ai-service-efficiency-20261029.md)：文本/图片共用AIService，公开路由模板与运行时产品Key分开，支持OpenAI聊天兼容和Anthropic消息协议；提供组件组合目录、故障现场汇总与静态关联测试候选。正式交付门不跳过，速度收益另做实测。
 
+> 后续模板实施总入口：[产品模板与生成效率完整计划表](docs/05_PROJECT_PLAN/product-template-roadmap-20261029.md)。覆盖8类产品模板、组件契约、诊断/选测支撑、依赖批次、里程碑和固定场景验收；优先多模态与HTTP/Webhook。当前为计划文档，后续模板尚未据此自动开工。
+
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 
 > 当前执行接手：[Harness 改进交接](docs/05_PROJECT_PLAN/harness-improvement-handoff-20261027.md)，包含已完成版本、验证边界和剩余批次的执行入口。
