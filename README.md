@@ -14,6 +14,8 @@
 
 > [通用AI服务与效率支持](docs/05_PROJECT_PLAN/ai-service-efficiency-20261029.md)：文本/图片共用AIService，公开路由模板与运行时产品Key分开，支持OpenAI聊天兼容和Anthropic消息协议；提供组件组合目录、故障现场汇总与静态关联测试候选。正式交付门不跳过，速度收益另做实测。
 
+> 当前协作工程优先级：[通过多Agent提高实际生成质量](docs/05_PROJECT_PLAN/multi-agent-generation-quality-plan-20261030.md)。先接只读找错、候选绑定、缺陷复现/修复/复测闭环，再补视觉审阅；研究设计不作为前置。
+
 > 当前研究与协作方向：[立项对照修订及多Agent规划](docs/05_PROJECT_PLAN/multi-agent-research-plan-20261029.md)。现役配置只留需求沟通、界面制作，旧裁判/内审入口已删；[面板改造记录](docs/05_PROJECT_PLAN/flow-routing-ui-20261029.md)。向导、制作与专业子任务均作为可消融机制，不以Agent数量或零Bug承诺作为研究目标。
 
 > 后续模板实施总入口：[产品模板与生成效率完整计划表](docs/05_PROJECT_PLAN/product-template-roadmap-20261029.md)。覆盖8类产品模板、组件契约、诊断/选测支撑、依赖批次、里程碑和固定场景验收；优先多模态与HTTP/Webhook。B0–B8本机模板、连接器设置、组合工作台、独立资源分发与B9对照工具已实施；真实服务、干净系统及真实效率对照仍待条件。当前源码审计修复与重建包见[模板审计记录](docs/05_PROJECT_PLAN/template-audit-20261029.md)；原交付范围见[剩余批次交付记录](docs/05_PROJECT_PLAN/template-rollout-result-20261029.md)。
