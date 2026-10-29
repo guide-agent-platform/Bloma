@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "5ae0bc0d641a635d816d3ec0019a9e5c32817ebd",
-  "scope_version": 9,
+  "source_revision": "c99e7ed5960af452e745dbaa604a1bba341040b1",
+  "scope_version": 10,
   "scanner_sha256": "32dd2ea79859d4a0d9332a849b988caf48659d9cbcee3c13b51620835663693a",
-  "scope_sha256": "5545d2d4c81c9c45451043eb82b3caaad329c5c888d5885a982feba92b7535e2",
-  "source_input_digest": "ae9601b069e58efaf49ab4e3cfc6a2822341a78660dcfbb446796e8d47287d7a",
+  "scope_sha256": "ad54df619cb08a445854c54926847b97ed286563b8349ffedf79ef39b49b37be",
+  "source_input_digest": "8d5d86a974faf585f95ff638d08c61e0dfb38a05d5d07049458d1a2a0b16671d",
   "method": "existing tracked and unignored working files + TypeScript AST static/type/reexport/literal dynamic/require imports; retired paths must remain absent; no app execution or symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,18 +19,18 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 802,
-    "module_edges": 2965,
-    "asset_edges": 38,
-    "scoped_modules": 81,
+    "scanned_sources": 835,
+    "module_edges": 3106,
+    "asset_edges": 39,
+    "scoped_modules": 86,
     "groups": {
       "legacy_retirement_boundary": 2,
       "production_shared_extracted": 3,
       "longterm_milestones_keep": 5,
-      "modern_workflow_keep": 14,
+      "modern_workflow_keep": 15,
       "current_routes_and_storage_keep": 10,
       "frozen_experiment_separate": 5,
-      "shared_capability_keep_migrate": 25,
+      "shared_capability_keep_migrate": 29,
       "history_data_and_user_access_keep": 12,
       "legacy_card_identity_keep": 1,
       "historical_schema_and_shared_diagnostics": 1,
@@ -86,6 +86,7 @@
         "main/software/release-store.ts",
         "main/software/trial.ts",
         "main/software/independent-design.ts",
+        "main/software/acceptance-counterexamples.ts",
         "main/software/independent-verification.ts",
         "main/software/harness-evaluation.ts"
       ]
@@ -142,6 +143,10 @@
         "main/software/capability-bindings.ts",
         "main/software/capability-resources.ts",
         "main/software/capability-tools.ts",
+        "main/software/document-capability.ts",
+        "main/software/import-project.ts",
+        "main/software/repository-context.ts",
+        "main/templates/tools/document_runtime.cjs",
         "main/templates/tools/speech_bridge.cjs"
       ]
     },
@@ -336,7 +341,7 @@
     {
       "path": "main/desktop/capability-verifiers.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "b0f1b04c7ec1b92194948b1f731d1b4661a47f063b21af9a8fa747e7e253bf63",
+      "sha256": "6d2d7b49d7393f8e0b62ad443272d892b791e94748b874e9f518e9d2306690ed",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -349,7 +354,16 @@
         }
       ],
       "type_importers": [],
-      "test_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/desktop/capability-verifiers.test.ts",
+          "to": "main/desktop/capability-verifiers.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/capability-verifiers",
+          "kind": "static_runtime",
+          "line": 2
+        }
+      ],
       "string_references": [
         {
           "from": "main/desktop/core-verification-cache.ts",
@@ -445,7 +459,7 @@
           "resolution": "module",
           "specifier": "../desktop/contract-schema",
           "kind": "static_runtime",
-          "line": 24
+          "line": 25
         }
       ],
       "type_importers": [
@@ -537,7 +551,7 @@
     {
       "path": "main/desktop/core-verification.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "a9f3d3edebf43aa4367566455c64d624fe263853b7ead7b7179f1d117e0a62ce",
+      "sha256": "93b40ac35fb5518ac78cbdb30f30b9b95eca42477f58bed64b0ce8236745eac6",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -583,6 +597,14 @@
       ],
       "type_importers": [
         {
+          "from": "main/desktop/acceptance-evidence.ts",
+          "to": "main/desktop/core-verification.ts",
+          "resolution": "module",
+          "specifier": "./core-verification",
+          "kind": "type",
+          "line": 1
+        },
+        {
           "from": "main/desktop/capability-verifiers.ts",
           "to": "main/desktop/core-verification.ts",
           "resolution": "module",
@@ -615,6 +637,14 @@
           "specifier": "../../main/desktop/core-verification",
           "kind": "static_runtime",
           "line": 11
+        },
+        {
+          "from": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "to": "main/desktop/core-verification.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/core-verification",
+          "kind": "static_runtime",
+          "line": 12
         },
         {
           "from": "tests/unit/desktop/core-verification-cache.test.ts",
@@ -1097,7 +1127,7 @@
     {
       "path": "main/desktop/gui-acceptance.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "dda120731c0e06a9a5de631effc02f116e334b653a722af8cafe09fc78f3949e",
+      "sha256": "5cdd01c731048c495b64677e3594b77e8c3faa958f15559c4254b6d189aacc50",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -1215,6 +1245,14 @@
       ],
       "type_importers": [
         {
+          "from": "main/desktop/gui-feature-results.ts",
+          "to": "main/desktop/gui-acceptance.ts",
+          "resolution": "module",
+          "specifier": "./gui-acceptance",
+          "kind": "type",
+          "line": 1
+        },
+        {
           "from": "main/desktop/gui-fixtures.ts",
           "to": "main/desktop/gui-acceptance.ts",
           "resolution": "module",
@@ -1289,6 +1327,14 @@
           "line": 12
         },
         {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "to": "main/desktop/gui-acceptance.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/gui-acceptance",
+          "kind": "type",
+          "line": 16
+        },
+        {
           "from": "tests/unit/software/file-interactions.test.ts",
           "to": "main/desktop/gui-acceptance.ts",
           "resolution": "module",
@@ -1326,7 +1372,7 @@
           "resolution": "module",
           "specifier": "../../../main/desktop/gui-acceptance",
           "kind": "static_runtime",
-          "line": 12
+          "line": 13
         },
         {
           "from": "tests/unit/software/notes-gui-upgrade.test.ts",
@@ -1601,7 +1647,7 @@
           "resolution": "module",
           "specifier": "../desktop/launch-smoke",
           "kind": "static_runtime",
-          "line": 23
+          "line": 24
         },
         {
           "from": "main/software/artifact-qualification.ts",
@@ -1686,6 +1732,14 @@
           "line": 4
         },
         {
+          "from": "main/software/launch-contract.ts",
+          "to": "main/desktop/launch-smoke.ts",
+          "resolution": "module",
+          "specifier": "../desktop/launch-smoke",
+          "kind": "type",
+          "line": 2
+        },
+        {
           "from": "main/software/native-gui-observer.ts",
           "to": "main/desktop/launch-smoke.ts",
           "resolution": "module",
@@ -1760,7 +1814,7 @@
     {
       "path": "main/desktop/lean-budget.ts",
       "group": "modern_workflow_keep",
-      "sha256": "2d1ca738cfd719ce12bc56527aa98f5f2b0a84d067c9e759a300fbebf40cd3f6",
+      "sha256": "421b08a62464a1c9752f48d03c6a5d82e96c8513da1aeb5d0584f727e88bbd87",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -1793,7 +1847,7 @@
           "resolution": "module",
           "specifier": "../desktop/lean-budget",
           "kind": "static_runtime",
-          "line": 12
+          "line": 13
         },
         {
           "from": "main/software/longterm-control.ts",
@@ -1810,6 +1864,14 @@
           "specifier": "../desktop/lean-budget",
           "kind": "static_runtime",
           "line": 7
+        },
+        {
+          "from": "main/software/working-context.ts",
+          "to": "main/desktop/lean-budget.ts",
+          "resolution": "module",
+          "specifier": "../desktop/lean-budget",
+          "kind": "static_runtime",
+          "line": 12
         }
       ],
       "type_importers": [],
@@ -1869,6 +1931,14 @@
           "specifier": "../../../main/desktop/lean-budget",
           "kind": "static_runtime",
           "line": 19
+        },
+        {
+          "from": "tests/unit/software/working-context.test.ts",
+          "to": "main/desktop/lean-budget.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/lean-budget",
+          "kind": "static_runtime",
+          "line": 12
         }
       ],
       "string_references": [],
@@ -1879,7 +1949,7 @@
     {
       "path": "main/desktop/lean-production.ts",
       "group": "modern_workflow_keep",
-      "sha256": "db51f2ed6aeed77e76bdbd4169108dbbbde15579653643b56181298a554fd1bb",
+      "sha256": "7ae7c4b84692fb0818b3fd3901cadbcbd434675273566d7d93eea4df21e5696d",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -1933,6 +2003,14 @@
       ],
       "test_importers": [
         {
+          "from": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "to": "main/desktop/llm-verification.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/llm-verification",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
           "from": "tests/unit/desktop/core-verification.test.ts",
           "to": "main/desktop/llm-verification.ts",
           "resolution": "module",
@@ -1965,7 +2043,7 @@
     {
       "path": "main/desktop/process-driver.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "edbf1dfc192428096ad05c69f7c1928e8c67fd1e1a1bbb8f93a3f465d66ce649",
+      "sha256": "5f504119e0c5a4cfb434975ee88e89e0ea671eae225f2863ba5903642f43082a",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2095,6 +2173,14 @@
           "specifier": "../desktop/process-driver",
           "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "main/software/execution-tools.ts",
+          "to": "main/desktop/process-driver.ts",
+          "resolution": "module",
+          "specifier": "../desktop/process-driver",
+          "kind": "static_runtime",
+          "line": 4
         },
         {
           "from": "main/software/import-project.ts",
@@ -2308,7 +2394,7 @@
     {
       "path": "main/desktop/production-completion.ts",
       "group": "production_shared_extracted",
-      "sha256": "05bf328458f0055f90a6140b382d3d3c8b0633dbe199aee96b11ac52d3ef4510",
+      "sha256": "2ed05da6bf7b75d353bd5f6b206842ec3d0212247f917f60c4cf9bd0c4a162e2",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2329,6 +2415,14 @@
           "specifier": "../../../main/desktop/production-completion",
           "kind": "static_runtime",
           "line": 2
+        },
+        {
+          "from": "tests/unit/software/async-command.test.ts",
+          "to": "main/desktop/production-completion.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/production-completion",
+          "kind": "static_runtime",
+          "line": 14
         }
       ],
       "string_references": [],
@@ -2339,7 +2433,7 @@
     {
       "path": "main/desktop/production-context.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "312c666494533c4d160f7519293609e444e01a8d298df4467f6816fc5da36db1",
+      "sha256": "7c0b559ddf85ab593d67574af2795a5d2ac885dab5df0917ad4c95cc119c3f27",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2368,6 +2462,14 @@
           "specifier": "../../../main/desktop/production-context",
           "kind": "static_runtime",
           "line": 12
+        },
+        {
+          "from": "tests/unit/software/working-context.test.ts",
+          "to": "main/desktop/production-context.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/production-context",
+          "kind": "static_runtime",
+          "line": 10
         }
       ],
       "string_references": [],
@@ -2671,6 +2773,14 @@
           "specifier": "../desktop/verification-fingerprint",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "main/software/working-context.ts",
+          "to": "main/desktop/verification-fingerprint.ts",
+          "resolution": "module",
+          "specifier": "../desktop/verification-fingerprint",
+          "kind": "static_runtime",
+          "line": 7
         }
       ],
       "type_importers": [],
@@ -2889,7 +2999,7 @@
           "resolution": "module",
           "specifier": "../desktop/workflow-policy",
           "kind": "static_runtime",
-          "line": 26
+          "line": 27
         },
         {
           "from": "main/ipc/projects.ts",
@@ -3354,7 +3464,7 @@
           "resolution": "module",
           "specifier": "../../../main/guide/lean-brief",
           "kind": "static_runtime",
-          "line": 8
+          "line": 9
         },
         {
           "from": "tests/unit/software/notes-gui-upgrade.test.ts",
@@ -3829,7 +3939,7 @@
     {
       "path": "main/ipc/project-deliverables.ts",
       "group": "history_data_and_user_access_keep",
-      "sha256": "1c3d1f9cc3a5f63e472a6816affa9fd21ec3c2c0c3de89b07b457223576246d0",
+      "sha256": "84a0e9d5eb1a78726a52835ea72b1bfc80f5b7678e5926e844d9ef8450ef9492",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -3842,7 +3952,24 @@
         }
       ],
       "type_importers": [],
-      "test_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/model-settings.test.ts",
+          "to": "main/ipc/project-deliverables.ts",
+          "resolution": "module",
+          "specifier": "../../../main/ipc/project-deliverables",
+          "kind": "static_runtime",
+          "line": 10
+        },
+        {
+          "from": "tests/unit/software/status-ipc.test.ts",
+          "to": "main/ipc/project-deliverables.ts",
+          "resolution": "module",
+          "specifier": "../../../main/ipc/project-deliverables",
+          "kind": "static_runtime",
+          "line": 6
+        }
+      ],
       "string_references": [],
       "asset_terms": [],
       "computed_imports": [],
@@ -3910,6 +4037,14 @@
           "line": 9
         },
         {
+          "from": "main/desktop/core-verification.ts",
+          "to": "main/model/requirement-capabilities.ts",
+          "resolution": "module",
+          "specifier": "../model/requirement-capabilities",
+          "kind": "static_runtime",
+          "line": 22
+        },
+        {
           "from": "main/guide/lean-brief.ts",
           "to": "main/model/requirement-capabilities.ts",
           "resolution": "module",
@@ -3961,7 +4096,7 @@
     {
       "path": "main/orchestration/stages/agent-dispatch.ts",
       "group": "current_routes_and_storage_keep",
-      "sha256": "7230d7b30ab69f4292d9d1622315b928c6458d9d1a35a269bea76dbcb94199c7",
+      "sha256": "3d4dd23761c263f240d295fc8fa3091ba5f06e040345747925c29a00c5074556",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -3998,6 +4133,14 @@
           "specifier": "../../main/orchestration/stages/agent-dispatch",
           "kind": "static_runtime",
           "line": 10
+        },
+        {
+          "from": "tests/unit/software/guide-terminal.test.ts",
+          "to": "main/orchestration/stages/agent-dispatch.ts",
+          "resolution": "module",
+          "specifier": "../../../main/orchestration/stages/agent-dispatch",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "tests/unit/software/workflow-retirement.test.ts",
@@ -4087,7 +4230,15 @@
           "resolution": "module",
           "specifier": "../platform/llm/monetary-budget",
           "kind": "static_runtime",
-          "line": 11
+          "line": 12
+        },
+        {
+          "from": "main/software/independent-settings.ts",
+          "to": "main/platform/llm/monetary-budget.ts",
+          "resolution": "module",
+          "specifier": "../platform/llm/monetary-budget",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "scripts/dispatch-parallel-preflight.ts",
@@ -4595,7 +4746,7 @@
           "resolution": "module",
           "specifier": "../../project/document-engine",
           "kind": "dynamic_runtime",
-          "line": 1430
+          "line": 1443
         },
         {
           "from": "main/delivery/snapshots.ts",
@@ -4703,6 +4854,14 @@
           "specifier": "../../main/project/document-engine",
           "kind": "static_runtime",
           "line": 7
+        },
+        {
+          "from": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "to": "main/project/document-engine.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/document-engine",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "tests/unit/desktop/core-verification.test.ts",
@@ -4941,7 +5100,7 @@
           "resolution": "module",
           "specifier": "../../../main/project/document-sync",
           "kind": "static_runtime",
-          "line": 9
+          "line": 10
         },
         {
           "from": "tests/unit/software/notes-gui-upgrade.test.ts",
@@ -5089,7 +5248,7 @@
           "resolution": "module",
           "specifier": "../project/prd-store",
           "kind": "static_runtime",
-          "line": 31
+          "line": 32
         },
         {
           "from": "main/project/document-engine.ts",
@@ -5129,7 +5288,7 @@
           "resolution": "module",
           "specifier": "../project/prd-store",
           "kind": "static_runtime",
-          "line": 7
+          "line": 8
         },
         {
           "from": "main/software/independent-verification.ts",
@@ -5188,12 +5347,28 @@
           "line": 4
         },
         {
+          "from": "main/software/verification-tool.ts",
+          "to": "main/project/prd-store.ts",
+          "resolution": "module",
+          "specifier": "../project/prd-store",
+          "kind": "static_runtime",
+          "line": 12
+        },
+        {
           "from": "main/software/verification.ts",
           "to": "main/project/prd-store.ts",
           "resolution": "module",
           "specifier": "../project/prd-store",
           "kind": "static_runtime",
           "line": 9
+        },
+        {
+          "from": "main/software/working-context.ts",
+          "to": "main/project/prd-store.ts",
+          "resolution": "module",
+          "specifier": "../project/prd-store",
+          "kind": "static_runtime",
+          "line": 5
         },
         {
           "from": "scripts/gui-acceptance-entry.ts",
@@ -5404,7 +5579,7 @@
           "resolution": "module",
           "specifier": "../../../main/project/prd-store",
           "kind": "static_runtime",
-          "line": 7
+          "line": 8
         },
         {
           "from": "tests/unit/software/notes-gui-upgrade.test.ts",
@@ -5792,7 +5967,7 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
-          "line": 22
+          "line": 23
         },
         {
           "from": "main/ipc/projects.ts",
@@ -5968,7 +6143,23 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
+          "line": 7
+        },
+        {
+          "from": "main/software/independent-policy.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "main/software/independent-settings.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 10
         },
         {
           "from": "main/software/independent-verification.ts",
@@ -6043,6 +6234,14 @@
           "line": 6
         },
         {
+          "from": "main/software/state-view.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 6
+        },
+        {
           "from": "main/software/trial.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6073,6 +6272,14 @@
           "specifier": "../project/project-service",
           "kind": "static_runtime",
           "line": 8
+        },
+        {
+          "from": "main/software/working-context.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 4
         },
         {
           "from": "scripts/gui-acceptance-entry.ts",
@@ -6622,6 +6829,14 @@
           "line": 8
         },
         {
+          "from": "tests/unit/software/async-command.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 5
+        },
+        {
           "from": "tests/unit/software/budget-host-completion.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6678,6 +6893,14 @@
           "line": 5
         },
         {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 8
+        },
+        {
           "from": "tests/unit/software/execution.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6700,6 +6923,14 @@
           "specifier": "../../../main/project/project-service",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "tests/unit/software/guide-terminal.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 8
         },
         {
           "from": "tests/unit/software/harness-continuity.test.ts",
@@ -6758,12 +6989,20 @@
           "line": 9
         },
         {
-          "from": "tests/unit/software/native-gui-tests.test.ts",
+          "from": "tests/unit/software/model-settings.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
           "specifier": "../../../main/project/project-service",
           "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "tests/unit/software/native-gui-tests.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 7
         },
         {
           "from": "tests/unit/software/notes-gui-upgrade.test.ts",
@@ -6830,6 +7069,14 @@
           "line": 5
         },
         {
+          "from": "tests/unit/software/status-ipc.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 7
+        },
+        {
           "from": "tests/unit/software/trial.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6860,6 +7107,14 @@
           "specifier": "../../../main/project/project-service",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "tests/unit/software/working-context.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "tests/unit/startup-reconcile.test.ts",
@@ -7101,7 +7356,7 @@
           "resolution": "module",
           "specifier": "../project/requirement-contract",
           "kind": "static_runtime",
-          "line": 8
+          "line": 9
         },
         {
           "from": "main/software/independent-verification.ts",
@@ -7166,6 +7421,14 @@
           "specifier": "../project/requirement-contract",
           "kind": "static_runtime",
           "line": 10
+        },
+        {
+          "from": "main/software/working-context.ts",
+          "to": "main/project/requirement-contract.ts",
+          "resolution": "module",
+          "specifier": "../project/requirement-contract",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "scripts/gui-acceptance-entry.ts",
@@ -7336,7 +7599,7 @@
           "resolution": "module",
           "specifier": "../../../main/project/requirement-contract",
           "kind": "static_runtime",
-          "line": 10
+          "line": 11
         },
         {
           "from": "tests/unit/software/notes-gui-upgrade.test.ts",
@@ -7393,9 +7656,39 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/software/acceptance-counterexamples.ts",
+      "group": "modern_workflow_keep",
+      "sha256": "3b433e7321065a35c0af38f73957b35a6af5c0e3e060d778901d567e0fe5f8f6",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/production-context.ts",
+          "to": "main/software/acceptance-counterexamples.ts",
+          "resolution": "module",
+          "specifier": "../software/acceptance-counterexamples",
+          "kind": "static_runtime",
+          "line": 22
+        },
+        {
+          "from": "main/software/independent-design.ts",
+          "to": "main/software/acceptance-counterexamples.ts",
+          "resolution": "module",
+          "specifier": "./acceptance-counterexamples",
+          "kind": "static_runtime",
+          "line": 2
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/software/agent-tools.ts",
       "group": "modern_workflow_keep",
-      "sha256": "555d91bc41206c693058bb58ef31be78ef42c90a58bd2d0497a5d05d6342f941",
+      "sha256": "153c11e8db75abefff9cd54091a8ebc13793a7af03ab49b2fa22c9e2e1ed5cf0",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7426,6 +7719,14 @@
           "line": 7
         },
         {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "to": "main/software/agent-tools.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/agent-tools",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
           "from": "tests/unit/software/repository-context.test.ts",
           "to": "main/software/agent-tools.ts",
           "resolution": "module",
@@ -7444,6 +7745,7 @@
       ],
       "string_references": [],
       "asset_terms": [
+        "document_runtime.cjs",
         "speech_bridge.cjs"
       ],
       "computed_imports": [],
@@ -7550,7 +7852,7 @@
     {
       "path": "main/software/capability-tools.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "c922d5c7c3ed0ad61e22155f1135dfb7441a47f599ee9b5784caff45d66aabe2",
+      "sha256": "c45da6ddbbc9d0efddd6a4f57b1f8f5696cf55bf8d5d8c0bd61c4a47bb4e1eba",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7559,7 +7861,7 @@
           "resolution": "module",
           "specifier": "./capability-tools",
           "kind": "static_runtime",
-          "line": 16
+          "line": 17
         }
       ],
       "type_importers": [],
@@ -7584,9 +7886,50 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/software/document-capability.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "8a8a8f6616bcea0f38d814f5178e5868b495ca74391654dbefe058daf6ef8598",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/production-context.ts",
+          "to": "main/software/document-capability.ts",
+          "resolution": "module",
+          "specifier": "../software/document-capability",
+          "kind": "static_runtime",
+          "line": 21
+        },
+        {
+          "from": "main/software/capability-tools.ts",
+          "to": "main/software/document-capability.ts",
+          "resolution": "module",
+          "specifier": "./document-capability",
+          "kind": "static_runtime",
+          "line": 15
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "to": "main/software/document-capability.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/document-capability",
+          "kind": "static_runtime",
+          "line": 12
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [
+        "document_runtime.cjs"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/software/harness-evaluation.ts",
       "group": "modern_workflow_keep",
-      "sha256": "0075b9769807027ddff4eb6bd9f4068bccc305a0ded6fc66a5e26225a1a40a5d",
+      "sha256": "3aae2a4793bc2d4d8111fad13754a335ba2211824f6bc8501d74a7b5d26158a0",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7641,6 +7984,14 @@
           "line": 10
         },
         {
+          "from": "tests/unit/software/independent-design.test.ts",
+          "to": "main/software/harness-evaluation.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/harness-evaluation",
+          "kind": "static_runtime",
+          "line": 19
+        },
+        {
           "from": "tests/unit/software/trial.test.ts",
           "to": "main/software/harness-evaluation.ts",
           "resolution": "module",
@@ -7655,9 +8006,64 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/software/import-project.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "3c015bf6ac0faa747df3574a331a5a8cbd7301f4011be0c2cbeb7f163d04ba64",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/lean-production.ts",
+          "to": "main/software/import-project.ts",
+          "resolution": "module",
+          "specifier": "../software/import-project",
+          "kind": "static_runtime",
+          "line": 39
+        },
+        {
+          "from": "main/ipc/projects.ts",
+          "to": "main/software/import-project.ts",
+          "resolution": "module",
+          "specifier": "../software/import-project",
+          "kind": "static_runtime",
+          "line": 43
+        },
+        {
+          "from": "main/software/migrate-workflow.ts",
+          "to": "main/software/import-project.ts",
+          "resolution": "module",
+          "specifier": "./import-project",
+          "kind": "static_runtime",
+          "line": 5
+        },
+        {
+          "from": "main/software/repository-context.ts",
+          "to": "main/software/import-project.ts",
+          "resolution": "module",
+          "specifier": "./import-project",
+          "kind": "static_runtime",
+          "line": 9
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/import-project.test.ts",
+          "to": "main/software/import-project.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/import-project",
+          "kind": "static_runtime",
+          "line": 6
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/software/independent-design.ts",
       "group": "modern_workflow_keep",
-      "sha256": "b9c3e4b82e100344010b6aa7a1422c3cc7ab9742b65948cb1277f4183c41080d",
+      "sha256": "f3ec65c5bbb42a15a395ca0a4c80e357037a7e4d4ccaed558f020451fb679b6f",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7720,7 +8126,7 @@
     {
       "path": "main/software/independent-verification.ts",
       "group": "modern_workflow_keep",
-      "sha256": "17427f8632fdc191dd033a31f2a96b1e0b4a15b784b759ed6a2350f2827770f1",
+      "sha256": "edfdc6c4de4eb53b003ee68d674e29101fd90a7840d6262dec9326b7f62c6ca0",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7760,7 +8166,7 @@
           "resolution": "module",
           "specifier": "../software/longterm-control",
           "kind": "static_runtime",
-          "line": 36
+          "line": 37
         },
         {
           "from": "main/software/longterm-message.ts",
@@ -7854,7 +8260,7 @@
           "resolution": "module",
           "specifier": "../software/longterm-state",
           "kind": "static_runtime",
-          "line": 35
+          "line": 36
         },
         {
           "from": "main/ipc/projects.ts",
@@ -7870,7 +8276,7 @@
           "resolution": "module",
           "specifier": "./longterm-state",
           "kind": "static_runtime",
-          "line": 17
+          "line": 18
         },
         {
           "from": "main/software/improvement-suggestions.ts",
@@ -7955,7 +8361,7 @@
     {
       "path": "main/software/release-store.ts",
       "group": "modern_workflow_keep",
-      "sha256": "38e3ede550473d5bb25c828a01b1cd29935aeb094fb3de14de94f085415723fc",
+      "sha256": "e1448966c26b08e0832b04d20897298e8f3a36870ccf6ac0b08394d47ed5ec07",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7972,7 +8378,7 @@
           "resolution": "module",
           "specifier": "../software/release-store",
           "kind": "static_runtime",
-          "line": 28
+          "line": 29
         },
         {
           "from": "main/software/artifact-qualification.ts",
@@ -8115,6 +8521,14 @@
           "line": 11
         },
         {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "to": "main/software/release-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/release-store",
+          "kind": "static_runtime",
+          "line": 13
+        },
+        {
           "from": "tests/unit/software/independent-design.test.ts",
           "to": "main/software/release-store.ts",
           "resolution": "module",
@@ -8183,6 +8597,37 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/software/repository-context.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "190a0ee1f9c2764e1db47f5ff23c898202a78ae0db6606e71465f5966ea06070",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/software/agent-tools.ts",
+          "to": "main/software/repository-context.ts",
+          "resolution": "module",
+          "specifier": "./repository-context",
+          "kind": "static_runtime",
+          "line": 14
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/repository-context.test.ts",
+          "to": "main/software/repository-context.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/repository-context",
+          "kind": "static_runtime",
+          "line": 8
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/software/runtime-manager.ts",
       "group": "shared_capability_keep_migrate",
       "sha256": "a1b2cf19d82d9fa75f2d4ebeccd8d3d907cd63a8f2a28c3fa856f14b2a7ca4fa",
@@ -8232,7 +8677,7 @@
     {
       "path": "main/software/trial.ts",
       "group": "modern_workflow_keep",
-      "sha256": "e2c664712c6402755a6fe19aab640fa8c79248c5d715dcf7eb548f59e46a4870",
+      "sha256": "d158a14c86ec891f2071750cf8acfaee5a055e0cfcfb066ccedbbef1c3a8ab25",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -8257,7 +8702,7 @@
           "resolution": "module",
           "specifier": "../software/trial",
           "kind": "static_runtime",
-          "line": 30
+          "line": 31
         },
         {
           "from": "main/orchestration/stages/agent-dispatch.ts",
@@ -8295,7 +8740,7 @@
     {
       "path": "main/software/verification.ts",
       "group": "modern_workflow_keep",
-      "sha256": "3c7546f167c8dd5e84ec42a3702db6e4307f25881712e0939fe334d6e30edb80",
+      "sha256": "ead6513e8efef785a2f6a655f57268ded6a2364b766a19db346cadedf3778ddc",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -8348,7 +8793,7 @@
           "resolution": "module",
           "specifier": "../../../main/software/verification",
           "kind": "static_runtime",
-          "line": 13
+          "line": 14
         },
         {
           "from": "tests/unit/software/trial.test.ts",
@@ -8373,6 +8818,59 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/templates/tools/document_runtime.cjs",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "ed63408ae712ecc5237071acc97d8f227ff59486ff0406ae23021b2b4325f9cc",
+      "module_load_reachable": false,
+      "runtime_importers": [],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "to": "main/templates/tools/document_runtime.cjs",
+          "resolution": "module",
+          "specifier": "../../../main/templates/tools/document_runtime.cjs",
+          "kind": "require_runtime",
+          "line": 19
+        }
+      ],
+      "string_references": [
+        {
+          "from": "main/software/document-capability.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 19,
+          "kind": "test_string"
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 72,
+          "kind": "test_string"
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 74,
+          "kind": "test_string"
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 75,
+          "kind": "test_string"
+        }
+      ],
+      "asset_terms": [],
+      "computed_imports": [
+        {
+          "line": 23,
+          "expression": "require(name + '/package.json')"
+        }
+      ],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/templates/tools/speech_bridge.cjs",
       "group": "shared_capability_keep_migrate",
       "sha256": "e5186b0cdc419f95db9162b67544df285191d5348d4cd5295af962a1c080d084",
@@ -8388,7 +8886,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 16,
+          "line": 17,
           "kind": "source_string"
         },
         {
@@ -9150,7 +9648,23 @@
           "resolution": "module",
           "specifier": "../../storage/config-paths",
           "kind": "static_runtime",
+          "line": 5
+        },
+        {
+          "from": "main/software/independent-policy.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
           "line": 4
+        },
+        {
+          "from": "main/software/independent-settings.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "main/software/independent-verification.ts",
@@ -9191,6 +9705,14 @@
           "specifier": "../../storage/config-paths",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "main/software/native-test-runtime.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 4
         },
         {
           "from": "main/software/process-manager.ts",
@@ -9249,6 +9771,14 @@
           "line": 6
         },
         {
+          "from": "main/software/state-view.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 4
+        },
+        {
           "from": "main/software/trial.ts",
           "to": "storage/config-paths.ts",
           "resolution": "module",
@@ -9271,6 +9801,14 @@
           "specifier": "../../storage/config-paths",
           "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "main/software/working-context.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 3
         }
       ],
       "type_importers": [],
@@ -9636,6 +10174,14 @@
           "line": 11
         },
         {
+          "from": "tests/unit/software/guide-terminal.test.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 10
+        },
+        {
           "from": "tests/unit/startup-reconcile.test.ts",
           "to": "storage/config-paths.ts",
           "resolution": "module",
@@ -9712,21 +10258,21 @@
       "path": "main/desktop/lean-production.ts",
       "needle": "productionAgentTools(baseTools",
       "meaning": "Shared helper in an old-named module still serves modern projects.",
-      "line": 195
+      "line": 197
     },
     {
       "id": "software_tool_filter",
       "path": "main/software/agent-tools.ts",
       "needle": "const FILE_TOOLS = new Set",
       "meaning": "Old resource/installer tools are not exposed by this filtering path.",
-      "line": 20
+      "line": 21
     },
     {
       "id": "new_capability_verification",
       "path": "main/desktop/core-verification.ts",
       "needle": "const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane: brief, manifest, signal: options.signal }, options.capabilityVerifiers)",
       "meaning": "Current short workflow still runs capability verifiers.",
-      "line": 254
+      "line": 262
     },
     {
       "id": "web_retirement_guard",
@@ -9806,17 +10352,17 @@
         },
         {
           "path": "main/desktop/core-verification.ts",
-          "line": 68,
+          "line": 74,
           "kind": "source"
         },
         {
           "path": "main/desktop/core-verification.ts",
-          "line": 218,
+          "line": 227,
           "kind": "source"
         },
         {
           "path": "main/desktop/core-verification.ts",
-          "line": 267,
+          "line": 288,
           "kind": "source"
         },
         {
@@ -9831,12 +10377,12 @@
         },
         {
           "path": "main/desktop/gui-acceptance.ts",
-          "line": 129,
+          "line": 132,
           "kind": "source"
         },
         {
           "path": "main/desktop/gui-acceptance.ts",
-          "line": 136,
+          "line": 139,
           "kind": "source"
         },
         {
@@ -9861,22 +10407,22 @@
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 64,
+          "line": 65,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 83,
+          "line": 84,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 121,
+          "line": 123,
           "kind": "source"
         },
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 125,
+          "line": 127,
           "kind": "source"
         },
         {
@@ -9886,32 +10432,62 @@
         },
         {
           "path": "main/desktop/production-context.ts",
+          "line": 69,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 70,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 71,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
           "line": 72,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 77,
+          "line": 76,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 78,
+          "line": 81,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 79,
+          "line": 90,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 80,
+          "line": 95,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 91,
+          "line": 96,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 97,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 98,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 109,
           "kind": "source"
         },
         {
@@ -9926,37 +10502,37 @@
         },
         {
           "path": "main/ipc/project-deliverables.ts",
-          "line": 117,
+          "line": 129,
           "kind": "source"
         },
         {
           "path": "main/ipc/project-deliverables.ts",
-          "line": 118,
+          "line": 130,
           "kind": "source"
         },
         {
           "path": "main/ipc/project-deliverables.ts",
-          "line": 132,
+          "line": 144,
           "kind": "source"
         },
         {
           "path": "main/ipc/project-deliverables.ts",
-          "line": 137,
-          "kind": "source"
-        },
-        {
-          "path": "main/ipc/project-deliverables.ts",
-          "line": 152,
-          "kind": "source"
-        },
-        {
-          "path": "main/ipc/project-deliverables.ts",
-          "line": 156,
+          "line": 149,
           "kind": "source"
         },
         {
           "path": "main/ipc/project-deliverables.ts",
           "line": 165,
+          "kind": "source"
+        },
+        {
+          "path": "main/ipc/project-deliverables.ts",
+          "line": 169,
+          "kind": "source"
+        },
+        {
+          "path": "main/ipc/project-deliverables.ts",
+          "line": 178,
           "kind": "source"
         },
         {
@@ -10050,22 +10626,22 @@
         },
         {
           "path": "tests/unit/software/independent-design.test.ts",
-          "line": 46,
+          "line": 122,
           "kind": "test"
         },
         {
           "path": "tests/unit/software/long-task-recovery.test.ts",
-          "line": 90,
+          "line": 123,
           "kind": "test"
         },
         {
           "path": "tests/unit/software/long-task-recovery.test.ts",
-          "line": 99,
+          "line": 132,
           "kind": "test"
         },
         {
           "path": "tests/unit/software/long-task-recovery.test.ts",
-          "line": 124,
+          "line": 157,
           "kind": "test"
         },
         {
@@ -10143,7 +10719,7 @@
       "sites": [
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 195,
+          "line": 197,
           "kind": "source"
         }
       ]
@@ -10153,7 +10729,7 @@
       "sites": [
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 240,
+          "line": 242,
           "kind": "source"
         },
         {
@@ -10179,6 +10755,11 @@
         {
           "path": "tests/unit/desktop/dispatcher-completion.test.ts",
           "line": 35,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/software/async-command.test.ts",
+          "line": 62,
           "kind": "test"
         }
       ]
@@ -10349,12 +10930,12 @@
       "sites": [
         {
           "path": "main/desktop/lean-production.ts",
-          "line": 291,
+          "line": 294,
           "kind": "source"
         },
         {
           "path": "main/software/verification.ts",
-          "line": 116,
+          "line": 125,
           "kind": "source"
         },
         {
@@ -10370,6 +10951,36 @@
         {
           "path": "tests/integration/lean-workflow.test.ts",
           "line": 77,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "line": 26,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "line": 36,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "line": 43,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "line": 47,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "line": 50,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/acceptance-evidence.test.ts",
+          "line": 55,
           "kind": "test"
         },
         {
@@ -10474,13 +11085,23 @@
       "sites": [
         {
           "path": "main/desktop/core-verification.ts",
-          "line": 150,
+          "line": 157,
           "kind": "source"
         },
         {
           "path": "main/desktop/core-verification.ts",
-          "line": 254,
+          "line": 262,
           "kind": "source"
+        },
+        {
+          "path": "tests/unit/desktop/capability-verifiers.test.ts",
+          "line": 7,
+          "kind": "test"
+        },
+        {
+          "path": "tests/unit/desktop/capability-verifiers.test.ts",
+          "line": 11,
+          "kind": "test"
         }
       ]
     },
@@ -10495,6 +11116,56 @@
   ],
   "asset_references": [
     {
+      "term": "document_runtime.cjs",
+      "sites": [
+        {
+          "path": "main/software/agent-tools.ts",
+          "line": 80,
+          "value": "资料解析/检索先按需读取read_production_context(documents)，复用产品自己的成熟解析依赖和document_runtime.cjs，不自写PDF/ZIP解析器替代依赖诊断。已有工程用inspect_repository overview/changes核对原入口与本轮增量；设计验收时可读取acceptance-counterexamples，选择与当前确认范围有关的多对象/异常反例。目录和组件准备不等于产品通过。"
+        },
+        {
+          "path": "main/software/document-capability.ts",
+          "line": 7,
+          "value": "document_runtime.cjs"
+        },
+        {
+          "path": "main/software/document-capability.ts",
+          "line": 49,
+          "value": "产品后端require(\"./document_runtime.cjs\")，先extractDocument(file,{dataDir:APP_DATA_DIR})，再searchDocuments/verifyCitation；准备不等于GUI业务或真实AI质量通过。依赖失败时按实际Node版本/包管理器诊断，勿改写成熟解析器。"
+        },
+        {
+          "path": "main/software/document-capability.ts",
+          "line": 55,
+          "value": "Node后端：const {extractDocument,searchDocuments,verifyCitation}=require(\"./document_runtime.cjs\"); const doc=await extractDocument(file,{dataDir:process.env.APP_DATA_DIR}); const result=searchDocuments([doc],\"关键词\"); verifyCitation([doc],resul"
+        },
+        {
+          "path": "tests/unit/software/document-capability.test.ts",
+          "line": 19,
+          "value": "../../../main/templates/tools/document_runtime.cjs"
+        },
+        {
+          "path": "tests/unit/software/document-capability.test.ts",
+          "line": 72,
+          "value": "document_runtime.cjs"
+        },
+        {
+          "path": "tests/unit/software/document-capability.test.ts",
+          "line": 74,
+          "value": "document_runtime.cjs"
+        },
+        {
+          "path": "tests/unit/software/document-capability.test.ts",
+          "line": 75,
+          "value": "document_runtime.cjs"
+        },
+        {
+          "path": "tests/unit/software/document-capability.test.ts",
+          "line": 129,
+          "value": "require('./document_runtime.cjs').extractDocument(require('node:path').join(process.env.APP_DATA_DIR,process.argv[2]||'sample.pdf'),{dataDir:process.env.APP_DATA_DIR}).then(doc=>console.log(doc.blocks[0].text)).catch(e=>{console.error(e);pr"
+        }
+      ]
+    },
+    {
       "term": "speech_runtime.py",
       "sites": [
         {
@@ -10504,7 +11175,7 @@
         },
         {
           "path": "main/desktop/core-verification.ts",
-          "line": 285,
+          "line": 306,
           "value": "语音复用 speech_runtime.py 的 SpeechEngine/StreamingRecorder，另加 speech:{\"module\":\"speech_runtime\",\"factory\":\"SpeechEngine\",\"method\":\"transcribe\",\"rate_argument\":true}，须指向产品实际使用的 ASR 实例构造入口，宿主固定 WAV/二维 PCM 探针会执行它。录音只入队，准备/识别在后台，UI 线程显示累计文字；硬件采集需要"
         },
         {
@@ -10534,7 +11205,7 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 16,
+          "line": 17,
           "value": "speech_runtime.py"
         },
         {
@@ -10634,7 +11305,7 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 16,
+          "line": 17,
           "value": "speech_locator.py"
         },
         {
@@ -10684,7 +11355,7 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 16,
+          "line": 17,
           "value": "speech_worker.py"
         },
         {
@@ -10709,12 +11380,12 @@
       "sites": [
         {
           "path": "main/desktop/production-context.ts",
-          "line": 75,
+          "line": 93,
           "value": "const {transcribeWav}=require(\"./speech_bridge.cjs\"); await transcribeWav(APP_DATA_DIR内PCM16 WAV绝对路径,{signal,timeoutMs:90000})；由宿主BLOMA_SPEECH_PYTHON绑定项目.venv，不要求用户安装Python或借用平台语音IPC。"
         },
         {
           "path": "main/software/agent-tools.ts",
-          "line": 78,
+          "line": 83,
           "value": "语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立"
         },
         {
@@ -10724,12 +11395,12 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 16,
+          "line": 17,
           "value": "speech_bridge.cjs"
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 50,
+          "line": 51,
           "value": "speech_bridge.cjs exports transcribeWav(APP_DATA_DIR下的PCM16 WAV绝对路径)，使用宿主绑定的BLOMA_SPEECH_PYTHON；支持signal和有界timeoutMs，不录音。"
         },
         {
@@ -11136,6 +11807,58 @@
   ],
   "template_assets": [
     {
+      "path": "tests/fixtures/software-import/document-product.cjs.txt",
+      "sha256": "c6fe3e582768d9f7929333762e93d88c67604d86ab49ccf39ef6528eddacbfe4",
+      "references": [
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 140
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/document_runtime.cjs",
+      "sha256": "ed63408ae712ecc5237071acc97d8f227ff59486ff0406ae23021b2b4325f9cc",
+      "references": [
+        {
+          "from": "main/software/agent-tools.ts",
+          "line": 80
+        },
+        {
+          "from": "main/software/document-capability.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/document-capability.ts",
+          "line": 49
+        },
+        {
+          "from": "main/software/document-capability.ts",
+          "line": 55
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 19
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 72
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 74
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 75
+        },
+        {
+          "from": "tests/unit/software/document-capability.test.ts",
+          "line": 129
+        }
+      ]
+    },
+    {
       "path": "main/templates/tools/speech_runtime.py",
       "sha256": "26ceb5a348a74ddb2eabdc24e15af3541f0096563d63c2cfbbe9218fe3f6f024",
       "references": [
@@ -11145,7 +11868,7 @@
         },
         {
           "from": "main/desktop/core-verification.ts",
-          "line": 285
+          "line": 306
         },
         {
           "from": "main/desktop/install-packages-tool.ts",
@@ -11169,7 +11892,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 16
+          "line": 17
         },
         {
           "from": "scripts/audit-workflow-retirement.mjs",
@@ -11251,7 +11974,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 16
+          "line": 17
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
@@ -11293,7 +12016,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 16
+          "line": 17
         },
         {
           "from": "main/templates/tools/speech_bridge.cjs",
@@ -12051,6 +12774,11 @@
       "expression": "import(pathToFileURL(process.env.BLOMA_NATIVE_TEST_FILE).href)"
     },
     {
+      "path": "main/templates/tools/document_runtime.cjs",
+      "line": 23,
+      "expression": "require(name + '/package.json')"
+    },
+    {
       "path": "main/templates/tools/llm_entry_probe.cjs",
       "line": 29,
       "expression": "import(pathToFileURL(file).href)"
@@ -12087,6 +12815,13 @@
       "group": "historical_schema_and_shared_diagnostics",
       "type_importers": 1,
       "test_importers": 0,
+      "module_load_reachable": false
+    },
+    {
+      "path": "main/templates/tools/document_runtime.cjs",
+      "group": "shared_capability_keep_migrate",
+      "type_importers": 0,
+      "test_importers": 1,
       "module_load_reachable": false
     },
     {

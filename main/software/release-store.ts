@@ -106,7 +106,13 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
   for (const dependency of DEPENDENCIES) {
     const entries = source.files.filter(entry => entry.path.startsWith(`${dependency}/`))
     if (!entries.length) continue
-    const key = hash(JSON.stringify(entries)), cache = join(getPromaHome(), 'software-dependency-snapshots', key), marker = `${cache}.json`
+    // Node resolves package dependencies by walking directories named
+    // node_modules. A junction to a bare hash folder loses that lookup level
+    // after realpath, breaking hoisted transitive CJS/ESM imports in releases.
+    // Keep old flat snapshots readable; new Node snapshots use a distinct key.
+    const key = hash(JSON.stringify(dependency === 'node_modules' ? { layout: 'node_modules-v2', entries } : entries))
+    const cacheBase = join(getPromaHome(), 'software-dependency-snapshots', key)
+    const cache = dependency === 'node_modules' ? join(cacheBase, 'node_modules') : cacheBase, marker = `${cache}.json`
     try {
       if (hash(await readFile(marker, 'utf8')) !== hash(JSON.stringify(entries))) throw Error('RELEASE_DEPENDENCY_CACHE_INVALID')
       const inventory = await runtimeInventory(cache, signal, {}, false)
@@ -115,6 +121,7 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       // Unique staging, no hard links to mutable development dependencies.
       const staging = `${cache}-${randomUUID()}`
+      await mkdir(dirname(staging), { recursive: true })
       await copyEntries(sourceRoot, staging, entries, signal, `${dependency}/`)
       await mkdir(dirname(cache), { recursive: true }); await rename(staging, cache); await writeFile(marker, JSON.stringify(entries))
     }
@@ -143,9 +150,11 @@ export async function prepareSoftwareRelease(projectId: string, sourceRoot: stri
 }
 export async function validateSoftwareRelease(projectId: string, release: SoftwareRelease, signal?: AbortSignal) {
   if (!/^[a-f0-9]{64}$/.test(release.id) || release.projectId !== projectId || resolve(release.root) !== resolve(base(projectId), release.id, 'app')) throw Error('RELEASE_IDENTITY_INVALID')
-  for (const cache of Object.values(release.dependencies)) {
+  for (const [name, cache] of Object.entries(release.dependencies)) {
     const rel = relative(resolve(getPromaHome(), 'software-dependency-snapshots'), resolve(cache))
-    if (rel.includes(sep) || !/^[a-f0-9]{64}$/.test(rel)) throw Error('RELEASE_CACHE_PATH_INVALID')
+    const legacy = /^[a-f0-9]{64}$/.test(rel)
+    const nodeLayout = name === 'node_modules' && /^[a-f0-9]{64}\/node_modules$/.test(rel.replaceAll(sep, '/'))
+    if (!DEPENDENCIES.has(name) || !legacy && !nodeLayout) throw Error('RELEASE_CACHE_PATH_INVALID')
   }
   const runtime = await runtimeInventory(release.root, signal, release.dependencies)
   if(release.speech_resources)await validateSpeechResources(release.speech_resources,signal)

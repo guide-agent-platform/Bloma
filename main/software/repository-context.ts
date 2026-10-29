@@ -6,7 +6,7 @@ import { writeTextFileAtomic } from '../../storage/json-store'
 import { findProject } from '../project/project-service'
 import { resolveProjectRoot } from '../../shared/project-root-override'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
-import { importedProjectContext } from './import-project'
+import { importedProjectContext, importedProjectChanges } from './import-project'
 import { redactSoftwareOutput } from './process-manager'
 
 const ignored = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.cache', 'dist', 'build', '00_HISTORY', '00_VERIFY'])
@@ -50,12 +50,13 @@ export function repositoryFileFacts(projectId: string, root: string, requested: 
   writeTextFileAtomic(cache, JSON.stringify(facts)); return { ...facts, reused: false }
 }
 export function buildRepositoryContextTool(projectId: string): AgentLoopTool {
-  return { name: 'inspect_repository', parallelSafe: true, description: '已有工程按需定位：overview查看实际包脚本/锁文件/测试目录；file提取单文件声明与导入候选；search按字面query查相关源码片段。事实缓存按当前文件内容摘要失效，不生成整仓长文。候选不是测试通过证据。',
-    input_schema: { type: 'object', required: ['mode'], additionalProperties: false, properties: { mode: { type: 'string', enum: ['overview', 'file', 'search'] }, path: { type: 'string' }, query: { type: 'string', minLength: 1, maxLength: 120 } } },
+  return { name: 'inspect_repository', parallelSafe: true, description: '已有工程按需定位：overview看包脚本/锁文件/测试；changes对比导入基线与当前副本字节，不读取原目录；file提取声明/导入候选；search查相关源码。候选或差异不是测试通过证据。',
+    input_schema: { type: 'object', required: ['mode'], additionalProperties: false, properties: { mode: { type: 'string', enum: ['overview', 'file', 'search', 'changes'] }, path: { type: 'string' }, query: { type: 'string', minLength: 1, maxLength: 120 } } },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw Error('REPOSITORY_PROJECT_MISMATCH')
         const root = resolveProjectRoot(projectId, () => findProject(projectId).root_path)
+        if (input.mode === 'changes') return { output: redactSoftwareOutput(JSON.stringify(await importedProjectChanges(projectId, root, ctx.signal))) }
         if (input.mode === 'file') {
           if (typeof input.path !== 'string' || !input.path) throw Error('REPOSITORY_FILE_REQUIRED')
           return { output: redactSoftwareOutput(JSON.stringify(repositoryFileFacts(projectId, root, input.path))) }

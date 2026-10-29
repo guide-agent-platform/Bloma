@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { importSoftwareProject, importedProjectContext } from '../../../main/software/import-project'
+import { importSoftwareProject, importedProjectContext, importedProjectChanges } from '../../../main/software/import-project'
 import { executeSoftwareCommand } from '../../../main/software/command-runtime'
 import { deleteProject } from '../../../main/project/project-service'
 
@@ -29,11 +29,13 @@ it('imports an existing dirty Git repository, fixes a cross-module defect in the
   expect(readFileSync(join(copied, 'user-work.txt'), 'utf8')).toBe('untracked user work')
   expect(existsSync(join(copied, 'node_modules'))).toBe(false)
   expect(importedProjectContext(project.project_id)).toMatchObject({ existing_project: true, user_dirty: true })
+  expect(await importedProjectChanges(project.project_id, copied)).toMatchObject({ original_user_dirty: true, total_changes: 0 })
   const before = await executeSoftwareCommand({ projectId: project.project_id, root: copied, command: ['npm', 'test'] })
   expect(before.code).not.toBe(0)
   writeFileSync(join(copied, 'lib/math.cjs'), 'exports.add=(a,b)=>a+b')
   const after = await executeSoftwareCommand({ projectId: project.project_id, root: copied, command: ['npm', 'test'] })
   expect(after.code, after.stderr).toBe(0)
+  expect(await importedProjectChanges(project.project_id, copied)).toMatchObject({ total_changes: 1, changes: [{ path: 'lib/math.cjs', change: 'changed' }], verification: 'unverified' })
   expect(git('status', '--porcelain=v1')).toBe(status); expect(git('rev-parse', 'HEAD')).toBe(head)
   expect(readFileSync(join(source, '.git/index')).equals(index)).toBe(true)
   expect(readFileSync(join(source, 'lib/math.cjs'), 'utf8')).toContain('a+b+1')
@@ -48,4 +50,18 @@ it('imports an ordinary directory without adding a template, and rejects a sourc
   await expect(importSoftwareProject(home, 'quick')).rejects.toThrow('IMPORT_SOURCE_CONTAINS_DESTINATION')
   mkdirSync(join(source, '.git'))
   await expect(importSoftwareProject(source, 'quick')).rejects.toThrow('IMPORT_GIT_METADATA_UNAVAILABLE')
+})
+it('keeps the baseline immutable, bounds changes, and compares the copy even when the original disappears', async () => {
+  writeFileSync(join(source, 'keep.txt'), 'original user bytes')
+  const project = await importSoftwareProject(source, 'quick')
+  rmSync(source, { recursive: true, force: true })
+  rmSync(join(project.root_path, 'keep.txt'))
+  for (let n = 0; n < 82; n++) writeFileSync(join(project.root_path, `added-${n}.txt`), 'new')
+  const result = await importedProjectChanges(project.project_id, project.root_path)
+  expect(result).toMatchObject({ available: true, total_changes: 83, omitted: 3 })
+  expect(result.changes).toHaveLength(80)
+  const file = join(home, 'host', 'software-imports', `${project.project_id}.json`)
+  const metadata = JSON.parse(readFileSync(file, 'utf8')); metadata.files = []
+  writeFileSync(file, JSON.stringify(metadata))
+  await expect(importedProjectChanges(project.project_id, project.root_path)).rejects.toThrow('IMPORT_BASELINE_INVALID')
 })

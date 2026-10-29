@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -49,6 +49,7 @@
         "main/software/release-store.ts",
         "main/software/trial.ts",
         "main/software/independent-design.ts",
+        "main/software/acceptance-counterexamples.ts",
         "main/software/independent-verification.ts",
         "main/software/harness-evaluation.ts"
       ]
@@ -105,6 +106,10 @@
         "main/software/capability-bindings.ts",
         "main/software/capability-resources.ts",
         "main/software/capability-tools.ts",
+        "main/software/document-capability.ts",
+        "main/software/import-project.ts",
+        "main/software/repository-context.ts",
+        "main/templates/tools/document_runtime.cjs",
         "main/templates/tools/speech_bridge.cjs"
       ]
     },
@@ -264,6 +269,7 @@
     "confirmMvpDelivered"
   ],
   "asset_terms": [
+    "document_runtime.cjs",
     "speech_runtime.py",
     "speech_locator.py",
     "speech_worker.py",
@@ -276,6 +282,8 @@
     "pending-confirmations"
   ],
   "asset_files": [
+    "tests/fixtures/software-import/document-product.cjs.txt",
+    "main/templates/tools/document_runtime.cjs",
     "main/templates/tools/speech_runtime.py",
     "main/templates/tools/speech_locator.py",
     "main/templates/tools/speech_worker.py",

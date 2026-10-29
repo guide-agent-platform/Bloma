@@ -24,6 +24,7 @@ let home:string,old:string|undefined,project:ReturnType<typeof createProject>,po
 const contract={cases:[{id:'save',feature:'F-001',steps:[{kind:'fill',control:'name',value:'Alice'},{kind:'click',control:'save'},{kind:'expect',control:'result',equals:'Alice'}]}]}
 const route=()=>({channel_id:'b',model:'model-b',env:{ANTHROPIC_BASE_URL:'https://b.invalid',ANTHROPIC_MODEL:'model-b'}})
 const query:SDKQuery=async function*(prompt,options){calls++;expect(prompt).not.toContain('IMPLEMENTATION_SENTINEL');expect(options.env.ANTHROPIC_MODEL).toBe('model-b');expect(options.tools).toBeUndefined()
+  const aid=JSON.parse(prompt).design_aids;expect(aid.scope).toContain('不新增功能');expect(aid.cases.some((item:{id:string})=>item.id==='historical-step')).toBe(true)
   expect(options.accounting?.role).toBe('acceptance_designer')
   options.requestGuard?.({url:'https://b.invalid/v1/messages',body:JSON.stringify({model:'model-b',max_tokens:1024})})
   yield{type:'assistant',message:{role:'assistant',content:[{type:'text',text:JSON.stringify(contract)}]}}

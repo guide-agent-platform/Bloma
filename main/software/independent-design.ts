@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { COUNTEREXAMPLE_GUIDANCE } from './acceptance-counterexamples'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
@@ -99,7 +100,8 @@ export async function prepareIndependentDesign(input:{projectId:string;sessionId
     if(Math.floor(money.remaining_rmb*1e6)<reserve)throw Error('INDEPENDENT_COMPLETE_REQUEST_RESERVE_UNAVAILABLE')
     const ux=readConfirmedUxBinding(input.projectId,brief)
     const data={goal:brief.positioning,requirements:brief.requirements.map(item=>({id:item.id,description:item.description,expected:trustedAcceptance(brief,item),behavior_assertions:item.behavior_assertions})),
-      constraints:brief.constraints,out_of_scope:brief.out_of_scope,confirmed_design:ux?.html_path?readFileSync(join(project.root_path,ux.html_path),'utf8'):null}
+      constraints:brief.constraints,out_of_scope:brief.out_of_scope,design_aids:COUNTEREXAMPLE_GUIDANCE,
+      confirmed_design:ux?.html_path?readFileSync(join(project.root_path,ux.html_path),'utf8'):null}
     const prompt=JSON.stringify(data);if(Buffer.byteLength(prompt)>256*1024)throw Error('INDEPENDENT_INPUT_TOO_LARGE')
     attempted=true
     save(input.projectId,{...base,status:'blocked',attempted,authorization_hash:authorizationHash,reason:'INDEPENDENT_DESIGN_IN_PROGRESS: 未完成的请求不得自动重发'})

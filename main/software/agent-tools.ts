@@ -77,6 +77,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 }
 
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
+  '资料解析/检索先按需读取read_production_context(documents)，复用产品自己的成熟解析依赖和document_runtime.cjs，不自写PDF/ZIP解析器替代依赖诊断。已有工程用inspect_repository overview/changes核对原入口与本轮增量；设计验收时可读取acceptance-counterexamples，选择与当前确认范围有关的多对象/异常反例。目录和组件准备不等于产品通过。',
   '通用能力按需读取：read_production_context(capabilities)看目录，execution看异步命令，working-state看当前现场。安装/构建/测试可run_command(yield_ms:1000)保留同一进程，用read_process等待结果；不要因工具已返回就重复启动或宣称完成。已有说明和组件按需使用，不增加前置流程。',
   '长期型读取read_production_context(longterm)恢复当前里程碑、待办与决策。只实现当前已确认目标；待办不自动开工。能力/接口/数据结构有重要变化时用record_longterm_decision保存兼容、迁移或回滚决定及原因。宿主检查通过后保留当前版本，待用户核对里程碑；不要把本阶段通过说成整个长期产品已完成。',
   '语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立交付分别验收。',

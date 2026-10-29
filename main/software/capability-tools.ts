@@ -12,6 +12,7 @@ import { bindSpeechCapability, executionSpeechBinding, speechManifestVersion } f
 import { projectRuntimeRequest, satisfies } from './runtime-manager'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { redactSoftwareOutput } from './process-manager'
+import { DOCUMENT_COMPONENT, inspectDocumentCapability, prepareDocumentCapability } from './document-capability'
 
 export const SPEECH_COMPONENTS=['speech_runtime.py','speech_locator.py','speech_worker.py','speech_bridge.cjs'] as const
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex')
@@ -100,12 +101,18 @@ export async function prepareSpeechCapability(projectId:string,root:string,signa
   }finally{preparing.delete(projectId)}
 }
 export function buildCapabilityTools(projectId:string,policy:ReturnType<typeof createSoftwareCollaborationPolicy>,parent:boolean):AgentLoopTool[]{
-  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查可复用语音组件、项目Python/依赖和模型缓存；不下载、不安装、不录音、不签发业务PASS。Node/Electron可复用项目Python文件转写桥。',input_schema:{type:'object',additionalProperties:false,properties:{}},
-    execute:async(_input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');return{output:JSON.stringify(await inspectSoftwareCapabilities(projectId,findProject(projectId).root_path,ctx.signal))}}catch(error){return{output:String(error),isError:true}}}}
-  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'受控准备speech能力：创建/复用项目.venv、检查/安装固定依赖、保护已有文件、物化Python ASR及Node WAV桥、绑定工程外资源并实际执行固定音频。download_models默认false；true仅下载校验固定公开资源。不会录音、调用付费端点或替代产品GUI验收。',
-    input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:['speech']},install_dependencies:{type:'boolean'},download_models:{type:'boolean'}}},
+  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查speech语音资源或documents产品文本解析组件/实际依赖；默认speech兼容旧调用。不下载、不安装、不录音、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:['speech','documents']}}},
+    execute:async(input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');if(Object.keys(input).some(key=>key!=='capability')||input.capability!==undefined&&!['speech','documents'].includes(String(input.capability)))throw Error('CAPABILITY_ARGUMENTS_INVALID');return{output:JSON.stringify(await(input.capability==='documents'?inspectDocumentCapability:inspectSoftwareCapabilities)(projectId,findProject(projectId).root_path,ctx.signal))}}catch(error){return{output:redactSoftwareOutput(String(error)),isError:true}}}}
+  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'受控准备speech语音或documents文档/字面检索/精确引用组件，保护已有文件。documents默认不安装；install_dependencies:true按npm工程准备固定依赖，保留其它包管理器锁文件。speech沿原依赖/资源准备方式；download_models仅speech支持。不调用付费端点，不签发产品PASS。',
+    input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:['speech','documents']},install_dependencies:{type:'boolean'},download_models:{type:'boolean'}}},
     execute:async(input,ctx)=>{
-      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||input.capability!=='speech'||Object.keys(input).some(key=>!['capability','install_dependencies','download_models'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean'))throw Error('CAPABILITY_ARGUMENTS_INVALID')
+      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||!['speech','documents'].includes(String(input.capability))||Object.keys(input).some(key=>!['capability','install_dependencies','download_models'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean'))throw Error('CAPABILITY_ARGUMENTS_INVALID')
+        if(input.capability==='documents'){
+          if(input.download_models!==undefined)throw Error('DOCUMENT_DOWNLOAD_MODELS_UNSUPPORTED')
+          for(const path of [DOCUMENT_COMPONENT,'package.json','package-lock.json'])policy.assertFileWrite(path,ctx)
+          const result=await prepareDocumentCapability(projectId,findProject(projectId).root_path,ctx.signal,input.install_dependencies===true)
+          return{output:redactSoftwareOutput(JSON.stringify(result)),isError:result.status!=='prepared'}
+        }
         for(const path of [...SPEECH_COMPONENTS,'.venv/pyvenv.cfg'])policy.assertFileWrite(path,ctx)
         const result=await prepareSpeechCapability(projectId,findProject(projectId).root_path,ctx.signal,input as {install_dependencies?:boolean;download_models?:boolean})
         return{output:JSON.stringify(result),isError:result.status!=='prepared'}

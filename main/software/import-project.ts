@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
-import { createProject, updateProject } from '../project/project-service'
+import { createProject, updateProject, findProject } from '../project/project-service'
 import { execFileDriverSpawn, buildDriverEnv } from '../desktop/process-driver'
 import { fileDigest } from './release-store'
 import type { ProjectMode } from '../../shared/types'
@@ -82,4 +82,25 @@ export function importedProjectContext(projectId: string) {
   const metadata = JSON.parse(readFileSync(file, 'utf8')) as { origin?: GitOrigin; files: ImportedFile[] }
   return { existing_project: true, files: metadata.files.length, branch: metadata.origin?.branch, head: metadata.origin?.head, user_dirty: Boolean(metadata.origin?.status),
     guidance: '这是已有工程的工作副本，原目录保持不变。先复用现有入口/测试/锁文件，按具体修改定位，不重铺骨架；原用户改动包含在副本中，提交与移交只说明自己的增量，不自动push或写回原目录。' }
+}
+
+/** Compare only the managed copy with its immutable import-time bytes, never
+ * reread or mutate the original user's directory. Original dirty bytes are baseline. */
+export async function importedProjectChanges(projectId: string, root: string, signal?: AbortSignal) {
+  const project = findProject(projectId)
+  if (!project.imported_source) return { available: false, reason: 'not_imported', verification: 'unverified' }
+  if (await realpath(root) !== await realpath(project.root_path)) throw Error('IMPORT_WORKING_COPY_MISMATCH')
+  const metadata = JSON.parse(readFileSync(join(getPromaHome(), 'software-imports', `${projectId}.json`), 'utf8')) as { project_id: string; files: ImportedFile[] }
+  if (metadata.project_id !== projectId || !Array.isArray(metadata.files) || hash(JSON.stringify(metadata.files)) !== project.imported_source.baseline_digest) throw Error('IMPORT_BASELINE_INVALID')
+  const current = await sourceFiles(root, signal), before = new Map(metadata.files.map(file => [file.path, file])), after = new Map(current.map(file => [file.path, file]))
+  const changes = []
+  for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+    signal?.throwIfAborted()
+    const a = before.get(path), b = after.get(path)
+    if (a?.sha256 === b?.sha256 && a?.size === b?.size) continue
+    changes.push({ path, change: !a ? 'added' : !b ? 'deleted' : 'changed', before_sha256: a?.sha256, after_sha256: b?.sha256 })
+  }
+  return { available: true, baseline: project.imported_source.baseline_digest, original_user_dirty: project.imported_source.dirty,
+    changes: changes.slice(0, 80), total_changes: changes.length, omitted: Math.max(0, changes.length - 80),
+    current_files: current.length, verification: 'unverified', note: '仅比较导入时字节与当前副本；原用户脏修改属于基线。依赖环境与.git不纳入差异，测试/业务结果须实际执行；不读取或写回原目录。' }
 }

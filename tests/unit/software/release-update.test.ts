@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
@@ -18,6 +18,36 @@ afterEach(async () => { await stopSoftwareSession(project.project_id, 'user-laun
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) }, 30000)
 async function promote() { const release = await prepareSoftwareRelease(project.project_id, project.root_path); await promoteSoftwareRelease(release, { version: 'actual-test-evidence', scope: 'test-scope', at: new Date().toISOString() }); return release }
 async function port() { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const a = server.address(); if (!a || typeof a === 'string') throw Error('port'); await new Promise<void>(done => server.close(() => done())); return a.port }
+it('preserves hoisted CJS and ESM dependency lookup after freezing and isolates release bytes from later working changes', async () => {
+  const root=project.root_path
+  const pkg=(name:string,source:string,esm=false)=>{
+    const directory=join(root,'node_modules',name);mkdirSync(directory,{recursive:true})
+    writeFileSync(join(directory,'package.json'),JSON.stringify({name,version:'1.0.0',main:esm?'index.mjs':'index.cjs',...(esm?{type:'module'}:{})}))
+    writeFileSync(join(directory,esm?'index.mjs':'index.cjs'),source)
+  }
+  pkg('outer-cjs', 'module.exports=require("inner-cjs")+1');pkg('inner-cjs','module.exports=20')
+  pkg('outer-esm','import n from "inner-esm";export default n+1',true);pkg('inner-esm','export default 20',true)
+  writeFileSync(join(root,'app.mjs'),'import a from "outer-cjs";import b from "outer-esm";console.log(a+b)')
+  writeFileSync(join(root,'LAUNCH.json'),JSON.stringify({schema_version:2,mode:'command',command:['node','app.mjs']}))
+  const release=await prepareSoftwareRelease(project.project_id,root)
+  expect(release.dependencies.node_modules.replaceAll('\\','/')).toMatch(/[a-f0-9]{64}\/node_modules$/)
+  const run=()=>executeSoftwareCommand({projectId:project.project_id,root:release.root,command:['node','app.mjs']})
+  let actual=await run();expect(actual.code,actual.stderr).toBe(0);expect(actual.stdout.trim()).toBe('42')
+  writeFileSync(join(root,'node_modules/inner-cjs/index.cjs'),'throw Error("working change")')
+  actual=await run();expect(actual.code,actual.stderr).toBe(0);expect(actual.stdout.trim()).toBe('42')
+  await validateSoftwareRelease(project.project_id,release)
+  await expect(validateSoftwareRelease(project.project_id,{...release,dependencies:{node_modules:join(release.dependencies.node_modules,'extra')}})).rejects.toThrow('CACHE_PATH_INVALID')
+})
+it('can still validate the legacy flat cache layout without rewriting its bytes or release record',async()=>{
+  const root=project.root_path
+  writeFileSync(join(root,'app.cjs'),'console.log(1)');writeFileSync(join(root,'LAUNCH.json'),JSON.stringify({schema_version:2,mode:'command',command:['node','app.cjs']}))
+  const release=await prepareSoftwareRelease(project.project_id,root),legacy=join(home,'software-dependency-snapshots','a'.repeat(64))
+  mkdirSync(join(legacy,'simple'),{recursive:true});writeFileSync(join(legacy,'simple/index.cjs'),'module.exports=1')
+  symlinkSync(legacy,join(release.root,'node_modules'),process.platform==='win32'?'junction':'dir')
+  release.dependencies={node_modules:legacy};release.runtime=await runtimeInventory(release.root,undefined,release.dependencies)
+  await validateSoftwareRelease(project.project_id,release)
+  expect(readFileSync(join(legacy,'simple/index.cjs'),'utf8')).toBe('module.exports=1')
+})
 it('reports bounded added/deleted/changed paths without exempting screenshots or dependency changes', async () => {
   const root = project.root_path;
   writeFileSync(join(root, 'app.cjs'), 'console.log(5)'); writeFileSync(join(root, 'gone.txt'), 'old');

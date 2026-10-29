@@ -6,6 +6,8 @@
 
 > 当前入口（2026-10-28）：新项目统一使用 software-v1，经过短任务单、必要的外观确认、连续 Pi 制作和宿主实际验证。长期型按里程碑核对与发布，待办另行确认。未标记历史项目和 lean-v1 只保留历史/产物访问，继续修改须显式复制；冻结实验只读报告。见 [后续清理记录](docs/05_PROJECT_PLAN/workflow-cleanup-20261028.md)。
 
+> 2026-10-29：[第一轮能力扩展](docs/05_PROJECT_PLAN/capability-expansion-20261029.md)接入产品自有PDF／DOCX文本解析、字面检索与精确引用核对，提供业务关系反例和已有工程导入差异；修复发布依赖的Node查找布局。工程验证通过，真实模型生成收益及AI效果另验。
+
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 
 > 当前执行接手：[Harness 改进交接](docs/05_PROJECT_PLAN/harness-improvement-handoff-20261027.md)，包含已完成版本、验证边界和剩余批次的执行入口。

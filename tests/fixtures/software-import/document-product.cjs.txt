@@ -1,0 +1,43 @@
+// Relocatable fixture source, materialized with document_runtime.cjs by its test.
+const fs = require('node:fs'), path = require('node:path'), http = require('node:http')
+const { extractDocument, searchDocuments, verifyCitation } = require('./document_runtime.cjs')
+const data = process.env.APP_DATA_DIR, store = path.join(data, 'documents.json')
+let documents = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')) : []
+const html = `<!doctype html><meta charset="utf-8"><title>Document capability fixture</title>
+<h1>资料解析工程验证</h1><input id="file" type="file"><select id="documents"></select>
+<input id="query"><button id="search">搜索</button><output id="count">0</output>
+<button id="forged">核对错误引用</button><output id="citation"></output><p id="status"></p><pre id="text"></pre>
+<script>
+let docs=[];const byId=id=>document.getElementById(id);const request=async(url,options)=>{const r=await fetch(url,options),v=await r.json();if(!r.ok)throw Error(v.error);return v};
+function selected(){return docs.find(d=>d.documentId===byId('documents').value)}
+function render(){byId('text').textContent=selected()?.blocks.map(b=>b.text).join('\\n')||'';byId('query').value='';byId('count').textContent='0'}
+function list(){const old=byId('documents').value;byId('documents').replaceChildren();for(const doc of docs){const option=document.createElement('option');option.value=doc.documentId;option.textContent=doc.name;byId('documents').append(option)}if(docs.some(d=>d.documentId===old))byId('documents').value=old;render()}
+byId('documents').onchange=render;
+byId('file').onchange=async e=>{try{const file=e.target.files[0],result=await request('/import?name='+encodeURIComponent(file.name),{method:'POST',body:file});docs=result.documents;list();byId('documents').value=result.selected;render();byId('status').textContent='已读取'}catch(e){byId('status').textContent='无法读取'}};
+byId('search').onclick=async()=>{const r=await request('/search',{method:'POST',body:JSON.stringify({id:selected().documentId,query:byId('query').value})});byId('count').textContent=String(r.total)};
+byId('forged').onclick=async()=>{const d=selected(),b=d.blocks[0],r=await request('/citation',{method:'POST',body:JSON.stringify({documentId:d.documentId,blockId:b.id,start:0,end:6,quote:'伪造原文内容'})});byId('citation').textContent=r.valid?'原文引用':'引用未核验'};
+request('/documents').then(r=>{docs=r;list()});
+</script>`
+http.createServer(async (request, response) => {
+  const url = new URL(request.url, 'http://127.0.0.1')
+  const send = (value, code = 200) => { response.writeHead(code, { 'Content-Type': 'application/json;charset=utf-8' }); response.end(JSON.stringify(value)) }
+  if (url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html;charset=utf-8' }); response.end(html); return }
+  try {
+    if (url.pathname === '/documents') return send(documents)
+    const chunks = []; let size = 0
+    for await (const chunk of request) { if ((size += chunk.length) > 16 * 1024 * 1024) throw Error('size'); chunks.push(chunk) }
+    const bytes = Buffer.concat(chunks)
+    if (url.pathname === '/import') {
+      const name = path.basename(url.searchParams.get('name')), file = path.join(data, 'upload-' + name)
+      fs.writeFileSync(file, bytes)
+      const doc = await extractDocument(file, { dataDir: data })
+      const next = [...documents.filter(d => d.documentId !== doc.documentId), doc]
+      fs.writeFileSync(store, JSON.stringify(next)); documents = next
+      return send({ documents, selected: doc.documentId })
+    }
+    const input = JSON.parse(bytes.toString('utf8'))
+    if (url.pathname === '/search') return send(searchDocuments(documents.filter(d => d.documentId === input.id), input.query))
+    if (url.pathname === '/citation') return send(verifyCitation(documents, input))
+    send({ error: 'missing' }, 404)
+  } catch (error) { fs.writeFileSync(path.join(data, 'last-error.txt'), error.stack || error.message); send({ error: error.message }, 422) }
+}).listen(Number(process.argv[2]), '127.0.0.1')

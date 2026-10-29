@@ -18,6 +18,8 @@ import { readIndependentDesign, readIndependentPolicy } from '../software/indepe
 import { readLongtermState, isLongtermSoftware } from '../software/longterm-state'
 import { SOFTWARE_CONTEXT_CATALOG } from '../software/context-catalog'
 import { softwareWorkingContext } from '../software/working-context'
+import { DOCUMENT_GUIDANCE } from '../software/document-capability'
+import { COUNTEREXAMPLE_GUIDANCE } from '../software/acceptance-counterexamples'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -56,15 +58,21 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
 
 export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
-    description: '只读按需上下文：capabilities列能力目录；execution看命令会话，working-state看当前版本/目标/命令/历史失败摘要；overview/features看完整范围，launch看入口，verification-gui/llm/speech看具体协议，resume看执行索引，data-update/delivery看数据与交付约定。只加载当前需要的主题。',
+    description: '只读按需上下文：capabilities列目录；documents看文档/检索/引用组件，acceptance-counterexamples看业务反例，existing-project看已有工程修改；execution/working-state看命令和现场；overview/features看范围，launch/verification-gui/llm/speech看协议，resume/data-update/delivery看恢复数据交付。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['capabilities','execution','working-state','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
+      topic: { type: 'string', enum: ['capabilities','execution','working-state','documents','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw Error('PRODUCTION_CONTEXT_PROJECT_MISMATCH')
         if (isSoftwareProject(projectId) && input.topic === 'capabilities') return { output: JSON.stringify({ catalog: SOFTWARE_CONTEXT_CATALOG, note: '目录不代表本轮需求或环境已就绪；按topic读取需要的说明，不扩大目标。' }) }
+        if (isSoftwareProject(projectId) && input.topic === 'documents') return { output: JSON.stringify(DOCUMENT_GUIDANCE) }
+        if (isSoftwareProject(projectId) && input.topic === 'acceptance-counterexamples') return { output: JSON.stringify(COUNTEREXAMPLE_GUIDANCE) }
+        if (isSoftwareProject(projectId) && input.topic === 'existing-project') return { output: JSON.stringify({
+          inspect: 'inspect_repository({mode:"overview"})定位原脚本/锁文件/测试；file/search按需定位；changes对比导入时实际字节和当前副本，原用户脏修改已包含在导入基线，不算本轮新增。',
+          baseline: '先用原项目命令实际运行原测试，保留退出码与失败事实；修改后分别运行原测试和新增案例，已有失败不能默认为本轮引入，也不能忽略新失败。检查实际用户入口与数据兼容。',
+          boundary: '原目录只读，工作在副本；不自动写回、push或删除原测试。差异清单不是行为验证，未导入项目不能捏造原工程基线。' }) }
         if (isSoftwareProject(projectId) && input.topic === 'execution') return { output: JSON.stringify({
           run: '短命令可同步；安装/构建/测试可run_command({command:[...],yield_ms:1000,timeout_ms:300000})。process_id表示同一命令继续运行，不应重复启动。',
           read: 'read_process({process_id,since_seq:上次next_seq,wait_ms:10000})等待新增日志或退出。output_truncated表示旧输出截断；stdin用write_process({process_id,text,close_stdin})，bytes_queued不等于应用已处理。',
