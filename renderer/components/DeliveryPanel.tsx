@@ -145,6 +145,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       {data?.status_view && <div role="status" aria-label="执行与交付状态" style={{display:'flex',gap:12,flexWrap:'wrap',padding:'7px 14px',fontSize:'var(--font-size-xs)',color:'var(--color-text-muted)',borderBottom:'1px solid var(--line-2)'}}>
         <span title={data.status_view.execution.reason}>执行：{data.status_view.execution.label}</span>
         <span>检查：{data.status_view.verification.label}</span>
+        {data.status_view.verification.scope_note&&<span>{data.status_view.verification.scope_note}</span>}
         <span>交付：{data.status_view.goal.label}</span>
         {data.status_view.active_commands>0&&<span>后台命令 {data.status_view.active_commands} 项</span>}
       </div>}

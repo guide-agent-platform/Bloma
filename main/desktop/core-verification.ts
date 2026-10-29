@@ -19,9 +19,12 @@ import { readLaunchDeclaration } from './launch-smoke'
 import { qualifySoftwareArtifact, type ArtifactQualification } from '../software/artifact-qualification'
 import { assertSoftwareDelivery } from '../software/launch-contract'
 import { guiFeatureResults } from './gui-feature-results'
+import { requirementCapabilities } from '../model/requirement-capabilities'
+import { acceptanceEvidence, invalidateAcceptanceEvidence, type AcceptanceEvidence, type FeatureAcceptanceEvidence } from './acceptance-evidence'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
+  acceptance_evidence?: AcceptanceEvidence
   verification_scope?: 'registered_local_cases_and_capability_contracts'
   local_status?: CoreVerificationStatus
   distribution?: ArtifactQualification
@@ -29,7 +32,7 @@ export interface CoreVerificationResult {
   reused?: boolean
   host_gui?: GuiAcceptanceResult
   llm?: LlmVerificationResult
-  requirements?: Array<{ id: string; requirement_hash: string; implementation: 'implemented' | 'partial' | 'missing' | 'unverified'; verification: CoreVerificationStatus }>
+  requirements?: Array<{ id: string; requirement_hash: string; implementation: 'implemented' | 'partial' | 'missing' | 'unverified'; verification: CoreVerificationStatus; acceptance_evidence?:FeatureAcceptanceEvidence }>
   speech?: import('./speech-verification').SpeechVerificationResult
   file_operations?: FileVerificationResult
   gui_execution?: { command: string; routing: string; scenarios: Array<{ name: string; outcome: string }> }
@@ -89,6 +92,7 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
       if (fingerprintOf(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
         result.status = 'unverified'; result.missing.push('验证期间目标或产物变化，本次结果作废')
         for (const row of result.requirements ?? []) row.verification = 'unverified'
+        invalidateAcceptanceEvidence(result)
       }
     } else {
     if (!existsSync(join(root, CORE_MANIFEST_REL))) throw new Error('缺少核心业务验证入口 CORE_CHECK.json')
@@ -202,6 +206,7 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     if (result.status === 'passed') {
       result.status = 'unverified'; result.summary = '验证未能完整收口，产物已保留。'
       for (const row of result.requirements ?? []) row.verification = 'unverified'
+      invalidateAcceptanceEvidence(result)
     }
     result.missing.push(error instanceof Error ? error.message : String(error))
   } finally {
@@ -209,7 +214,7 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
   }
   if (root) {
     try { writeTextFileAtomic(join(root, CORE_REPORT_REL), JSON.stringify(result, null, 2)) }
-    catch { result.status = 'environment_blocked'; result.summary = '验证记录未能保存，不能确认交付。' }
+    catch { result.status = 'environment_blocked'; result.summary = '验证记录未能保存，不能确认交付。';invalidateAcceptanceEvidence(result) }
   }
   return result
 }
@@ -253,6 +258,7 @@ async function verifyLeanBehavior(options: CoreVerificationOptions, root: string
     }
   }
   const manifest = existsSync(join(root, CORE_MANIFEST_REL)) ? JSON.parse(readFileSync(join(root, CORE_MANIFEST_REL), 'utf8')) as Record<string, unknown> : {}
+  const localStates=new Map(states)
   const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane: brief, manifest, signal: options.signal }, options.capabilityVerifiers)
   for (const outcome of capabilities) {
     result.missing.push(...outcome.missing); Object.assign(result, outcome.report)
@@ -260,12 +266,25 @@ async function verifyLeanBehavior(options: CoreVerificationOptions, root: string
     for (const [fid, state] of Object.entries(outcome.features)) states.set(fid, combineVerification(states.get(fid) ?? 'unverified', state))
   }
   result.requirements = brief.requirements.map(row => {
-    const verification = states.get(row.id) ?? 'unverified'
+    let verification = states.get(row.id) ?? 'unverified'
+    const checks=capabilities.filter(outcome=>outcome.features[row.id]!==undefined)
+    const llm=manifest.llm as {covers?:string[]}|undefined
+    const requiredCaps=requirementCapabilities(row)
+    const modelEffect=requiredCaps.has('llm')||llm?.covers?.includes(row.id)
+    const requiredVerifiers=new Set<string>()
+    if(modelEffect)requiredVerifiers.add('llm')
+    if(requiredCaps.has('speech')||requiredCaps.has('microphone'))requiredVerifiers.add('speech')
+    if(requiredCaps.has('prefix_rename')||requiredCaps.has('rename_undo'))requiredVerifiers.add('prefix_rename')
+    const missingVerifiers=[...requiredVerifiers].filter(id=>!checks.some(check=>check.verifier_id===id))
+    if(missingVerifiers.length){verification=combineVerification(verification,'unverified');result.missing.push(`${row.id}: 缺少宿主能力检查结果 ${missingVerifiers.join(',')}`)}
+    const contracts=missingVerifiers.length?'unverified' as const:checks.length?checks.reduce((status,outcome)=>combineVerification(status,outcome.features[row.id]),'passed' as CoreVerificationStatus):'not_required' as const
     if (verification !== 'passed') result.missing.push(`${row.id}: ${verification}`)
-    return { id: row.id, requirement_hash: requirementEvidenceHash(brief, row), implementation: verification === 'passed' ? 'implemented' : 'unverified', verification }
+    const evidence:FeatureAcceptanceEvidence={local_cases:localStates.get(row.id)??'unverified',capability_contracts:contracts,implementation:'not_assessed',external_model_effects:modelEffect?'unverified':'not_required'}
+    return { id: row.id, requirement_hash: requirementEvidenceHash(brief, row), implementation:'unverified' as const, verification,acceptance_evidence:evidence }
   })
   result.status = result.requirements.reduce((status, row) => combineVerification(status, row.verification), behavior)
   if (result.missing.length && result.status === 'passed') result.status = 'unverified'
+  result.acceptance_evidence=acceptanceEvidence(result.status,result.requirements.map(row=>row.acceptance_evidence!))
   if (isSoftwareProject(options.projectId)) {
     result.local_status = result.status
     result.distribution = await qualifySoftwareArtifact(root, brief, options.signal)

@@ -9,6 +9,7 @@ export interface CapabilityContext {
   projectId: string; root: string; backplane: PrdBackplane; manifest: Record<string, unknown>; signal?: AbortSignal
 }
 export interface CapabilityOutcome {
+  verifier_id?: string
   status: CoreVerificationStatus
   missing: string[]
   features: Record<string, CoreVerificationStatus>
@@ -79,7 +80,7 @@ export async function runCapabilityVerifiers(ctx: CapabilityContext, registry = 
       const valid = (status: string) => ['passed', 'failed', 'unverified', 'environment_blocked'].includes(status)
       if (!valid(outcome.status) || !Array.isArray(outcome.missing) || outcome.missing.some(reason => typeof reason !== 'string')
         || !outcome.features || Object.entries(outcome.features).some(([id, status]) => !valid(status) || !ctx.backplane.requirements.some(item => item.id === id))) throw new Error('CAPABILITY_OUTCOME_INVALID')
-      outcomes.push(outcome)
+      outcomes.push({...outcome,verifier_id:verifier.id})
     }
   }
   return outcomes

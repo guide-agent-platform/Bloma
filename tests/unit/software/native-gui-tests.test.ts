@@ -92,6 +92,8 @@ it('keeps actual business assertions and exposes a diagnostic image warning when
     const result = await verifySoftwareCandidate(project.project_id, 'diagnostic-only-failure', AbortSignal.timeout(90000))
     expect(result.status, result.summary).toBe('passed')
     expect(result.core?.host_gui?.native_evidence?.assertions).toBeGreaterThan(0)
+    expect(result.core?.requirements?.every(row=>row.verification==='passed'&&row.implementation==='unverified')).toBe(true)
+    expect(result.core?.acceptance_evidence).toMatchObject({registered_checks:'passed',implementation:'not_assessed',complete_requirements:'not_assessed'})
     expect(result.core?.host_gui?.evidence_warnings).toContain('diagnostic font capture timeout')
 }, 120000)
 it('allows changing an unrelated probe and appending checks without invalidating the original business expectations', () => {

@@ -32,6 +32,10 @@ it('labels a valid old verification as history and refuses a corrupt receipt', (
   const receipt = { state: 'complete', at: Date.now(), result, result_hash: createHash('sha256').update(JSON.stringify(result)).digest('hex') }
   writeFileSync(join(dir, project.project_id + '.json'), JSON.stringify(receipt))
   expect(softwareStatusView(project.project_id, false)).toMatchObject({ verification: { status: 'last_passed' }, goal: { status: 'not_delivered' } })
+  expect(softwareStatusView(project.project_id,false).verification.scope_note).toContain('历史记录未分层')
+  const layered={...result,core:{acceptance_evidence:{version:1,coverage:'registered_case_references',registered_checks:'passed',implementation:'not_assessed',external_model_effects:'unverified',complete_requirements:'not_assessed'}}}
+  writeFileSync(join(dir,project.project_id+'.json'),JSON.stringify({...receipt,result:layered,result_hash:createHash('sha256').update(JSON.stringify(layered)).digest('hex')}))
+  expect(softwareStatusView(project.project_id,false).verification.scope_note).toContain('真实供应商连通和模型效果尚未验证')
   writeFileSync(join(dir, project.project_id + '.json'), JSON.stringify({ ...receipt, result_hash: 'corrupt' }))
   expect(softwareStatusView(project.project_id, false).verification.status).toBe('unavailable')
 })

@@ -333,7 +333,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       }
       if (candidate) await verifyReleaseSource(candidate, runSignal)
       const launch = existsSync(join(project.root_path, 'LAUNCH.json')) ? JSON.parse(readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8')) as { command?: string[] } : undefined
-      const text = `${modelBudgetStop ? '模型调用已停止；宿主沿已登记规则完成了实际验证。' : ''}本次目标已完成并通过当前核心、安全与启动检查。${'可从项目交付入口一键启动试用。'}${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
+      const text = `${modelBudgetStop ? '模型调用已停止；宿主沿已登记规则完成了实际验证。' : ''}已登记的本机案例、安全与启动检查通过，可从项目交付入口启动试用。完整需求效果尚未独立评定。${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
       return async () => {
         runSignal.throwIfAborted()
         if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) { blocked('收口前产物或验证输入发生变化，本次未交付。'); return }
@@ -357,7 +357,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
           stageLongtermMilestone(input.projectId,input.sessionId,input.requestId,candidate)
           emit('longterm_changed',{summary:findProject(input.projectId).longterm_summary})
           emit('user_decision_required',longtermPendingDecision(input.projectId,input.sessionId)!)
-          const message='当前里程碑已通过宿主检查，可启动这个版本核对。确认本阶段后再决定下一轮；待办没有自动进入实现。'
+          const message='当前里程碑已登记的本机检查通过，可启动这个版本核对完整效果。确认本阶段后再决定下一轮；待办没有自动进入实现。'
           deps.persistAssistant(input.sessionId,message);emit('message_delta',{text:message});deps.complete(input.sessionId,input.projectId,'incomplete');return
         }
         commitDesktopDelivery(input.projectId, runSignal)

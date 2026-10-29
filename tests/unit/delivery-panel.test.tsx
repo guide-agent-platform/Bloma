@@ -51,10 +51,11 @@ function renderPanel(stage: string): void {
 describe('DeliveryPanel', () => {
   it('separates an ended execution and a historical passed check from an undelivered goal', async () => {
     mockBloma({ deliverables: { files: [], launch: { declared: true, parse_ok: true }, can_launch: false,
-      status_view: { execution: { status: 'ended', label: '本轮已结束' }, verification: { status: 'last_passed', label: '最近检查通过（对应记录版本）' }, goal: { status: 'not_delivered', label: '本轮尚未交付' }, active_commands: 0 } } })
+      status_view: { execution: { status: 'ended', label: '本轮已结束' }, verification: { status: 'last_passed', label: '最近检查通过（对应记录版本）',scope_note:'仅本机检查；真实模型效果尚未验证。' }, goal: { status: 'not_delivered', label: '本轮尚未交付' }, active_commands: 0 } } })
     renderPanel('generating_mvp')
     const status = await screen.findByRole('status', { name: '执行与交付状态' })
     expect(status.textContent).toContain('本轮已结束'); expect(status.textContent).toContain('本轮尚未交付')
+    expect(status.textContent).toContain('真实模型效果尚未验证')
     expect(screen.getByTestId('delivery-launch-button').hasAttribute('disabled')).toBe(true)
   })
   it('keeps the independent trial visible when verification clears the debug preview and binds update requests to its version',async()=>{

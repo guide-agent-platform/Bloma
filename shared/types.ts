@@ -455,7 +455,7 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface SoftwareStatusView {
   execution: { status: string; label: string; reason?: string }
-  verification: { status: 'not_run' | 'running' | 'last_passed' | 'last_failed' | 'last_unverified' | 'unavailable'; label: string; at?: number }
+  verification: { status: 'not_run' | 'running' | 'last_passed' | 'last_failed' | 'last_unverified' | 'unavailable'; label: string; at?: number; scope_note?: string }
   goal: { status: 'not_delivered' | 'waiting_confirmation' | 'delivered' | 'archived'; label: string }
   active_commands: number
 }
