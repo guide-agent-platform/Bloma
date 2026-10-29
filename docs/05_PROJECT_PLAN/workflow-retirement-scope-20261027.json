@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -107,6 +107,10 @@
         "main/software/capability-resources.ts",
         "main/software/capability-tools.ts",
         "main/software/document-capability.ts",
+        "main/software/integration-capabilities.ts",
+        "main/templates/tools/ocr_runtime.cjs",
+        "main/templates/tools/http_connector.cjs",
+        "main/templates/tools/webhook_inbox.cjs",
         "main/software/import-project.ts",
         "main/software/repository-context.ts",
         "main/templates/tools/document_runtime.cjs",
@@ -269,6 +273,10 @@
     "confirmMvpDelivered"
   ],
   "asset_terms": [
+    "ocr_runtime.cjs",
+    "ocr_worker.ps1",
+    "http_connector.cjs",
+    "webhook_inbox.cjs",
     "document_runtime.cjs",
     "speech_runtime.py",
     "speech_locator.py",
@@ -282,6 +290,10 @@
     "pending-confirmations"
   ],
   "asset_files": [
+    "main/templates/tools/ocr_runtime.cjs",
+    "main/templates/tools/ocr_worker.ps1",
+    "main/templates/tools/http_connector.cjs",
+    "main/templates/tools/webhook_inbox.cjs",
     "tests/fixtures/software-import/document-product.cjs.txt",
     "main/templates/tools/document_runtime.cjs",
     "main/templates/tools/speech_runtime.py",

@@ -13,6 +13,7 @@ import { projectRuntimeRequest, satisfies } from './runtime-manager'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { redactSoftwareOutput } from './process-manager'
 import { DOCUMENT_COMPONENT, inspectDocumentCapability, prepareDocumentCapability } from './document-capability'
+import { INTEGRATION_COMPONENTS, inspectIntegrationCapability, prepareIntegrationCapability } from './integration-capabilities'
 
 export const SPEECH_COMPONENTS=['speech_runtime.py','speech_locator.py','speech_worker.py','speech_bridge.cjs'] as const
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex')
@@ -101,12 +102,21 @@ export async function prepareSpeechCapability(projectId:string,root:string,signa
   }finally{preparing.delete(projectId)}
 }
 export function buildCapabilityTools(projectId:string,policy:ReturnType<typeof createSoftwareCollaborationPolicy>,parent:boolean):AgentLoopTool[]{
-  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查speech语音资源或documents产品文本解析组件/实际依赖；默认speech兼容旧调用。不下载、不安装、不录音、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:['speech','documents']}}},
-    execute:async(input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');if(Object.keys(input).some(key=>key!=='capability')||input.capability!==undefined&&!['speech','documents'].includes(String(input.capability)))throw Error('CAPABILITY_ARGUMENTS_INVALID');return{output:JSON.stringify(await(input.capability==='documents'?inspectDocumentCapability:inspectSoftwareCapabilities)(projectId,findProject(projectId).root_path,ctx.signal))}}catch(error){return{output:redactSoftwareOutput(String(error)),isError:true}}}}
-  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'受控准备speech语音或documents文档/字面检索/精确引用组件，保护已有文件。documents默认不安装；install_dependencies:true按npm工程准备固定依赖，保留其它包管理器锁文件。speech沿原依赖/资源准备方式；download_models仅speech支持。不调用付费端点，不签发产品PASS。',
-    input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:['speech','documents']},install_dependencies:{type:'boolean'},download_models:{type:'boolean'}}},
+  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查speech语音、documents文本、ocr本机图片识别或http产品连接组件；默认speech兼容旧调用。不下载、不安装、不录音、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:['speech','documents','ocr','http']}}},
+    execute:async(input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');if(Object.keys(input).some(key=>key!=='capability')||input.capability!==undefined&&!['speech','documents','ocr','http'].includes(String(input.capability)))throw Error('CAPABILITY_ARGUMENTS_INVALID');
+      const root=findProject(projectId).root_path
+      const result=input.capability==='ocr'||input.capability==='http'?await inspectIntegrationCapability(projectId,root,input.capability,ctx.signal):await(input.capability==='documents'?inspectDocumentCapability:inspectSoftwareCapabilities)(projectId,root,ctx.signal)
+      return{output:redactSoftwareOutput(JSON.stringify(result))}}catch(error){return{output:redactSoftwareOutput(String(error)),isError:true}}}}
+  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'受控准备speech、documents、ocr或http产品组件，保护已有文件。ocr调用Windows已安装语言，http提供JSON API/Webhook，无依赖下载选项；language仅ocr。documents可显式install_dependencies:true；speech沿原资源准备。准备不调用付费端点、不签发业务PASS。',
+    input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:['speech','documents','ocr','http']},install_dependencies:{type:'boolean'},download_models:{type:'boolean'},language:{type:'string',maxLength:40}}},
     execute:async(input,ctx)=>{
-      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||!['speech','documents'].includes(String(input.capability))||Object.keys(input).some(key=>!['capability','install_dependencies','download_models'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean'))throw Error('CAPABILITY_ARGUMENTS_INVALID')
+      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||!['speech','documents','ocr','http'].includes(String(input.capability))||Object.keys(input).some(key=>!['capability','install_dependencies','download_models','language'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean')||input.language!==undefined&&(input.capability!=='ocr'||typeof input.language!=='string'||input.language.length>40||!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.language)))throw Error('CAPABILITY_ARGUMENTS_INVALID')
+        if(input.capability==='ocr'||input.capability==='http'){
+          if(input.install_dependencies!==undefined||input.download_models!==undefined)throw Error('INTEGRATION_NO_DOWNLOAD_OPTIONS')
+          for(const path of INTEGRATION_COMPONENTS[input.capability])policy.assertFileWrite(path,ctx)
+          const result=await prepareIntegrationCapability(projectId,findProject(projectId).root_path,input.capability,ctx.signal,input.language as string|undefined)
+          return{output:redactSoftwareOutput(JSON.stringify(result)),isError:result.status!=='prepared'}
+        }
         if(input.capability==='documents'){
           if(input.download_models!==undefined)throw Error('DOCUMENT_DOWNLOAD_MODELS_UNSUPPORTED')
           for(const path of [DOCUMENT_COMPONENT,'package.json','package-lock.json'])policy.assertFileWrite(path,ctx)

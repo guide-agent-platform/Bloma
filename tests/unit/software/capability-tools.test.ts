@@ -47,7 +47,7 @@ it('preserves conflicting user implementations and rejects unknown arguments bef
   await expect(prepareSpeechCapability(project.project_id,project.root_path,signal(),{},{execute,probe})).rejects.toThrow('EXISTING_FILES_PRESERVED')
   expect(execute).not.toHaveBeenCalled();expect(readFileSync(join(project.root_path,'speech_runtime.py'),'utf8')).toBe('user implementation')
   const tools=buildSoftwareAgentTools(project.project_id,'parent',createSoftwareCollaborationPolicy(project.project_id,project.root_path,'s'))
-  const result=await tools.find(tool=>tool.name==='prepare_software_capability')!.execute({capability:'ocr'},{projectId:project.project_id,sessionId:'s',requestId:'r',signal:signal(),state:createToolState()})
+  const result=await tools.find(tool=>tool.name==='prepare_software_capability')!.execute({capability:'unsupported-provider'},{projectId:project.project_id,sessionId:'s',requestId:'r',signal:signal(),state:createToolState()})
   expect(result.isError).toBe(true)
   const child=buildSoftwareAgentTools(project.project_id,'implement',createSoftwareCollaborationPolicy(project.project_id,project.root_path,'s'))
   expect(child.some(tool=>tool.name==='inspect_software_capabilities')).toBe(true);expect(child.some(tool=>tool.name==='prepare_software_capability')).toBe(false)

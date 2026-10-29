@@ -20,6 +20,7 @@ import { SOFTWARE_CONTEXT_CATALOG } from '../software/context-catalog'
 import { softwareWorkingContext } from '../software/working-context'
 import { DOCUMENT_GUIDANCE } from '../software/document-capability'
 import { COUNTEREXAMPLE_GUIDANCE } from '../software/acceptance-counterexamples'
+import { MULTIMODAL_GUIDANCE, HTTP_GUIDANCE } from '../software/integration-capabilities'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -58,9 +59,9 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
 
 export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
-    description: '只读按需上下文：capabilities列目录；documents看文档/检索/引用组件，acceptance-counterexamples看业务反例，existing-project看已有工程修改；execution/working-state看命令和现场；overview/features看范围，launch/verification-gui/llm/speech看协议，resume/data-update/delivery看恢复数据交付。',
+    description: '只读按需上下文：capabilities列目录；documents看文档，multimodal看OCR/音频，http-integration看API/Webhook；acceptance-counterexamples看反例，existing-project看已有工程；execution/working-state看现场，overview/features看范围，launch/verification-gui/llm/speech看协议，resume/data-update/delivery看恢复交付。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['capabilities','execution','working-state','documents','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
+      topic: { type: 'string', enum: ['capabilities','execution','working-state','documents','multimodal','http-integration','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
@@ -68,6 +69,8 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
         if (ctx.projectId !== projectId) throw Error('PRODUCTION_CONTEXT_PROJECT_MISMATCH')
         if (isSoftwareProject(projectId) && input.topic === 'capabilities') return { output: JSON.stringify({ catalog: SOFTWARE_CONTEXT_CATALOG, note: '目录不代表本轮需求或环境已就绪；按topic读取需要的说明，不扩大目标。' }) }
         if (isSoftwareProject(projectId) && input.topic === 'documents') return { output: JSON.stringify(DOCUMENT_GUIDANCE) }
+        if (isSoftwareProject(projectId) && input.topic === 'multimodal') return { output: JSON.stringify(MULTIMODAL_GUIDANCE) }
+        if (isSoftwareProject(projectId) && input.topic === 'http-integration') return { output: JSON.stringify(HTTP_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'acceptance-counterexamples') return { output: JSON.stringify(COUNTEREXAMPLE_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'existing-project') return { output: JSON.stringify({
           inspect: 'inspect_repository({mode:"overview"})定位原脚本/锁文件/测试；file/search按需定位；changes对比导入时实际字节和当前副本，原用户脏修改已包含在导入基线，不算本轮新增。',
