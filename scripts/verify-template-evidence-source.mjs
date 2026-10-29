@@ -3,7 +3,7 @@ import path from 'node:path'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {createRequire} from 'node:module'
-const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'..'),out=path.join(root,'run-artifacts/template-rollout-20261029'),sources=new Map()
+const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.env.BLOMA_TEMPLATE_EVIDENCE_DIR||path.join(root,'run-artifacts/template-rollout-20261029')),sources=new Map()
 const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 for(const folder of fs.readdirSync(path.join(root,'main/templates/components')))for(const name of fs.readdirSync(path.join(root,'main/templates/components',folder))){assert.ok(!sources.has(name));sources.set(name,path.join(root,'main/templates/components',folder,name))}
 for(const name of fs.readdirSync(path.join(root,'main/templates/tools')))if(!sources.has(name))sources.set(name,path.join(root,'main/templates/tools',name))

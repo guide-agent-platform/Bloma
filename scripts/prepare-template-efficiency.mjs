@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {createHash} from 'node:crypto'
-const root=path.resolve(import.meta.dirname,'..'),directory=path.join(root,'run-artifacts/template-rollout-20261029')
+const root=path.resolve(import.meta.dirname,'..'),directory=path.resolve(process.env.BLOMA_TEMPLATE_EVIDENCE_DIR||path.join(root,'run-artifacts/template-rollout-20261029'))
 fs.mkdirSync(directory,{recursive:true})
 const sha=value=>createHash('sha256').update(value).digest('hex'),scenarios=JSON.parse(fs.readFileSync(path.join(root,'docs/05_PROJECT_PLAN/template-scenarios-20261029.json'),'utf8'))
 const sources=[]

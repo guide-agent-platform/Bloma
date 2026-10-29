@@ -70,4 +70,9 @@ function recoverDeadLock(dataDir,name){
  if(fs.readFileSync(file,'utf8')!==raw)throw Error('STORE_LOCK_CHANGED')
  fs.unlinkSync(file);return{recovered:true,previous_pid:row.pid}
 }
-module.exports={createDataStore,validId,recoverDeadLock}
+function canonicalJSON(value){
+ jsonValue(value)
+ const ordered=item=>Array.isArray(item)?item.map(ordered):item&&typeof item==='object'?Object.fromEntries(Object.keys(item).sort().map(key=>[key,ordered(item[key])])):item
+ return JSON.stringify(ordered(value))
+}
+module.exports={createDataStore,validId,recoverDeadLock,canonicalJSON}

@@ -1,5 +1,5 @@
 const {createHash}=require('node:crypto')
-const {createDataStore,validId}=require('./product_store.cjs')
+const {createDataStore,validId,canonicalJSON}=require('./product_store.cjs')
 const {createHttpConnector,verifyWebhook}=require('./http_connector.cjs')
 const {createWebhookInbox}=require('./webhook_inbox.cjs')
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -25,7 +25,7 @@ function createHttpWorkflow({dataDir,resolveKey=async()=>undefined}){
  function record(config,item){const id=at(item,config.idPath),version=at(item,config.versionPath),fields={};if(typeof id!=='string'||!id||id.length>200||!Number.isSafeInteger(version)||version<0)throw Error('SYNC_RECORD_INVALID');for(const [name,source]of Object.entries(config.mapping))fields[name]=at(item,source);return{id,version,fields}}
  const recordId=(conn,id)=>'remote_'+hash([conn,id])
  const change=(old,id,type,data,refs=[])=>({id,type,expectedRevision:old?.revision??0,data,refs})
- function newer(old,next){if(!old)return true;if(next.version===old.version&&hash(next.fields)!==hash(old.fields))throw Error('SYNC_VERSION_CONFLICT');return next.version>old.version}
+ function newer(old,next){if(!old)return true;if(next.version===old.version&&canonicalJSON(next.fields)!==canonicalJSON(old.fields))throw Error('SYNC_VERSION_CONFLICT');return next.version>old.version}
  async function pull({connectionId,signal}){
   if(active.has(connectionId))throw Error('SYNC_BUSY');active.add(connectionId)
   try{
@@ -69,20 +69,38 @@ function createHttpWorkflow({dataDir,resolveKey=async()=>undefined}){
   state.commit(before.revision,changes);inbox.markDone(accepted.receipt)
   return{ok:true,kind:apply?'applied':'ignored_old_version'}
  }
- async function submit({connectionId,recordId:sourceId,sourceRevision,fields,signal}){
-  const conn=connection(connectionId),before=state.read(),id='outbound_'+hash([connectionId,sourceId,sourceRevision,fields]),old=before.records[id]
-  if(old)return{ok:old.data.status==='done',kind:old.data.status,operationId:id}
-  if(Object.values(before.records).some(row=>row.type==='outbound'&&row.data.connectionId===connectionId&&row.data.sourceId===sourceId&&['pending','unknown'].includes(row.data.status)))throw Error('SYNC_RECONCILIATION_REQUIRED')
+ function destinationScope(config){return hash({url:new URL(config.writePath,config.baseUrl).href,method:config.writeMethod,network:config.network??'public',secret_name:config.secret_name??null,authHeader:config.authHeader??'Authorization',authPrefix:config.authPrefix??'Bearer '})}
+ async function submit({connectionId,recordId:sourceId,sourceRevision,fields,signal,onRequestStart,expectedConnectionRevision}){
   if(typeof sourceId!=='string'||!sourceId||!Number.isSafeInteger(sourceRevision)||sourceRevision<1||!fields||Array.isArray(fields)||typeof fields!=='object')throw Error('SYNC_SUBMIT_INVALID')
-  const api=await client(conn,{'Idempotency-Key':id});signal?.throwIfAborted()
-  const data={connectionId,sourceId,sourceRevision,fields,status:'pending',at:new Date().toISOString()}
+  const fieldIdentity=canonicalJSON(fields),conn=connection(connectionId),scope=destinationScope(conn.data)
+  if(expectedConnectionRevision!==undefined&&expectedConnectionRevision!==conn.revision)throw Error('CONNECTION_STALE')
+  const before=state.read(),related=Object.values(before.records).filter(row=>row.type==='outbound'&&row.data.connectionId===connectionId&&row.data.sourceId===sourceId)
+  const matching=related.filter(row=>row.data.sourceRevision===sourceRevision&&canonicalJSON(row.data.fields)===fieldIdentity)
+  const scoped=matching.filter(row=>row.data.destination_scope===scope),complete=scoped.find(row=>row.data.status==='done'),pending=scoped.find(row=>['pending','unknown'].includes(row.data.status))
+  if(complete)return{ok:true,kind:'done',operationId:complete.id}
+  if(pending)return{ok:false,kind:pending.data.status,operationId:pending.id}
+  const legacy=matching.find(row=>!row.data.destination_scope&&row.data.status!=='not_applied')
+  if(legacy)return{ok:false,kind:'scope_unverified',operationId:legacy.id}
+  if(related.some(row=>['pending','unknown'].includes(row.data.status)))throw Error('SYNC_RECONCILIATION_REQUIRED')
+  if(scoped.length>=10)throw Error('SYNC_RETRY_LIMIT')
+  const id='outbound_'+hash(['v2',scope,sourceId,sourceRevision,fieldIdentity,scoped.length+1]),api=await client(conn,{'Idempotency-Key':id})
+  signal?.throwIfAborted();if(connection(connectionId).revision!==conn.revision)throw Error('CONNECTION_STALE')
+  const data={connectionId,connectionRevision:conn.revision,destination_scope:scope,destination_url:new URL(conn.data.writePath,conn.data.baseUrl).href,sourceId,sourceRevision,fields,status:'pending',attempt:scoped.length+1,at:new Date().toISOString()}
   state.commit(before.revision,[change(undefined,id,'outbound',data)])
-  let result;try{result=await api.request(conn.data.writePath,{method:conn.data.writeMethod,body:{source_id:sourceId,source_revision:sourceRevision,fields},signal})}catch{result={ok:false,kind:'unknown'}}
-  const after=state.read(),current=after.records[id],status=result.ok?'done':['auth_error','rate_limited'].includes(result.kind)?'rejected':'unknown'
+  let result,started=false
+  try{onRequestStart?.();signal?.throwIfAborted();started=true;result=await api.request(conn.data.writePath,{method:conn.data.writeMethod,body:{source_id:sourceId,source_revision:sourceRevision,fields},signal})}catch{result={ok:false,kind:started?'unknown':'not_applied'}}
+  const after=state.read(),current=after.records[id]
+  if(current?.data.status!=='pending')return{ok:current?.data.status==='done',kind:current?.data.status??'unknown',operationId:id}
+  const status=result.ok?'done':result.kind==='not_applied'?'not_applied':['auth_error','rate_limited'].includes(result.kind)?'rejected':'unknown'
   state.commit(after.revision,[change(current,id,'outbound',{...current.data,status,error:result.ok?null:result.kind})])
   return{ok:result.ok,kind:status,operationId:id}
  }
- function reconcile({operationId,revision,state:result,remoteId}){const before=state.read(),row=before.records[operationId];if(!row||row.type!=='outbound'||!['pending','unknown'].includes(row.data.status)||!['done','not_applied'].includes(result)||typeof remoteId!=='string'||remoteId.length>200)throw Error('SYNC_RECONCILIATION_INVALID');return state.commit(revision,[change(row,operationId,'outbound',{...row.data,status:result,remoteId,reviewed_at:new Date().toISOString()})])}
+ function reconcile({operationId,revision,state:result,remoteId}){
+  const before=state.read(),row=before.records[operationId]
+  if(!row||row.type!=='outbound'||!(['pending','unknown'].includes(row.data.status)||!row.data.destination_scope&&['done','rejected'].includes(row.data.status))||!['done','not_applied'].includes(result)||typeof remoteId!=='string'||!remoteId.trim()||remoteId.length>200)throw Error('SYNC_RECONCILIATION_INVALID')
+  const conn=connection(row.data.connectionId)
+  return state.commit(revision,[change(row,operationId,'outbound',{...row.data,status:result,remoteId,reviewed_at:new Date().toISOString(),destination_scope:row.data.destination_scope??destinationScope(conn.data),connectionRevision:row.data.connectionRevision??conn.revision,destination_url:row.data.destination_url??new URL(conn.data.writePath,conn.data.baseUrl).href})])
+ }
  return{settings,saveConnection,pull,receive,submit,reconcile,read:()=>state.read()}
 }
 module.exports={createHttpWorkflow,validateConnection,at}

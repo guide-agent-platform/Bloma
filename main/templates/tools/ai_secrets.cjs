@@ -21,4 +21,14 @@ function createSecretStore({dataDir,encrypt,decrypt}){
   }
  }
 }
-module.exports={createSecretStore}
+// Compensation must not delete a key once public configuration may reference it.
+// A read/cleanup failure keeps encrypted material for explicit reconciliation.
+function cleanupStagedSecrets(store,names,readReferences){
+ if(!names.length)return{retained:[],uncertain:false}
+ let references
+ try{references=new Set(readReferences())}catch{return{retained:[...names],uncertain:true}}
+ const retained=[]
+ for(const name of names){if(references.has(name)){retained.push(name);continue}try{store.remove(name)}catch{retained.push(name)}}
+ return{retained,uncertain:retained.length>0}
+}
+module.exports={createSecretStore,cleanupStagedSecrets}

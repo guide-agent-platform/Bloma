@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),{randomUUID,createHash}=re
 const {createDataStore}=require('./product_store.cjs'),{createJobQueue}=require('./product_jobs.cjs')
 const {createFileWorkflow}=require('./product_files.cjs'),{createMediaWorkflow}=require('./product_media.cjs'),{createHttpWorkflow}=require('./product_http.cjs')
 const {queryRecords,batchById}=require('./product_query.cjs'),{createProductSettings,dispatchSettings}=require('./product_settings.cjs')
-const {createSecretStore}=require('./ai_secrets.cjs'),{createProductDiagnostics}=require('./product_diagnostics.cjs')
+const {createSecretStore,cleanupStagedSecrets}=require('./ai_secrets.cjs'),{createProductDiagnostics}=require('./product_diagnostics.cjs')
 function createWorkbench({dataDir,safeStorage,dialog,nativeImage,recognizeImage,transcribeWav}){
  const resources=()=>({audio:!!process.env.BLOMA_SPEECH_PYTHON&&path.isAbsolute(process.env.BLOMA_SPEECH_PYTHON)&&fs.existsSync(process.env.BLOMA_SPEECH_PYTHON)&&!!process.env.BLOMA_SPEECH_MODEL_DIR&&path.isAbsolute(process.env.BLOMA_SPEECH_MODEL_DIR)&&['model.int8.onnx','tokens.txt','silero_vad.onnx'].every(name=>fs.existsSync(path.join(process.env.BLOMA_SPEECH_MODEL_DIR,name)))?'configured_not_verified':'unavailable',ocr:process.platform==='win32'?'windows_engine_not_language_verified':'unavailable'})
  const store=createDataStore({dataDir}),handlers={},queue=createJobQueue({dataDir,handlers}),settings=createProductSettings({dataDir,safeStorage})
@@ -12,10 +12,10 @@ function createWorkbench({dataDir,safeStorage,dialog,nativeImage,recognizeImage,
  Object.assign(handlers,media.handlers,{parse:async(input,ctx)=>{ctx.progress(.1);const result=await files.preview(input.ids,{signal:ctx.signal});ctx.progress(1);return{previewId:result.id}},pull:async(input,ctx)=>{const result=await http.pull({...input,signal:ctx.signal});if(!result.ok)throw Error('SYNC_'+result.kind.toUpperCase());return result},sync:async(input,ctx)=>{
   const row=store.read().records[input.resultId];if(row?.type!=='analysis'||row.revision!==input.revision)throw Error('MEDIA_RESULT_STALE')
   const source=files.asset(row.data.assetId);if(source.revision!==row.data.sourceRevision||source.data.sha256!==row.data.sha256)throw Error('MEDIA_SOURCE_STALE')
-  ctx.signal.throwIfAborted();ctx.beginEffect()
-  const result=await http.submit({connectionId:input.connectionId,recordId:row.id,sourceRevision:row.revision,fields:{text:row.data.text,source_sha256:row.data.sha256},signal:ctx.signal})
-  if(result.kind==='done'||result.kind==='rejected')ctx.finishEffect()
-  if(!result.ok)throw Error(result.kind==='unknown'?'SYNC_RECONCILIATION_REQUIRED':'SYNC_WRITE_REJECTED')
+  ctx.signal.throwIfAborted();if(http.settings().records[input.connectionId]?.revision!==input.connectionRevision)throw Error('CONNECTION_STALE')
+  const result=await http.submit({connectionId:input.connectionId,recordId:row.id,sourceRevision:row.revision,fields:{text:row.data.text,source_sha256:row.data.sha256},signal:ctx.signal,expectedConnectionRevision:input.connectionRevision,onRequestStart:()=>ctx.beginEffect()})
+  if(['done','rejected','not_applied'].includes(result.kind))ctx.finishEffect()
+  if(!result.ok)throw Error(['unknown','pending','scope_unverified'].includes(result.kind)?'SYNC_RECONCILIATION_REQUIRED':'SYNC_WRITE_REJECTED')
   return result
  }})
  const methods={
@@ -42,16 +42,17 @@ function createWorkbench({dataDir,safeStorage,dialog,nativeImage,recognizeImage,
   analyze:input=>{if(input.mode==='vision'&&input.consent!==true)throw Error('MEDIA_CONSENT_REQUIRED');const {consent,...request}=input;return media.submit(request)},
   correct:input=>media.correct(input),
   cancel:({id})=>queue.cancel(id),
+  archiveJobs:({ids})=>queue.archive(ids),
   resume:({id,reviewed})=>queue.resume(id,{reviewed:reviewed===true}),
   pull:({connectionId})=>queue.enqueue({type:'pull',input:{connectionId},dedupeKey:'pull_'+randomUUID()}),
-  sync:({connectionId,resultId,revision,consent})=>{if(consent!==true)throw Error('SYNC_CONSENT_REQUIRED');return queue.enqueue({type:'sync',input:{connectionId,resultId,revision},dedupeKey:'sync_'+JSON.stringify([connectionId,resultId,revision])})},
+  sync:({connectionId,resultId,revision,consent})=>{if(consent!==true)throw Error('SYNC_CONSENT_REQUIRED');const connectionRevision=http.settings().records[connectionId]?.revision;if(!connectionRevision)throw Error('CONNECTION_MISSING');return queue.enqueue({type:'sync',input:{connectionId,connectionRevision,resultId,revision},dedupeKey:'sync_'+createHash('sha256').update(JSON.stringify([connectionId,connectionRevision,resultId,revision])).digest('hex')})},
   saveConnection({id,revision,entityRevision,config,key,webhookKey}){
    const before=http.settings();if(before.revision!==revision)throw Error('STORE_STALE')
    const staged=[],next=structuredClone(config)
    try{
     for(const[field,value]of [['secret_name',key],['webhook_secret_name',webhookKey]])if(value){const name='APP_HTTP_'+randomUUID().replaceAll('-','').toUpperCase();secrets().set(name,value);staged.push(name);next[field]=name}
     return http.saveConnection({id,revision,entityRevision,config:next})
-   }catch(error){for(const name of staged)secrets().remove(name);throw error}
+   }catch(error){if(!staged.length)throw error;const cleanup=cleanupStagedSecrets(secrets(),staged,()=>Object.values(http.settings().records).flatMap(row=>[row.data.secret_name,row.data.webhook_secret_name]).filter(Boolean));if(cleanup.uncertain)throw Error('CONNECTION_SAVE_OUTCOME_UNKNOWN');throw error}
   },
   reconcile:input=>http.reconcile(input),
   async export(){const picked=await dialog.showSaveDialog({defaultPath:'资料归档.json',filters:[{name:'资料备份',extensions:['json']}]});if(picked.canceled||!picked.filePath)return{cancelled:true};return files.writeExport(picked.filePath)},

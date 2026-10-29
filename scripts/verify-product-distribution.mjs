@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto'
 import assert from 'node:assert/strict'
 import {_electron as electron} from 'playwright'
 import {materializeWorkbench,installFixtureDependencies,electronPath,projectRoot} from './product-template-fixture.mjs'
-const require=createRequire(import.meta.url),api=require('../main/templates/components/distribution/product_distribution.cjs'),out=path.join(projectRoot,'run-artifacts/template-rollout-20261029'),home=fs.mkdtempSync(path.join(os.tmpdir(),'bloma-portable-native-')),source=path.join(home,'source'),data=path.join(home,'产品 数据'),installed=path.join(home,'安装 目录')
+const require=createRequire(import.meta.url),api=require('../main/templates/components/distribution/product_distribution.cjs'),out=path.resolve(process.env.BLOMA_TEMPLATE_EVIDENCE_DIR||path.join(projectRoot,'run-artifacts/template-rollout-20261029')),home=fs.mkdtempSync(path.join(os.tmpdir(),'bloma-portable-native-')),source=path.join(home,'source'),data=path.join(home,'产品 数据'),installed=path.join(home,'安装 目录')
 fs.mkdirSync(out,{recursive:true});fs.mkdirSync(data);materializeWorkbench(source)
 const report={at:new Date().toISOString(),scope:'real physical Windows portable runtime; same machine with developer PATH removed; NOT clean-machine acceptance',cases:[],errors:[],unverified:['independent clean machine','public release or installer signing']}
 let app,page
@@ -17,7 +17,7 @@ async function start(root){app=await electron.launch({executablePath:path.join(r
 async function verifyCli(root){const child=spawn(path.join(root,'runtime/electron.exe'),[path.join(root,'app/product_distribution.cjs'),'--verify',root],{env:{...env(),ELECTRON_RUN_AS_NODE:'1'},windowsHide:true,stdio:['ignore','pipe','pipe']});let output='',errors='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>errors+=bytes);await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(Error('PORTABLE_VERIFIER_FAILED '+errors)))});return JSON.parse(output.trim().split(/\r?\n/).at(-1))}
 try{
  await installFixtureDependencies(source,path.join(out,'package-install.log'))
- const speech=await api.buildSpeechResources({projectDir:source,pythonExecutable:path.join(out,'asr-runtime/Scripts/python.exe'),modelsDir:path.join(os.homedir(),'.proma/speech-models/sensevoice-int8')});report.speech={python_version:speech.python_version,packages:speech.packages};
+ const speech=await api.buildSpeechResources({projectDir:source,pythonExecutable:process.env.BLOMA_TEMPLATE_ASR_PYTHON||path.join(projectRoot,'run-artifacts/template-rollout-20261029/asr-runtime/Scripts/python.exe'),modelsDir:path.join(os.homedir(),'.proma/speech-models/sensevoice-int8')});report.speech={python_version:speech.python_version,packages:speech.packages};
  const runtime=path.dirname(electronPath),one=await api.buildDistribution({projectDir:source,runtimeDir:runtime,outputDir:path.join(home,'中文 空格 便携包 v1'),productId:'bloma-example',requiredResources:[{path:'document_runtime.cjs',sha256:sha(path.join(source,'document_runtime.cjs'))},...speech.required_resources]})
  report.bundle_one=one.id;assert.equal((await verifyCli(one.root)).id,one.id);pass('packaged Electron verifies its own physical runtime/app files from a Chinese-space path')
  const store=require(path.join(source,'product_store.cjs')).createDataStore({dataDir:data});store.commit(0,[{id:'retained',type:'note',expectedRevision:0,data:{name:'保留用户资料',text:'cannot lose this'}}])

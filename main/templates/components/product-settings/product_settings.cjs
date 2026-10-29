@@ -2,7 +2,7 @@
 const {randomUUID}=require('node:crypto')
 const {AIService}=require('./ai_service.cjs')
 const {validateRoutes}=require('./ai_routes.cjs')
-const {createSecretStore}=require('./ai_secrets.cjs')
+const {createSecretStore,cleanupStagedSecrets}=require('./ai_secrets.cjs')
 
 function createProductSettings({dataDir,safeStorage}) {
   let active, lastCheck
@@ -34,7 +34,11 @@ function createProductSettings({dataDir,safeStorage}) {
         secrets.set(id,key);staged.push(id);config.routes[name].api_key_env=id
       }
       ai.saveSettings(dataDir,config,input.revision)
-    }catch(error){for(const id of staged)secrets.remove(id);throw error}
+    }catch(error){
+      const cleanup=cleanupStagedSecrets(secrets,staged,()=>ai.settings(dataDir).routes.map(row=>row.api_key_env))
+      if(cleanup.uncertain)throw Error('SETTINGS_SAVE_OUTCOME_UNKNOWN')
+      throw error
+    }
     cancel();lastCheck=undefined
     return read()
   }
@@ -59,7 +63,7 @@ function createProductSettings({dataDir,safeStorage}) {
   // The bridge exposes no secret getter, arbitrary channel, or arbitrary AI request.
   return {read,save,check,cancel,ai}
 }
-const errors=new Set(['AI_SETTINGS_STALE','SETTINGS_ENCRYPTION_UNAVAILABLE','SETTINGS_INPUT_INVALID','SETTINGS_CHECK_CONSENT_REQUIRED','SETTINGS_CHECK_BUSY','AI_ROUTE_INVALID','AI_ROUTES_INVALID','AI_SECRET_VALUE_INVALID'])
+const errors=new Set(['AI_SETTINGS_STALE','SETTINGS_SAVE_OUTCOME_UNKNOWN','SETTINGS_ENCRYPTION_UNAVAILABLE','SETTINGS_INPUT_INVALID','SETTINGS_CHECK_CONSENT_REQUIRED','SETTINGS_CHECK_BUSY','AI_ROUTE_INVALID','AI_ROUTES_INVALID','AI_SECRET_VALUE_INVALID'])
 async function dispatchSettings(backend,method,input){
   if(!['read','save','check','cancel'].includes(method))return{ok:false,code:'SETTINGS_METHOD_INVALID'}
   try{return{ok:true,value:await backend[method](input)}}catch(error){return{ok:false,code:errors.has(error?.message)?error.message:'SETTINGS_OPERATION_FAILED'}}

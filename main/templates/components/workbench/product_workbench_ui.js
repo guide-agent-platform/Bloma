@@ -4,7 +4,7 @@
  const say=text=>{$('notice').textContent=text}
  async function call(method,input){const result=await api[method](input);if(!result.ok)throw result;return result.value}
  function button(label,fn){const item=document.createElement('button');item.type='button';item.textContent=label;item.onclick=fn;return item}
- async function perform(fn,message){if(busy)return;busy=true;try{const value=await fn();say(message);await refresh(true);return value}catch(error){say((error.next??'操作失败，请核对设置与当前状态')+' ['+(error.code??'UNKNOWN')+']')}finally{busy=false}}
+ async function perform(fn,message){if(busy)return;busy=true;try{const value=await fn();say(value?.archived===true?'该任务已归档，未重新执行；请查看已有资料或结果':message);await refresh(true);return value}catch(error){say((error.next??'操作失败，请核对设置与当前状态')+' ['+(error.code??'UNKNOWN')+']')}finally{busy=false}}
  async function query(){
   const epoch=++queryEpoch,value=await call('query',{query:$('query').value,type:$('type').value||undefined,sort:$('sort').value,page:listing?.page??1,selected:[...selected]})
   if(epoch!==queryEpoch)return
@@ -27,7 +27,7 @@
    if(value.image){$('preview-image').src=value.image;$('preview-image').hidden=false}
    const row=value.record
    const modeLabel={vision:'AI图片理解',ocr:'本机文字识别',audio:'音频转写'},stateLabel={pending:'写入结果待核对',unknown:'写入结果未知，请先核对外部系统',done:'已同步',rejected:'服务拒绝写入',not_applied:'已核对，确认未写入'}
-   $('record-detail').textContent=row.type==='document'?row.data.document.blocks.map(item=>item.text).join('\n'):row.type==='analysis'?modeLabel[row.data.mode]+' · '+(row.data.corrected?'已人工校正':'结果待核对')+'\n原始结果：'+row.data.originalText:row.type==='asset'?'来源已保存，大小 '+row.data.bytes+' 字节。请选择处理方式。':row.type==='import_preview'?value.previewRows.map(item=>item.name+'：'+(item.ok?'可提交':'解析失败')+'\n'+item.summary).join('\n\n'):row.type==='outbound'?stateLabel[row.data.status]:row.type==='remote'?Object.entries(row.data.fields).map(([name,value])=>name+'：'+String(value)).join('\n'):'状态已保存，可在关联操作中核对。'
+   $('record-detail').textContent=row.type==='document'?row.data.document.blocks.map(item=>item.text).join('\n'):row.type==='analysis'?modeLabel[row.data.mode]+' · '+(row.data.corrected?'已人工校正':'结果待核对')+'\n原始结果：'+row.data.originalText:row.type==='asset'?'来源已保存，大小 '+row.data.bytes+' 字节。请选择处理方式。':row.type==='import_preview'?value.previewRows.map(item=>item.name+'：'+(item.ok?'可提交':'解析失败')+'\n'+item.summary).join('\n\n'):row.type==='outbound'?(!row.data.destination_scope?'该旧记录未绑定发送目标，请先核对。':stateLabel[row.data.status]+'\n目标：'+row.data.destination_url):row.type==='remote'?Object.entries(row.data.fields).map(([name,value])=>name+'：'+String(value)).join('\n'):'状态已保存，可在关联操作中核对。'
    $('correction').value=row.type==='analysis'?row.data.text:''
    if(value.source)$('mode').value=value.source.kind==='audio'?'audio':'vision'
    if(row.type==='outbound')$('reconcile-id').value=row.id
@@ -84,6 +84,7 @@
  $('export').onclick=()=>perform(()=>call('export'),'备份操作已结束，请核对所选文件')
  $('restore').onclick=()=>perform(async()=>{if(!window.confirm('将恢复所选备份，当前记录会先备份。继续？'))return;await call('restore',{revision:status.revision});focusEpoch++;current=null;focusId=null;$('source').textContent='恢复后请重新选择资料';$('preview-image').hidden=true;$('correction').value=''},'恢复操作已结束，请核对当前资料')
  $('delete').onclick=()=>perform(async()=>{if(!window.confirm('删除选中记录？仍被其他记录引用的资料将保留并报告错误。'))return;const result=await call('remove',{ids:[...selected]});$('batch-results').textContent=JSON.stringify(result.map(row=>({id:row.id,ok:row.ok,code:row.code})),null,2);selected.clear();focusEpoch++;current=null;focusId=null;$('source').textContent='请选择资料';$('record-detail').textContent='';$('preview-image').hidden=true;$('correction').value=''},'逐项删除结果已更新')
+ $('archive-jobs').onclick=()=>perform(()=>{const ids=status.jobs.filter(row=>['succeeded','failed','cancelled'].includes(row.state)&&!row.needs_review&&!row.effect_pending).map(row=>row.id);if(!ids.length)throw{code:'JOBS_ARCHIVE_REVIEW_REQUIRED',next:'没有可归档的已结束任务，待核对任务会保留'};return call('archiveJobs',{ids})},'已归档结束任务，去重凭据仍保留；不会重跑业务')
  $('reconcile').onclick=()=>perform(()=>call('reconcile',{operationId:$('reconcile-id').value,revision:status.sync.revision,state:$('reconcile-state').value,remoteId:$('remote-id').value}),'核对结果已记录；不会自动重发')
  for(const id of ['query','type','sort'])$(id).addEventListener(id==='query'?'input':'change',()=>{if(id!=='sort')selected.clear();listing={page:1};query().catch(error=>say('查询失败，请重新载入'))})
  $('prev').onclick=()=>{listing.page--;query()};$('next').onclick=()=>{listing.page++;query()}
