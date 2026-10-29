@@ -104,12 +104,12 @@ export async function prepareSpeechCapability(projectId:string,root:string,signa
   }finally{preparing.delete(projectId)}
 }
 export function buildCapabilityTools(projectId:string,policy:ReturnType<typeof createSoftwareCollaborationPolicy>,parent:boolean):AgentLoopTool[]{
-  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查speech、documents、ocr、http、ai、vision或product-settings产品组件；ai为通用文本/图片服务及路由模板。默认speech，不下载、不发模型请求、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:CAPABILITY_NAMES}}},
+  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查schema所列产品组件的契约、文件和运行时；含数据、任务、HTTP工作流、文件、多模态、查询、工作台与分发/对照。默认speech，不下载、不发模型请求、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:CAPABILITY_NAMES}}},
     execute:async(input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');if(Object.keys(input).some(key=>key!=='capability')||input.capability!==undefined&&!CAPABILITY_NAMES.includes(String(input.capability)))throw Error('CAPABILITY_ARGUMENTS_INVALID');
       const root=findProject(projectId).root_path
       const result=integrationCapability(input.capability)?await inspectIntegrationCapability(projectId,root,input.capability,ctx.signal):await(input.capability==='documents'?inspectDocumentCapability:inspectSoftwareCapabilities)(projectId,root,ctx.signal)
       return{output:redactSoftwareOutput(JSON.stringify(result))}}catch(error){return{output:redactSoftwareOutput(String(error)),isError:true}}}}
-  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'物化成熟产品组件：product-settings产品AI设置UI及独立Electron适配；ai通用AI服务+可编辑公开路由，vision沿兼容入口共用AI服务；speech/documents/ocr/http保持原用法。保护已有代码，公开路由可修改但不含明文Key；不调用模型或签发PASS。',
+  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'按schema选择并物化成熟组件：设置/数据/任务/HTTP工作流/文件/多模态/查询/工作台/分发/对照；旧ai/vision/speech/documents/ocr/http保持兼容。保护已有代码，公开路由可修改但不含明文Key；不调用模型或签发PASS。',
     input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:CAPABILITY_NAMES},install_dependencies:{type:'boolean'},download_models:{type:'boolean'},language:{type:'string',maxLength:40}}},
     execute:async(input,ctx)=>{
       try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||!CAPABILITY_NAMES.includes(String(input.capability))||Object.keys(input).some(key=>!['capability','install_dependencies','download_models','language'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean')||input.language!==undefined&&(input.capability!=='ocr'||typeof input.language!=='string'||input.language.length>40||!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.language)))throw Error('CAPABILITY_ARGUMENTS_INVALID')

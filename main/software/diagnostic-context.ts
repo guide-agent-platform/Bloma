@@ -8,6 +8,7 @@ import {readSoftwareRunState} from './run-state'
 import {softwareStatusView} from './state-view'
 import {activeSoftwareCommands,redactSoftwareOutput} from './process-manager'
 import {activeDebugSessionId,readDebugSession} from './debug-sessions'
+import {componentContracts} from './component-contracts'
 
 /** One bounded navigation view. Historical receipts are never fresh PASS. */
 export function softwareDiagnosticContext(projectId:string,sessionId:string){
@@ -29,7 +30,7 @@ export function softwareDiagnosticContext(projectId:string,sessionId:string){
  try{const id=activeDebugSessionId(projectId,sessionId);if(id){const state=readDebugSession(projectId,sessionId,id);debug={available:true,id,state:state.state,source:state.source,version:state.version,stale:state.source!==source||state.stale,screenshot:state.screenshot,
   observations:state.observations.slice(-6).map(row=>({kind:row.kind,message:redactSoftwareOutput(row.message).slice(0,600)})),next:'当前截图用view_image({debug_session_id})；源码变化先inspect_app重新观察'}}}catch{debug={available:false,error:'本会话调试记录不可用'}}
  const scrub=(value:unknown):unknown=>typeof value==='string'?redactSoftwareOutput(value):Array.isArray(value)?value.map(scrub):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,scrub(item)])):value
- return scrub({project_id:projectId,current_source:source,status:softwareStatusView(projectId,true),run_error:runError,current_error:run?.error?.slice(0,1600),historical_failure:run?.last_failure&&{error:run.last_failure.error.slice(0,800)},
+ return scrub({project_id:projectId,current_source:source,operation_id:project.lean_operation_id,component_navigation:componentContracts().map(row=>({id:row!.id,source:row!.source_revision,tests:row!.verification.tests,scope:'navigation_not_product_pass'})),status:softwareStatusView(projectId,true),run_error:runError,current_error:run?.error?.slice(0,1600),historical_failure:run?.last_failure&&{error:run.last_failure.error.slice(0,800)},
   commands:activeSoftwareCommands(projectId,sessionId).map(row=>({process_id:row.process_id,state:row.state})),verification,debug,
   next:'已有命令用read_process接续；按已记录expected/actual定位。未知原因保留未知，截图附上不等于已审阅；历史记录不签发当前PASS。不重置预算或重复副作用。'})
 }

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "frozen_from_commit": "65757dc",
+  "scope": "requirements fixed before workflow implementation; controlled services and real services kept separate",
+  "scenarios": [
+    {
+      "id": "C1",
+      "requirement": "**C1 图片记录同步助手**：两张内容不同的图片 A/B，即使同名也有不同来源身份。分别分析、人工修正、同步到不同外部记录；显示各自来源/结果/同步状态。A慢返回不得覆盖B。相同版本重复提交不能重复创建；网络提交结果未知须核对，取消不表示远端撤销。重开后原图和校正结果可定位。先真实图片+本地受控视觉线协议与API；供应商视觉质量另验。",
+      "required_cases": [
+        "source_identity",
+        "stale_response",
+        "correction",
+        "sync_deduplication",
+        "unknown_write_reconciliation",
+        "reopen"
+      ]
+    },
+    {
+      "id": "C2",
+      "requirement": "**C2 团队资料归档工作台**：混合文档/图片/PCM16 WAV与损坏文件，显示逐项结果；坏输入不得使成功项丢失。同名不同内容分开、重复内容按显式策略处理。取消处理中任务后不产生迟到记录。检索切换后内容、页码、计数、稳定选择ID一致；导出读回保留来源及校正。真实文件解析/OCR/ASR与模型结果分别标识。",
+      "required_cases": [
+        "mixed_bad_inputs",
+        "same_name_identity",
+        "cancellation",
+        "query_switch",
+        "export_readback",
+        "reopen"
+      ]
+    },
+    {
+      "id": "C3",
+      "requirement": "**C3 API事件跟进台**：拉取至少两页，含重叠记录；中途失败不前移已提交游标。只有全部记录事务提交后更新游标。签名错误拒绝；相同事件相同负载不重放，相同ID不同负载拒绝；旧版本事件不得覆盖新版本。远端写入已完成但回执丢失时显示待核对，重开不自动再发。",
+      "required_cases": [
+        "page_commit",
+        "signature",
+        "duplicate_conflict",
+        "out_of_order",
+        "unknown_write",
+        "reopen"
+      ]
+    }
+  ]
+}

@@ -21,6 +21,12 @@ it('reports missing executable errors without leaking active slots or crashing o
   const result=await run(`(async()=>{const b=require('./speech_bridge.cjs'),errors=[];for(let i=0;i<3;i++)try{await b.transcribeWav('fixture-only')}catch(e){errors.push(e.message)}console.log(JSON.stringify(errors))})()`,join(home,'missing-python'))
   const errors=JSON.parse(result.stdout);expect(errors).toHaveLength(3);expect(errors.every((error:string)=>error.includes('ENOENT'))).toBe(true)
 })
+it.skipIf(!python)('uses the product-specific data directory passed by its caller',async()=>{
+ const specific=join(home,'product-specific');mkdirSync(specific)
+ writeFileSync(join(root,'speech_worker.py'),`import json,os\nprint(json.dumps({'ok':True,'text':os.environ['APP_DATA_DIR']}))\n`)
+ const result=await run(`require('./speech_bridge.cjs').transcribeWav('fixture-only',{dataDir:${JSON.stringify(specific)}}).then(console.log,e=>{console.error(e);process.exit(1)})`)
+ expect(result.stdout.trim()).toBe(specific)
+})
 it.skipIf(!python)('bounds concurrency and cancellation/timeout while reaping only the workers it created',async()=>{
   writeFileSync(join(root,'speech_worker.py'),`import os,time\nfrom pathlib import Path\nPath(os.environ['APP_DATA_DIR'],str(os.getpid())+'.started').write_text('owned fixture')\ntime.sleep(20)\n`)
   const result=await run(`(async()=>{const b=require('./speech_bridge.cjs'),a=new AbortController();const jobs=[b.transcribeWav('fixture-only',{signal:a.signal}),b.transcribeWav('fixture-only',{signal:a.signal}),b.transcribeWav('fixture-only')];setTimeout(()=>a.abort(),300);const values=await Promise.allSettled(jobs);try{await b.transcribeWav('fixture-only',{timeoutMs:100})}catch(e){console.log(e.message)}console.log(JSON.stringify(values.map(v=>v.reason?.message)))})()`)

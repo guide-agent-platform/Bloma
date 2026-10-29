@@ -5,14 +5,16 @@ const { isAbsolute, join } = require('node:path')
 let active = 0
 exports.transcribeWav = function transcribeWav(file, options = {}) {
   const python = process.env.BLOMA_SPEECH_PYTHON, timeout = options.timeoutMs ?? 90000
+  const dataDir = options.dataDir ?? process.env.APP_DATA_DIR
   if (!python || !isAbsolute(python) || typeof file !== 'string' || !Number.isSafeInteger(timeout) || timeout < 100 || timeout > 120000)
     return Promise.reject(Error('ASR_PREPARED_PYTHON_AND_WAV_REQUIRED'))
+  if (typeof dataDir !== 'string' || !isAbsolute(dataDir)) return Promise.reject(Error('ASR_DATA_DIR_REQUIRED'))
   if (options.signal?.aborted) return Promise.reject(Error('ASR_CANCELLED'))
   if (active >= 2) return Promise.reject(Error('ASR_BUSY'))
   return new Promise((resolve, reject) => {
     active++
     const child = spawn(python, ['-I', '-B', '-X', 'utf8', join(__dirname, 'speech_worker.py'), file], {
-      cwd: __dirname, env: process.env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe']
+      cwd: __dirname, env: { ...process.env, APP_DATA_DIR: dataDir }, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe']
     })
     let stdout = '', stderr = '', failure, stopping = false
     child.stdout?.setEncoding('utf8'); child.stderr?.setEncoding('utf8')

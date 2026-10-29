@@ -1,0 +1,1 @@
+require('./document_runtime.cjs').extractDocument(process.argv[2],{dataDir:process.argv[3]}).then(document=>process.stdout.write(JSON.stringify({ok:true,document}))).catch(error=>{process.stdout.write(JSON.stringify({ok:false,code:/^DOCUMENT_[A-Z_]+$/.test(error?.message)?error.message:'FILES_PARSE_FAILED'}));process.exitCode=1})

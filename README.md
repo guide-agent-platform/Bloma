@@ -14,9 +14,9 @@
 
 > [通用AI服务与效率支持](docs/05_PROJECT_PLAN/ai-service-efficiency-20261029.md)：文本/图片共用AIService，公开路由模板与运行时产品Key分开，支持OpenAI聊天兼容和Anthropic消息协议；提供组件组合目录、故障现场汇总与静态关联测试候选。正式交付门不跳过，速度收益另做实测。
 
-> 后续模板实施总入口：[产品模板与生成效率完整计划表](docs/05_PROJECT_PLAN/product-template-roadmap-20261029.md)。覆盖8类产品模板、组件契约、诊断/选测支撑、依赖批次、里程碑和固定场景验收；优先多模态与HTTP/Webhook。B0组件契约与B1首期AI设置现已实施，连接器设置仍随B4a待办；见[B0/B1实施记录](docs/05_PROJECT_PLAN/template-b0-b1-20261029.md)。
+> 后续模板实施总入口：[产品模板与生成效率完整计划表](docs/05_PROJECT_PLAN/product-template-roadmap-20261029.md)。覆盖8类产品模板、组件契约、诊断/选测支撑、依赖批次、里程碑和固定场景验收；优先多模态与HTTP/Webhook。B0–B8本机模板、连接器设置、组合工作台、独立资源分发与B9对照工具已实施；真实服务、干净系统及真实效率对照仍待条件。见[剩余批次交付记录](docs/05_PROJECT_PLAN/template-rollout-result-20261029.md)。
 
-> 当前会话接手（2026-10-29）：[模板与AI服务会话交接](docs/05_PROJECT_PLAN/session-handoff-templates-20261029.md)，包含实际提交、未提交用户改动、代码/证据地图、未完成项及B0/B1后续入口。
+> 当前会话接手（2026-10-29）：[模板与AI服务会话交接](docs/05_PROJECT_PLAN/session-handoff-templates-20261029.md)，包含实际提交、未提交用户改动、当前模板交付入口及仍待真实条件的验收。
 
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 

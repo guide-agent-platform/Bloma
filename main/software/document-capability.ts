@@ -52,6 +52,7 @@ export async function prepareDocumentCapability(projectId: string, root: string,
 }
 
 export const DOCUMENT_GUIDANCE = {
+  workflow: '批量产品流程可prepare_software_capability({capability:"file-io"})，使用createFileWorkflow导入内容快照、受监管worker预览、显式commitPreview及含源文件字节的归档；解析器依赖沿documents准备。界面示例见workbench，不将文件扩展名或预览结束当作提交完成。',
   prepare: 'inspect_software_capabilities({capability:"documents"})；prepare_software_capability({capability:"documents",install_dependencies:true})物化组件并按npm工程安装缺少的固定依赖。其它包管理器保留原锁文件，按正常命令安装后重试；默认不联网安装。',
   usage: 'Node后端：const {extractDocument,searchDocuments,verifyCitation}=require("./document_runtime.cjs"); const doc=await extractDocument(file,{dataDir:process.env.APP_DATA_DIR}); const result=searchDocuments([doc],"关键词"); verifyCitation([doc],result.hits[0]);',
   identity: 'documentId绑定原文件SHA-256，blockId绑定原文件/位置/文本；笔记和AI消息另保留自己的资料/消息/步骤身份，禁止全局最后回答兜底。引用必须核对documentId、blockId、start、end、quote，并从真实原文显示。',
