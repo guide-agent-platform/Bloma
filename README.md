@@ -16,9 +16,11 @@
 
 > 后续模板实施总入口：[产品模板与生成效率完整计划表](docs/05_PROJECT_PLAN/product-template-roadmap-20261029.md)。覆盖8类产品模板、组件契约、诊断/选测支撑、依赖批次、里程碑和固定场景验收；优先多模态与HTTP/Webhook。当前为计划文档，后续模板尚未据此自动开工。
 
+> 当前会话接手（2026-10-29）：[模板与AI服务会话交接](docs/05_PROJECT_PLAN/session-handoff-templates-20261029.md)，包含实际提交、未提交用户改动、代码/证据地图、未完成项及B0/B1后续入口。
+
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 
-> 当前执行接手：[Harness 改进交接](docs/05_PROJECT_PLAN/harness-improvement-handoff-20261027.md)，包含已完成版本、验证边界和剩余批次的执行入口。
+> 历史Harness接手（2026-10-27）：[Harness 改进交接](docs/05_PROJECT_PLAN/harness-improvement-handoff-20261027.md)，保留当时已完成版本、验证边界和剩余批次记录；当前入口以上述会话交接与模板总计划为准。
 
 > 历史接线（2026-10-20）：平台生成Windows Python/WebView2桌面应用，[制作流程v2](docs/05_PROJECT_PLAN/production-workflow-v2-20261020.md)保留当时设计；代码清理、硬编码修复和本机旧项目清理结果见[清理实施记录](docs/05_PROJECT_PLAN/hardcoding-cleanup-execution-20261020.md)。
 
