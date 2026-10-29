@@ -4,10 +4,14 @@ import { join } from 'node:path'
 import { mainRootDir } from '../platform/paths'
 
 export const SETTINGS_FILES = ['product_settings.cjs', 'product_settings_ui.js', 'product_settings.css', 'product_settings.html', 'product_settings_electron.cjs', 'product_settings_preload.cjs'] as const
+export const PRODUCT_FILES = { 'data-store':['product_store.cjs'], jobs:['product_store.cjs','product_jobs.cjs'] } as const
+const directories:Record<string,string>={'product_store.cjs':'data-store','product_jobs.cjs':'jobs'}
 export function componentSource(name: string) {
-  return join(mainRootDir(), 'templates', SETTINGS_FILES.includes(name as typeof SETTINGS_FILES[number]) ? 'components/product-settings' : 'tools', name)
+  return join(mainRootDir(), 'templates', SETTINGS_FILES.includes(name as typeof SETTINGS_FILES[number]) ? 'components/product-settings' : directories[name] ? 'components/'+directories[name] : 'tools', name)
 }
 const specs = {
+  'data-store':{title:'产品记录与恢复',files:PRODUCT_FILES['data-store'],dependencies:{},schema:'createDataStore({dataDir,name,schemaVersion,validate}); read/commit/backup/restore/migrate',entry:'createDataStore',tests:['tests/unit/software/product-foundation.test.ts'],limits:'本机JSON最多32MiB/2万记录；非云数据库；锁不自动破坏'},
+  jobs:{title:'产品业务任务',files:PRODUCT_FILES.jobs,dependencies:{},schema:'createJobQueue({dataDir,handlers,concurrency,limit}); enqueue/cancel/resume/list/subscribe/close',entry:'createJobQueue / recoverJobLock',tests:['tests/unit/software/product-foundation.test.ts'],limits:'本机单owner；恢复只重排业务步骤；副作用未知须人工核对，不接管PID'},
   'product-settings': { title: '产品 AI 设置', files: ['ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs',...SETTINGS_FILES], dependencies: {electron:'39.x (独立窗口适配)'}, schema: 'read(); save({config,revision,keys}); check({route,revision,consent:true}); cancel()', entry: 'createProductSettings + mountProductSettings', tests: ['tests/unit/software/product-settings.test.ts','scripts/verify-product-settings.mjs'], limits: 'Node/Electron 产品适配；HTTP业务配置后续B4a；保存不联网；连接不认证效果' },
   ai: { title: '通用 AI 服务', files: ['ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs'], dependencies: {}, schema: 'AI_SERVICE.template.json + ai_routes.cjs:validateRoutes', entry: 'AIService.generate/settings/saveSettings', tests: ['tests/unit/software/ai-service.test.ts'], limits: '非流式文本/图片；真实供应商及质量待验' },
   http: { title: 'HTTP / Webhook', files: ['http_connector.cjs','webhook_inbox.cjs'], dependencies: {}, schema: 'createHttpConnector({baseUrl,methods,auth,network}); verifyWebhook({secret,rawBody,timestamp,signature})', entry: 'createHttpConnector.request / createWebhookInbox', tests: ['tests/unit/software/http-connector.test.ts'], limits: '固定来源 JSON / 通用 HMAC；无 OAuth/公网托管；写操作不重试' },
@@ -23,11 +27,15 @@ const routeSchema = {
   },
 }
 const publicSchemas: Record<string, unknown> = {
+  'data-store':{type:'object',required:['dataDir'],properties:{dataDir:{type:'string'},name:{type:'string',pattern:'^[A-Za-z0-9_-]{1,120}$'},schemaVersion:{type:'integer',minimum:1}}},
+  jobs:{type:'object',required:['dataDir','handlers'],properties:{dataDir:{type:'string'},concurrency:{type:'integer',minimum:1,maximum:8},limit:{type:'integer',minimum:1,maximum:10000}}},
   ai: {type:'object',additionalProperties:false,required:['version','default_route','routes'],properties:{version:{const:1},default_route:{type:'string'},routes:{type:'object',minProperties:1,maxProperties:16,propertyNames:{pattern:'^[A-Za-z0-9_-]{1,64}$'},additionalProperties:routeSchema}},semantic_validation:'ai_routes.cjs:validateRoutes; default_route must exist; endpoint parsed as URL without userinfo/query/hash'},
   http: {type:'object',required:['baseUrl'],properties:{baseUrl:{type:'string',format:'uri'},methods:{type:'array',items:{enum:['GET','POST','PUT','PATCH','DELETE']}},network:{enum:['public','loopback']},timeoutMs:{type:'integer'}},semantic_validation:'http_connector.cjs:createHttpConnector/request; credentials backend runtime only; DNS/origin checked at request time'},
   documents: {type:'object',required:['dataDir'],properties:{dataDir:{type:'string'}},semantic_validation:'document_runtime.cjs:extractDocument; real path within dataDir; limits enforced by runtime; signal is runtime-only'},
 }
 const behaviors: Record<string, unknown> = {
+  'data-store':{output:'snapshot schema_version/revision/records; stable id/entity revision/refs',errors:'STORE_STALE / STORE_ENTITY_STALE / STORE_SCHEMA_INVALID / STORE_RECORD_INVALID; filesystem errors',cancellation:'同步原子事务；不在中途提交半份记录',effects:'CAS records; failed migration leaves old source; restore creates pre-restore backup'},
+  jobs:{output:'job id/type/input/state/progress/checkpoint/result/needs_review',errors:'JOBS_*; handler errors only safe codes, no original raw text',cancellation:'target AbortSignal; waiting for handler settlement before terminal; late update discarded',effects:'bounded queue; durable checkpoint/effect_pending; interrupted effects require review before explicit resume'},
   ai: {output:'{ok,kind,text?,input_images?,protocol?}',errors:'unconfigured/auth_error/rate_limited/invalid_response/cancelled/timeout/model_error',cancellation:'generate({signal:AbortSignal}); request aborted, no retry',effects:'explicit generate sends one model request; settings reads public data; saveSettings writes public config with revision CAS'},
   http: {output:'request -> {ok,status?,data?,kind?}; verifyWebhook -> {valid,kind?,eventDigest?}',errors:'invalid configuration throws HTTP_*; request returns bounded category without response body',cancellation:'request(relative,{signal,timeoutMs}); no automatic retries',effects:'request may commit remote write before cancellation; verifyWebhook signature only; inbox pending needs business reconciliation'},
   documents: {output:'extractDocument -> documentId/blocks; searchDocuments -> hits/total; verifyCitation -> valid/reason',errors:'throws DOCUMENT_*; parser errors are not valid empty documents',cancellation:'no in-process AbortSignal; run parsing in a supervised worker/process with timeout and cancellation',effects:'reads source files within dataDir; no business persistence or model request'},

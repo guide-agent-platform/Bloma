@@ -2,10 +2,10 @@ import {createHash} from 'node:crypto'
 import {existsSync,lstatSync,readFileSync,writeFileSync} from 'node:fs'
 import {join} from 'node:path'
 import {executeSoftwareCommand} from './command-runtime'
-import {componentContract,componentSource,componentContracts,SETTINGS_FILES} from './component-contracts'
+import {componentContract,componentSource,componentContracts,SETTINGS_FILES,PRODUCT_FILES} from './component-contracts'
 
 const AI_FILES=['ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs'] as const
-export const INTEGRATION_COMPONENTS={'product-settings':[...AI_FILES,...SETTINGS_FILES],ocr:['ocr_runtime.cjs','ocr_worker.ps1'],http:['http_connector.cjs','webhook_inbox.cjs'],ai:['ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs'],vision:['vision_client.cjs','ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs']} as const
+export const INTEGRATION_COMPONENTS={...PRODUCT_FILES,'product-settings':[...AI_FILES,...SETTINGS_FILES],ocr:['ocr_runtime.cjs','ocr_worker.ps1'],http:['http_connector.cjs','webhook_inbox.cjs'],ai:['ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs'],vision:['vision_client.cjs','ai_service.cjs','ai_routes.cjs','ai_secrets.cjs','AI_SERVICE.template.json','http_connector.cjs']} as const
 export type IntegrationCapability=keyof typeof INTEGRATION_COMPONENTS
 function components(root:string,kind:IntegrationCapability){return INTEGRATION_COMPONENTS[kind].map(name=>{
   const bytes=readFileSync(componentSource(name)),target=join(root,name),hash=(value:Buffer)=>createHash('sha256').update(value).digest('hex')
@@ -18,7 +18,7 @@ export async function inspectIntegrationCapability(projectId:string,root:string,
   const files=components(root,kind),materialized=files.every(file=>['platform_component','project_config'].includes(file.state))
   let runtime:Record<string,unknown>|undefined,error:string|undefined
   if(materialized){
-    const source=kind==='ocr'?`require('./ocr_runtime.cjs').inspectOcr().then(r=>console.log(JSON.stringify(r))).catch(e=>{console.error(e.message);process.exitCode=1})`:kind==='vision'||kind==='ai'||kind==='product-settings'?`const{AIService}=require('./ai_service.cjs');${kind==='product-settings'?`if(typeof require('./product_settings.cjs').createProductSettings!=='function')throw Error('SETTINGS_BACKEND_MISSING');`:''}${kind==='vision'?`if(typeof require('./vision_client.cjs').VisionClient!=='function')throw Error('VISION_CLIENT_MISSING');`:''}console.log(JSON.stringify({node:process.versions.node,protocols:['openai-chat','anthropic-messages'],settings:new AIService().settings()}))`:`require('./http_connector.cjs');require('./webhook_inbox.cjs');console.log(JSON.stringify({node:process.versions.node,protocol:'json-http-and-hmac-sha256'}))`
+    const source=kind==='data-store'||kind==='jobs'?`require('./product_store.cjs');${kind==='jobs'?"require('./product_jobs.cjs');":''}console.log(JSON.stringify({node:process.versions.node,scope:'module_load_only'}))`:kind==='ocr'?`require('./ocr_runtime.cjs').inspectOcr().then(r=>console.log(JSON.stringify(r))).catch(e=>{console.error(e.message);process.exitCode=1})`:kind==='vision'||kind==='ai'||kind==='product-settings'?`const{AIService}=require('./ai_service.cjs');${kind==='product-settings'?`if(typeof require('./product_settings.cjs').createProductSettings!=='function')throw Error('SETTINGS_BACKEND_MISSING');`:''}${kind==='vision'?`if(typeof require('./vision_client.cjs').VisionClient!=='function')throw Error('VISION_CLIENT_MISSING');`:''}console.log(JSON.stringify({node:process.versions.node,protocols:['openai-chat','anthropic-messages'],settings:new AIService().settings()}))`:`require('./http_connector.cjs');require('./webhook_inbox.cjs');console.log(JSON.stringify({node:process.versions.node,protocol:'json-http-and-hmac-sha256'}))`
     const result=await executeSoftwareCommand({projectId,root,signal,command:['node','-e',source],timeoutMs:30000})
     if(result.code===0)runtime=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)!);else error=result.stderr.slice(-1200)
   }
@@ -60,7 +60,7 @@ export const AI_SERVICE_GUIDANCE={
 }
 export const PRODUCT_COMPONENT_RECIPES={
   contracts:componentContracts(),
-  components:[{id:'product-settings',provides:['产品自己的AI设置界面','隔离后台桥','OS加密Key'],prepare:'product-settings',topic:'ai-service'},{id:'ai',provides:['文本/图片请求','公开多路由','运行时Key注入'],prepare:'ai',topic:'ai-service'},{id:'documents',provides:['资料文本','字面检索','精确引用'],prepare:'documents',topic:'documents'},{id:'http',provides:['JSON API','Webhook收件辅助'],prepare:'http',topic:'http-integration'},{id:'speech',provides:['已有ASR及文件转写桥'],prepare:'speech',topic:'verification-speech'}],
+  components:[{id:'data-store',provides:['记录CAS','稳定ID/引用','备份/恢复/迁移'],prepare:'data-store',topic:'components'},{id:'jobs',provides:['业务队列/进度','取消/检查点','中断待核对'],prepare:'jobs',topic:'components'},{id:'product-settings',provides:['产品自己的AI设置界面','隔离后台桥','OS加密Key'],prepare:'product-settings',topic:'ai-service'},{id:'ai',provides:['文本/图片请求','公开多路由','运行时Key注入'],prepare:'ai',topic:'ai-service'},{id:'documents',provides:['资料文本','字面检索','精确引用'],prepare:'documents',topic:'documents'},{id:'http',provides:['JSON API','Webhook收件辅助'],prepare:'http',topic:'http-integration'},{id:'speech',provides:['已有ASR及文件转写桥'],prepare:'speech',topic:'verification-speech'}],
   recipes:[{name:'资料问答',uses:['documents','ai'],note:'产品保存来源与消息身份，真实回答与引用质量另验'},{name:'图片分析',uses:['ai'],note:'传真实图片，不以文件名/OCR文字替代视觉输入'},{name:'外部记录助手',uses:['http','ai'],note:'按确认范围组合；写操作和凭据由产品明确配置'}],
   scope:'可复用组件和组合参考，不新增用户需求，不自动安装/调用或证明完整产品通过'}
 export const HTTP_GUIDANCE={
