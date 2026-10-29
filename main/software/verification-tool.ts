@@ -38,13 +38,15 @@ export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<ty
           failed_step: failed ? { id: failed.id, selector: step && 'selector' in step ? step.selector : undefined, has_text: step?.has_text, expected, actual: typeof failed.actual === 'string' ? failed.actual.slice(0, 1600) : failed.actual } : undefined,
           cli: result.core?.host_cli ? { status: result.core.host_cli.status, error: result.core.host_cli.error,
             cases: result.core.host_cli.cases.slice(0, 6).map(item => ({ ...item, actual: item.actual.slice(0, 500), stderr: item.stderr?.slice(-1200) })) } : undefined,
+          cases: result.core?.host_gui?.case_results&&[...result.core.host_gui.case_results.filter(row=>row.status!=='passed'),...result.core.host_gui.case_results.filter(row=>row.status==='passed')].slice(0,16).map(row=>({...row,error:row.error?.slice(0,600)})),
+          case_count:result.core?.host_gui?.case_results?.length,requirements: result.core?.requirements?.slice(0,64), verification_scope:'local_behavior_and_capability_contracts',
           issues: result.security?.issues.slice(0, 8), candidate_id: result.candidate?.id, report: result.report_path, evidence_dir: result.core?.host_gui?.evidence_dir,
           evidence_warnings: result.core?.host_gui?.evidence_warnings,
           independent:result.independent&&('diagnostic'in result.independent?{status:result.independent.status,diagnostic:result.independent.diagnostic,report:result.independent.report_path}:{status:result.independent.status}),
-          next: result.status === 'passed' ? '当前版本通过，可以结束制作；宿主会核对版本后交付。' : '按实际失败修复，再verify_app；不要降低已确认预期。' })),
+          next: result.status === 'passed' ? '当前版本通过，可以结束制作；宿主会核对版本后交付。' : result.failure?.next ?? '按实际失败修复，再verify_app；不要降低已确认预期。' })),
           isError: result.status !== 'passed', feedback: { schema_version: 1, execution: 'completed', source: 'host', scope: 'software_candidate',
             verification: result.status === 'passed' ? 'passed' : result.status === 'failed' ? 'failed' : 'unverified',
-            category: result.failure?.category === 'test_adapter' ? 'verification_harness' : result.status === 'environment_blocked' ? 'environment' : result.status === 'failed' ? 'product_assertion' : 'verification_harness',
+            category: result.failure?.category === 'unknown' ? 'unknown' : ['test_adapter','harness'].includes(result.failure?.category??'') ? 'verification_harness' : result.status === 'environment_blocked' ? 'environment' : result.status === 'failed' ? 'product_assertion' : 'verification_harness',
             recovery: result.status === 'passed' ? 'none' : result.status === 'environment_blocked' ? 'prepare_environment' : 'inspect' } }
       } catch (error) { const summary = String(error); return { output: JSON.stringify({ summary, failure: verificationFailure({ status: 'unverified', summary }, error) }), isError: true } }
     } }

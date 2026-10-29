@@ -2,6 +2,6 @@
 <input id="name"><button id="save">Save</button><span id="count">loading</span><span id="error"></span><div id="items"></div>
 <script src="bridge.js"></script><script>
 async function refresh(){const rows=await App.call('list_items');document.querySelector('#count').textContent=String(Array.isArray(rows)?rows.length:0);document.querySelector('#items').textContent=Array.isArray(rows)?rows.join(','):'';if(!Array.isArray(rows))document.querySelector('#error').textContent=rows.error;}
-document.querySelector('#save').onclick=async()=>{const result=await App.call('add_item',document.querySelector('#name').value);document.querySelector('#error').textContent=result.error||'';await refresh();};
+document.querySelector('#save').onclick=async()=>{const button=document.querySelector('#save');button.disabled=true;try{const result=await App.call('add_item',document.querySelector('#name').value);document.querySelector('#error').textContent=result.error||'';await refresh();}finally{button.disabled=false;}};
 window.addEventListener('DOMContentLoaded',refresh);
 </script></body></html>

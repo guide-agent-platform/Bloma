@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { dirname, isAbsolute, join } from 'node:path';
 import ts from 'typescript';
 import { getPromaHome } from '../../storage/config-paths';
-import type { GuiAcceptanceSuite } from '../desktop/gui-acceptance';
+import type { GuiAcceptanceSuite, GuiAcceptanceResult } from '../desktop/gui-acceptance';
 import { nativeTestInputs } from './native-test-inputs';
 export interface NativeGuiTests {
     layout?: 'project';
@@ -284,6 +284,7 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
     }> = [], covered = new Set<string>(), executed = new Set<string>();
     let interactions = 0, assertions = 0, failed = false;
     const bootstrapErrors: string[] = [];
+    const case_results: NonNullable<GuiAcceptanceResult['case_results']> = suite.native_tests!.cases.map(row=>({name:row.name,feature:row.feature,status:'not_run',assertions:0,interactions:0}));
     for (const report of reports) {
         if (report.code !== 0)
             failed = true;
@@ -310,6 +311,13 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
             if (event.type === 'test:fail')
                 failed = true;
             if (ids.length) {
+                const row=case_results.find(row=>row.name===event.name)!
+                const counts=trace.cases.find((c:{name:string})=>c.name===event.name)
+                if(counts){row.assertions+=Number.isSafeInteger(counts.assertions)&&counts.assertions>=0?counts.assertions:0;row.interactions+=Number.isSafeInteger(counts.interactions)&&counts.interactions>=0?counts.interactions:0}
+                const status=event.skip||event.todo?'not_run':passed?'passed':event.type==='test:fail'&&!String(event.error).includes('GUI_NATIVE_ASSERTION_REQUIRED')?'failed':'unverified'
+                // A later success must never erase an earlier failure of this case.
+                if(row.status!=='failed')row.status=status==='failed'?'failed':row.status==='unverified'||status==='unverified'?'unverified':status
+                if(event.error)row.error=String(event.error).slice(0,4000)
                 if (passed) {
                     ids.forEach((id: string) => covered.add(id));
                     executed.add(event.name);
@@ -319,7 +327,8 @@ export function nativeGuiObservations(suite: GuiAcceptanceSuite, reports: Array<
         }
     }
     const missing = suite.covers.filter(id => !covered.has(id));
-    const finish=<T>(value:T)=>({...value,native_evidence:{interactions,assertions}})
+    const finish=<T extends {status:string;error?:string}>(value:T)=>({...value,case_results,native_evidence:{interactions,assertions},
+      ...(value.status==='passed'?{}:{failure_kind:(bootstrapErrors.length&&!steps.length?'bootstrap':value.status==='failed'?'assertion':'incomplete') as GuiAcceptanceResult['failure_kind']})})
     if (!steps.length && !assertions && failed && bootstrapErrors.length) return finish({ status: 'unverified' as const, steps,
         error: `GUI_NATIVE_BOOTSTRAP_FAILED: ${bootstrapErrors[0].slice(0, 4000)}` });
     if(!assertions&&steps.length&&steps.every(step=>!step.passed&&String((step.actual as {error?:string}).error).includes('GUI_NATIVE_ASSERTION_REQUIRED')))return finish({status:'unverified' as const,steps,error:'GUI_NATIVE_ASSERTIONS_MISSING: 没有实际业务断言，需修正测试计划，不能据此交付'})

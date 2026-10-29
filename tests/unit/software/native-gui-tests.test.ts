@@ -54,6 +54,19 @@ afterEach(async () => { vi.restoreAllMocks(); await closeAllDebugSessions(); if 
     delete process.env.PROMA_HOME;
 else
     process.env.PROMA_HOME = previous; rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }, 30000);
+it('returns partial feature evidence from a real browser without passing a failed candidate',async()=>{
+    writeFileSync(join(project.root_path,'tests/acceptance.mjs'),`export default async({test,page,assert})=>{
+      await test('F-001 save',async()=>{await page.locator('#name').fill('Alice');await page.locator('#save').click();assert.equal(await page.locator('#list').innerText(),'Alice')});
+      await test('F-002 bad expectation',async()=>{await page.locator('#save').click();assert.equal(await page.locator('#list').innerText(),'WRONG')});
+      throw Error('stop this test module after the failing case');
+      await test('F-002 not reached',async()=>{assert.equal(1,1)});
+    }`)
+    registerNativeGuiTests(project.project_id,'tests/acceptance.mjs')
+    const result=await verifySoftwareCandidate(project.project_id,'partial',AbortSignal.timeout(60000))
+    expect(result.status).toBe('failed');expect(result.core?.requirements?.map(row=>row.verification)).toEqual(['passed','failed'])
+    expect(result.core?.host_gui?.case_results?.map(row=>row.status)).toEqual(['passed','failed','not_run'])
+    expect(await recentSoftwareVerification(project.project_id,'partial')).toBeUndefined()
+},90000)
 it('does not freeze a native draft before its application launch declaration is valid', async () => {
     const launchFile=join(project.root_path,'LAUNCH.json'),original=readFileSync(launchFile,'utf8')
     writeFileSync(launchFile,JSON.stringify({schema_version:2,command:'npm start',ui:true}))

@@ -50,7 +50,8 @@ export async function runNativeGuiTests(input: {
         frozenNativeGuiEntry(input.projectId, native, input.root);
         const result=nativeGuiObservations(input.suite,reports)
         const evidence_dir = join(workspace, 'evidence', 'acceptance')
-        return runtimeFailures.length?{...result,evidence_dir,evidence_warnings:evidenceWarnings,status:'failed' as const,error:`GUI_NATIVE_RUNTIME_ERROR: ${runtimeFailures[0]}`,
+        return runtimeFailures.length?{...result,evidence_dir,evidence_warnings:evidenceWarnings,status:'failed' as const,failure_kind:'runtime' as const,
+          case_results:result.case_results.map(row=>row.status==='passed'?{...row,status:'unverified' as const}:row),error:`GUI_NATIVE_RUNTIME_ERROR: ${runtimeFailures[0]}`,
           steps:[...result.steps,{id:'native-runtime',passed:false,actual:runtimeFailures.slice(0,3)}]}:{...result,evidence_dir,evidence_warnings:evidenceWarnings}
     }
     finally {

@@ -16,6 +16,15 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 const observation = (steps: unknown[], status = 'passed') => ({ code: 0, stdout: 'BLOMA_GUI_ACCEPTANCE:' + JSON.stringify({ version: 1, status, steps }), stderr: '' })
 describe('independent host native GUI acceptance', () => {
+  it('retains action assertion outcomes when a later assertion fails and remaining checks do not run',async()=>{
+    const input:GuiAcceptanceSuite={version:1,scope_hash:scope,covers:['F-001','F-002','F-003'],steps:[
+      {id:'first',kind:'expect',selector:'#count',equals:'0'},{id:'second',kind:'expect',selector:'#count',equals:'1'},{id:'third',kind:'expect',selector:'#count',equals:'2'}],
+      acceptance_refs:{first:['F-001'],second:['F-002'],third:['F-003']}}
+    installGuiAcceptanceSuite('p',input)
+    const result=await runGuiAcceptance({projectId:'p',root,scopeHash:scope,spawn:async()=>observation([{id:'first',passed:true},{id:'second',passed:false}],'failed')})
+    expect(result?.status).toBe('failed');expect(result?.source_unchanged).toBe(true)
+    expect(result?.case_results?.map(row=>row.status)).toEqual(['passed','failed','not_run'])
+  })
   it.each([undefined, 'c'.repeat(64)])('rejects generated rules when current UX fingerprint is %s', async designHash => {
     installGuiAcceptanceSuite('p', { ...suite(), design_hash: 'b'.repeat(64) })
     const spawn = vi.fn()
@@ -71,11 +80,13 @@ describe('independent host native GUI acceptance', () => {
       { id: 'deny-write', kind: 'lock_data' }, { id: 'blocked-save', kind: 'click', selector: '#save' },
       { id: 'save-error', kind: 'expect', selector: '#error', contains: 'Save failed' },
       { id: 'input-retained', kind: 'expect', selector: '#name', property: 'value', equals: 'must remain unsaved' },
+      { id: 'locked-finished', kind: 'expect', selector: '#save:not(:disabled)', property: 'count', equals: '1' },
       { id: 'restore-access', kind: 'unlock_data' },
       { id: 'full-name', kind: 'fill', selector: '#name', value: 'disk full input' },
       { id: 'inject-full', kind: 'storage_full' }, { id: 'full-save', kind: 'click', selector: '#save' },
       { id: 'full-error', kind: 'expect', selector: '#error', nonempty: true },
       { id: 'full-input', kind: 'expect', selector: '#name', property: 'value', equals: 'disk full input' },
+      { id: 'full-finished', kind: 'expect', selector: '#save:not(:disabled)', property: 'count', equals: '1' },
       { id: 'clear-full', kind: 'storage_restore' },
       { id: 'clear-name', kind: 'fill', selector: '#name', value: '' },
       { id: 'empty-save', kind: 'click', selector: '#save' }, { id: 'error', kind: 'expect', selector: '#error', equals: 'Name required' },
@@ -88,7 +99,7 @@ describe('independent host native GUI acceptance', () => {
     installGuiAcceptanceSuite('p', input)
     const result = await runGuiAcceptance({ projectId: 'p', root, scopeHash: scope, python: nativePython, signal: AbortSignal.timeout(90000) })
     expect(result?.status, JSON.stringify(result)).toBe('passed')
-    expect(result?.steps).toHaveLength(26)
+    expect(result?.steps).toHaveLength(28)
     installGuiAcceptanceSuite('p', { ...suite(), steps: [{ id: 'wrong-expectation', kind: 'expect', selector: '#count', equals: '999', timeout_ms: 100 }] })
     const negative = await runGuiAcceptance({ projectId: 'p', root, scopeHash: scope, python: nativePython, signal: AbortSignal.timeout(45000) })
     expect(negative?.status).toBe('failed')

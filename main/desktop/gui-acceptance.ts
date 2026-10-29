@@ -31,6 +31,8 @@ export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: st
   fixtures?: Array<{ path: string; text?: string; source?: string; sha256?: string; size?: number }>
 }
 export interface GuiAcceptanceResult {
+  case_results?: Array<{name:string;feature:string;status:'passed'|'failed'|'unverified'|'not_run';assertions:number;interactions:number;error?:string}>
+  failure_kind?: 'assertion'|'runtime'|'bootstrap'|'incomplete'
   version: 1; scope: 'host_native_gui_business'; status: 'passed' | 'failed' | 'unverified'
   method?: 'action_steps' | 'node:test'
   native_evidence?: {interactions:number;assertions:number}
@@ -169,11 +171,21 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
       result.status = 'passed'
     }
     }
+    if(!suite.native_tests&&suite.acceptance_refs){
+      result.case_results=Object.entries(suite.acceptance_refs).flatMap(([id,features])=>{
+        const step=suite.steps.find(step=>step.id===id),observed=result.steps.find(step=>step.id===id)
+        if(!step||!['expect','expect_file'].includes(step.kind))return []
+        return features.map(feature=>({name:id,feature,status:!observed?'not_run' as const:observed.passed?'passed' as const:'failed' as const,assertions:observed?1:0,interactions:0}))
+      })
+    }
     result.source_unchanged = verificationFingerprint(root, null, fingerprintPolicy) === before
     if (!result.source_unchanged || !readFileSync(path).equals(bytes)) throw new Error('GUI_INPUT_CHANGED')
   } catch (error) {
     if (callerSignal?.aborted) throw error
     result.status = 'unverified'; result.error = error instanceof Error ? error.message : String(error)
+    // A result aborted by input/version/runner failure cannot preserve a PASS.
+    result.failure_kind='incomplete'
+    result.case_results=result.case_results?.map(row=>({...row,status:'unverified'}))
   } finally { if (temporary) { try { rmSync(temporary, { recursive: true, force: true }) } catch { /* owned data only */ } } }
   writeTextFileAtomic(join(options.root, '00_VERIFY/host-gui-acceptance.json'), JSON.stringify(result, null, 2))
   return result

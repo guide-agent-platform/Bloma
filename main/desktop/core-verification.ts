@@ -18,9 +18,11 @@ import { isSoftwareProject } from './workflow-policy'
 import { readLaunchDeclaration } from './launch-smoke'
 import { qualifySoftwareArtifact, type ArtifactQualification } from '../software/artifact-qualification'
 import { assertSoftwareDelivery } from '../software/launch-contract'
+import { guiFeatureResults } from './gui-feature-results'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
+  verification_scope?: 'registered_local_cases_and_capability_contracts'
   local_status?: CoreVerificationStatus
   distribution?: ArtifactQualification
   host_cli?: LeanCliResult
@@ -215,6 +217,7 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
 /** Lean projects observe the actual application, without requiring a second
  * product-authored script to print PASS. Specialized adapters remain mandatory. */
 async function verifyLeanBehavior(options: CoreVerificationOptions, root: string, brief: import('../model/prd-backplane').PrdBackplane, result: CoreVerificationResult): Promise<void> {
+  result.verification_scope='registered_local_cases_and_capability_contracts'
   if (!brief.user_confirmed_at) throw new Error('LEAN_SCOPE_NOT_CONFIRMED')
   if (isSoftwareProject(options.projectId)) {
     const declared = readLaunchDeclaration(root)
@@ -243,9 +246,9 @@ async function verifyLeanBehavior(options: CoreVerificationOptions, root: string
       result.host_gui = gui; behavior = gui.status
       if (gui.covers.some(id => !states.has(id))) throw new Error('GUI_COVERAGE_UNKNOWN_REQUIREMENT')
       if (gui.status !== 'passed') result.missing.push(`实际界面业务检查：${gui.error ?? gui.status}`)
-      for (const fid of gui.covers) {
-        states.set(fid, gui.status)
-        result.evidence.push({ fid, scenario: 'host-native-gui', input: 'gui', outcome: gui.status === 'passed' ? 'pass' : gui.status === 'failed' ? 'fail' : 'unverified' })
+      for (const row of guiFeatureResults(gui)) {
+        states.set(row.id, row.status)
+        result.evidence.push({ fid:row.id, scenario:row.cases.join('; ')||'host-native-gui', input:'gui', outcome:row.status==='failed'?'fail':row.not_run?'not_run':row.status==='passed'?'pass':'unverified' })
       }
     }
   }
@@ -271,7 +274,7 @@ async function verifyLeanBehavior(options: CoreVerificationOptions, root: string
       result.missing.push(result.distribution.detail)
     }
   }
-  result.summary = result.status === 'passed' ? '实际入口与本次承诺功能检查通过，验证范围见报告。' : '实际功能检查尚未全部通过，产物已保留。'
+  result.summary = result.status === 'passed' ? '已登记的本机业务案例与能力协议检查通过，完整效果以实际验收范围为准。' : '实际功能检查尚未全部通过，产物已保留。'
 }
 
 export const CORE_DECLARATION_BRIEF = `
