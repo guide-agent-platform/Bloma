@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { componentContract } from './component-contracts'
 import { mainRootDir } from '../platform/paths'
 import { executeSoftwareCommand } from './command-runtime'
 
@@ -19,7 +20,7 @@ async function probe(projectId: string, root: string, signal: AbortSignal, execu
 export async function inspectDocumentCapability(projectId: string, root: string, signal: AbortSignal, execute: Execute = executeSoftwareCommand) {
   const state = component(root)
   const dependencies = state.state === 'platform_component' ? await probe(projectId, root, signal, execute) : undefined
-  return { capability: 'documents', provider: 'node-document-text-v1', component: { name: DOCUMENT_COMPONENT, state: state.state, sha256: state.sha256 },
+  return { capability: 'documents', contract: componentContract('documents'), provider: 'node-document-text-v1', component: { name: DOCUMENT_COMPONENT, state: state.state, sha256: state.sha256 },
     dependencies: dependencies?.code === 0 ? JSON.parse(dependencies.stdout.trim().split(/\r?\n/).at(-1)!) : undefined,
     ready: state.state === 'platform_component' && dependencies?.code === 0, error: dependencies && dependencies.code !== 0 ? dependencies.stderr.slice(-1600) : undefined,
     product_verification: 'unverified', formats: ['pdf_text', 'docx_text', 'utf8_txt', 'utf8_md'], retrieval: 'literal', ocr: 'unsupported' }

@@ -9,6 +9,7 @@ function createSecretStore({dataDir,encrypt,decrypt}){
  const check=target=>{const info=fs.lstatSync(target);if(info.isSymbolicLink()||!info.isFile()||info.size>16384)throw Error('AI_SECRET_FILE_INVALID')}
  return{
   has(name){const target=file(name);if(!fs.existsSync(target))return false;check(target);return true},
+  remove(name){const target=file(name);if(fs.existsSync(target)){check(target);fs.unlinkSync(target)}},
   get(name){const target=file(name);if(!fs.existsSync(target))return undefined;check(target);const value=decrypt(fs.readFileSync(target));if(typeof value!=='string')throw Error('AI_SECRET_DECODE_FAILED');return value},
   set(name,key){
    const target=file(name);if(typeof key!=='string'||!key.trim()||Buffer.byteLength(key)>8192)throw Error('AI_SECRET_VALUE_INVALID')
