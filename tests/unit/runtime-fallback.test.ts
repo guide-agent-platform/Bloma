@@ -460,7 +460,7 @@ describe('runtime channel fallback · 审查族 fallbackScope（闭环 PR4）', 
 
     const resolution = resolveChannelEnv({
       channelId: primary.id,
-      category: 'prd',
+      category: 'guide',
       projectId: 'p-scope',
       sessionId: 's-scope-1',
       fallbackScope: 'routed-only',
@@ -474,11 +474,11 @@ describe('runtime channel fallback · 审查族 fallbackScope（闭环 PR4）', 
 
   it('routed-only：路由配置的 fallback_channel_ids 命中 → 切配置域内备用，决策含 fallback_scope', () => {
     const { primary, bystander } = seedJudgeChannels()
-    setCategoryRoutingForTests({ prd: { fallback_channel_ids: [bystander.id] } })
+    setCategoryRoutingForTests({ guide: { fallback_channel_ids: [bystander.id] } })
 
     const resolution = resolveChannelEnv({
       channelId: primary.id,
-      category: 'prd',
+      category: 'guide',
       projectId: 'p-scope',
       sessionId: 's-scope-2',
       fallbackScope: 'routed-only',
@@ -511,11 +511,11 @@ describe('runtime channel fallback · 审查族 fallbackScope（闭环 PR4）', 
         return text.replace(/^enc:/, '')
       },
     })
-    setCategoryRoutingForTests({ prd: { fallback_channel_ids: [brokenBackup.id] } })
+    setCategoryRoutingForTests({ guide: { fallback_channel_ids: [brokenBackup.id] } })
 
     const resolution = resolveChannelEnv({
       channelId: primary.id,
-      category: 'prd',
+      category: 'guide',
       projectId: 'p-scope',
       sessionId: 's-scope-3',
       fallbackScope: 'routed-only',
@@ -527,10 +527,10 @@ describe('runtime channel fallback · 审查族 fallbackScope（闭环 PR4）', 
   it('回归：缺省与显式 all 均兜底全部启用渠道（现状不变）', () => {
     const { primary, bystander } = seedJudgeChannels()
 
-    const byDefault = resolveChannelEnv({ channelId: primary.id, category: 'prd', projectId: 'p-scope', sessionId: 's-scope-4a' })
+    const byDefault = resolveChannelEnv({ channelId: primary.id, category: 'guide', projectId: 'p-scope', sessionId: 's-scope-4a' })
     expect(byDefault.channel?.id).toBe(bystander.id)
 
-    const explicitAll = resolveChannelEnv({ channelId: primary.id, category: 'prd', projectId: 'p-scope', sessionId: 's-scope-4b', fallbackScope: 'all' })
+    const explicitAll = resolveChannelEnv({ channelId: primary.id, category: 'guide', projectId: 'p-scope', sessionId: 's-scope-4b', fallbackScope: 'all' })
     expect(explicitAll.channel?.id).toBe(bystander.id)
   })
 
@@ -553,7 +553,7 @@ describe('runtime channel fallback · 审查族 fallbackScope（闭环 PR4）', 
 
     const resolution = resolveChannelEnv({
       channelId: primary.id,
-      category: 'prd',
+      category: 'guide',
       projectId: 'p-scope',
       sessionId: 's-scope-5',
       fallbackScope: 'routed-only',

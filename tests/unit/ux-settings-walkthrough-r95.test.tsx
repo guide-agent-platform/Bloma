@@ -35,9 +35,9 @@ describe('ux-settings-walkthrough r95：SettingsPage（0 基础用户视角，S-
   it('[S1·结构] Tab 集含模型渠道/提示词配置/通知与声音（2026-10-06 体验批 A 新增）且**无「关于」Tab/版本行**（S-006 P1a 缺口渲染级证据）', async () => {
     render(<SettingsPage onBack={vi.fn()} />)
     const tabs = screen.getAllByRole('tab')
-    expect(tabs.map((t) => t.textContent)).toEqual(['模型渠道', '验收模型', '提示词配置', '通知与声音'])
-    fireEvent.click(screen.getByRole('tab', { name: '验收模型' }))
-    expect(screen.getByRole('heading', { name: '验收模型' })).toBeTruthy()
+    expect(tabs.map((t) => t.textContent)).toEqual(['模型渠道', '验收设计', '提示词配置', '通知与声音'])
+    fireEvent.click(screen.getByRole('tab', { name: '验收设计' }))
+    expect(screen.getByRole('heading', { name: '验收设计' })).toBeTruthy()
     // 走查断言：无关于/版本任何入口（S-006 P1a 修后此断言应翻转为含「关于」）
     expect(document.body.textContent ?? '').not.toMatch(/关于|版本\s*0\.\d/)
     expect(screen.queryByTestId('about-section')).toBeNull()

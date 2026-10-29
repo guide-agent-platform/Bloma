@@ -718,19 +718,12 @@ export interface CategoryRoutingEntry {
   fallback_channel_ids?: string[]
 }
 
-/** 用户可配置的三类 Agent 角色；gwt 由浏览器探针执行，不属于 LLM 渠道角色。 */
-export type AgentRoutingRole = 'guide' | 'programming' | 'judge'
+/** 当前两类流程默认值；不表示 Agent 实例数。 */
+export type AgentRoutingRole = 'guide' | 'programming'
 
-/** 角色到运行时文档类别的固定聚合映射（设置层与测试共用）。audit（内审，2026-09-01
- *  决议 4/7）是裁判角色的附属类别：允许与 judge 主渠道不同渠道（厂商隔离），
- *  保存展开时缺省随 judge 主渠道、可显式指定 audit_channel_id 覆盖。 */
-export const AGENT_ROLE_CATEGORIES: Record<AgentRoutingRole, readonly DocumentCategory[]> = {
-  guide: ['guide', 'prd', 'summary'],
-  programming: ['sketch', 'mvp'],
-  judge: ['judge', 'audit'],
-}
-
-export const AGENT_ROUTING_ROLES: readonly AgentRoutingRole[] = ['guide', 'programming', 'judge']
+/** Current flow defaults; retired judge/audit categories are not configurable. */
+export const AGENT_ROLE_CATEGORIES: Record<AgentRoutingRole, readonly DocumentCategory[]> = {guide:['guide'],programming:['sketch','mvp']}
+export const AGENT_ROUTING_ROLES: readonly AgentRoutingRole[] = ['guide','programming']
 
 export interface CategoryRoutingRoleView {
   role: AgentRoutingRole
@@ -742,15 +735,6 @@ export interface CategoryRoutingRoleView {
   channel_name?: string
   model_name?: string
   effective: 'routed' | 'auto' | 'dangling' | 'mixed'
-  /** 裁判角色专属（2026-09 内审闭环）：内审（audit）类别的渠道子视图。
-   *  audit 允许与 judge 主渠道不同（厂商隔离需要）；缺省同主渠道。 */
-  audit?: {
-    channel_id?: string
-    fallback_channel_ids?: string[]
-    channel_name?: string
-    model_name?: string
-    effective: 'routed' | 'auto' | 'dangling'
-  }
 }
 
 export interface CategoryRoutingRoleListResult {
@@ -758,13 +742,7 @@ export interface CategoryRoutingRoleListResult {
   views: CategoryRoutingRoleView[]
 }
 
-/** 角色保存条目（2026-09 内审闭环）：在类别条目之上允许为裁判角色显式指定内审渠道。
- *  audit_channel_id 缺省 = 随 channel_id 展开（向后兼容：老 payload 行为不变）。 */
-export interface RoleRoutingEntry extends CategoryRoutingEntry {
-  /** 仅 judge 角色：内审（audit）类别渠道；不传则同 channel_id */
-  audit_channel_id?: string
-  audit_fallback_channel_ids?: string[]
-}
+export type RoleRoutingEntry = CategoryRoutingEntry
 
 export interface CategoryRoutingRoleUpdateEnvelope extends RequestEnvelope {
   routing: Partial<Record<AgentRoutingRole, RoleRoutingEntry>>

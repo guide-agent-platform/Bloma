@@ -6,7 +6,7 @@ import '../styles/software-model-settings.css'
 
 export function SoftwareModelSettingsPanel() {
   const project = useAtomValue(currentProjectAtom)
-  if (!project || project.workflow_version !== 'software-v1') return <div className="model-settings"><h2>验收模型</h2><p>进入一个新流程项目后，可在这里设置该项目的验收方式。</p></div>
+  if (!project || project.workflow_version !== 'software-v1') return <div className="model-settings"><h2>验收设计</h2><p>进入一个新流程项目后，可在这里设置该项目的验收方式。</p></div>
   return <ProjectModelSettings key={project.project_id} projectId={project.project_id} name={project.name} />
 }
 function ProjectModelSettings({ projectId, name }: { projectId: string; name: string }) {
@@ -60,13 +60,13 @@ function ProjectModelSettings({ projectId, name }: { projectId: string; name: st
   }
   const reason = data?.lock_reason?.includes('READ_ONLY') ? '项目已归档或放弃，配置只读。' : '本轮已开始或已登记对照，配置只读；已有版本、预算和记录保留。'
   return <form className="model-settings" aria-label="项目验收模型配置" onSubmit={event => void save(event)}>
-    <header><div><h2>验收模型</h2><p>{name || '当前项目'} · 仅影响这个项目</p></div><button type="button" disabled={pending} onClick={() => void load()}>刷新</button></header>
-    <p>A 沿用当前会话的制作模型。可增加 B 独立设计业务案例，由平台实际执行验收。</p>
+    <header><div><h2>验收设计</h2><p>{name || '当前项目'} · 仅影响这个项目</p></div><button type="button" disabled={pending} onClick={() => void load()}>刷新</button></header>
+    <p>A 沿用当前会话的制作模型，按需协作子任务也继承 A。可单独授权 B 设计业务案例，由平台执行检查和交付裁决。</p>
     {error && <p role="alert">{error}</p>}
     {data?.locked && <p role="status">{reason}</p>}
     {running && <p role="status">项目正在运行，暂不能修改配置。</p>}
     <fieldset disabled={locked}><legend>验收方式</legend>
-      <label className="model-choice"><input type="radio" name="verification-mode" checked={!enabled} onChange={() => { setVariant('single'); setConsent(false); setMessage('') }} /><span><strong>单模型</strong><small>A 完成制作与测试，平台执行验收。</small></span></label>
+      <label className="model-choice"><input type="radio" name="verification-mode" checked={!enabled} onChange={() => { setVariant('single'); setConsent(false); setMessage('') }} /><span><strong>仅使用制作模型 A</strong><small>沿用 A 完成制作与按需协作；这里不关闭子任务，平台执行验收。</small></span></label>
       <label className="model-choice"><input type="radio" name="verification-mode" checked={enabled} onChange={() => { setVariant('independent'); setConsent(false); setMessage('') }} /><span><strong>A＋B 独立验收设计</strong><small>B 只读确认需求与界面，设计关键业务案例；A 实现，平台裁决。</small></span></label>
       {enabled && <div className="model-settings-fields">
         <label>B 的渠道<select aria-label="B 的渠道" value={channel} onChange={event => { edit(setChannel,event.target.value); setModel('') }}><option value="">选择已启用渠道</option>{data?.channels.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -87,7 +87,7 @@ function ProjectModelSettings({ projectId, name }: { projectId: string; name: st
     {data?.budget && <p>已保存的 B 预算：{data.budget.cap_rmb} 元 · 已计责任上界 {data.budget.accounted_upper_rmb} 元 · 剩余 {data.budget.remaining_rmb} 元</p>}
     {data?.budget_error && <p role="alert">{data.budget_error}</p>}
     {data && <p>预算准入：开工时检查 · 设计：{({not_prepared:'尚未准备',frozen:'已冻结',blocked:'受阻',disabled:'未启用'} as Record<string,string>)[data.design_status] ?? '记录待核对'}</p>}
-    <footer><button type="submit" disabled={locked || !valid}>{pending ? '处理中…' : enabled ? '保存并授权 B 预算' : '保存单模型配置'}</button><span>已有账本和失败记录保留。</span></footer>
+    <footer><button type="submit" disabled={locked || !valid}>{pending ? '处理中…' : enabled ? '保存并授权 B 预算' : '保存仅 A 的验收配置'}</button><span>已有账本和失败记录保留。</span></footer>
     {message && <p role="status">{message}</p>}
   </form>
 }

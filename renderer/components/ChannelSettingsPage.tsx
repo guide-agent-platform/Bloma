@@ -20,6 +20,7 @@
  *   在 App.tsx 的 settings 路由中渲染，或通过设置面板/弹窗打开。
  */
 
+import { FLOW_ROUTING_COPY } from '../../shared/routing-display'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useAtom } from 'jotai'
 import type {
@@ -732,8 +733,6 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
 interface RoleRoutingDraftRow {
   channelId?: string
   fallbackIds: string[]
-  /** 裁判角色专属（2026-09 内审闭环）：内审（audit）渠道；undefined = 随主渠道 */
-  auditChannelId?: string
 }
 
 type RoleRoutingDraft = Partial<Record<AgentRoutingRole, RoleRoutingDraftRow>>
@@ -766,14 +765,14 @@ function previewModelName(channel: Channel | undefined): string | undefined {
   return modelsOf(channel).find((model) => model.enabled)?.name
 }
 
-const ROLE_ORDER: AgentRoutingRole[] = ['guide', 'programming', 'judge']
-
 const RoleRoutingSection: React.FC<{
   channels: Channel[]
   views: CategoryRoutingRoleView[] | null
   onViewsSaved: (views: CategoryRoutingRoleView[]) => void
 }> = ({ channels, views, onViewsSaved }) => {
   const [draft, setDraft] = useState<RoleRoutingDraft>({})
+  const [touchedRoles, setTouchedRoles] = useState<Set<AgentRoutingRole>>(new Set())
+  const [feedback, setFeedback] = useState<{error:boolean; text:string} | null>(null)
   const [draftReady, setDraftReady] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expandedRole, setExpandedRole] = useState<AgentRoutingRole | null>(null)
@@ -786,17 +785,19 @@ const RoleRoutingSection: React.FC<{
       next[view.role] = {
         channelId: view.channel_id,
         fallbackIds: [...(view.fallback_channel_ids ?? [])],
-        auditChannelId: view.audit?.channel_id,
       }
     }
     setDraft(next)
+    setTouchedRoles(new Set())
     setDraftReady(true)
   }, [views])
 
   const patchRow = useCallback((role: AgentRoutingRole, patch: Partial<RoleRoutingDraftRow>) => {
+    setTouchedRoles(previous => new Set(previous).add(role))
+    setFeedback(null)
     setDraft((previous) => ({
       ...previous,
-      [role]: { channelId: previous[role]?.channelId, fallbackIds: previous[role]?.fallbackIds ?? [], ...patch },
+      [role]: { channelId: previous[role]?.channelId, fallbackIds: previous[role]?.fallbackIds ?? [], ...previous[role], ...patch },
     }))
   }, [])
 
@@ -814,8 +815,7 @@ const RoleRoutingSection: React.FC<{
       const target = event.target as HTMLElement | null
       if (!target || target.tagName !== 'SELECT') return
       const aiId = target.getAttribute('data-ai-id') ?? ''
-      // 内审（audit）子下拉不参与主渠道滚轮循环切换（角色 key 不是合法 AgentRoutingRole）
-      if (!aiId.startsWith('role-routing-select-') || aiId.includes('-audit') || (target as HTMLSelectElement).disabled) return
+      if (!aiId.startsWith('role-routing-select-') || (target as HTMLSelectElement).disabled) return
       event.preventDefault()
       wheelAccRef.current += event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
       const step = Math.trunc(wheelAccRef.current / 100)
@@ -827,34 +827,42 @@ const RoleRoutingSection: React.FC<{
     return () => document.removeEventListener('wheel', cycleOnWheel)
   }, [])
 
-  const saveRouting = useCallback((routing: CategoryRoutingRoleUpdateEnvelope['routing']) => {
-    const api = window.electronAPI
-    if (!api?.channels?.categoryRoutingRoleUpdate) return
-    setSaving(true)
-    void api.channels.categoryRoutingRoleUpdate({ request_id: crypto.randomUUID(), routing })
-      .then((result) => { if (result.ok) onViewsSaved(result.data.views) })
-      .finally(() => setSaving(false))
-  }, [onViewsSaved])
+  const rowChanged = (view: CategoryRoutingRoleView) => {
+    const row = draft[view.role]
+    if (!row) return false
+    if (view.effective === 'mixed') return touchedRoles.has(view.role)
+    return row.channelId !== view.channel_id || JSON.stringify(row.fallbackIds) !== JSON.stringify(view.fallback_channel_ids ?? [])
 
-  const handleSave = useCallback(() => {
+  }
+  const saveRouting = async (routing: CategoryRoutingRoleUpdateEnvelope['routing']) => {
+    const api = window.electronAPI
+    if (!api?.channels?.categoryRoutingRoleUpdate) { setFeedback({error:true,text:'配置接口不可用，请正常重启应用后再试。'}); return }
+    setSaving(true); setFeedback(null)
+    try {
+      const result = await api.channels.categoryRoutingRoleUpdate({ request_id: crypto.randomUUID(), routing })
+      if (result.ok) { onViewsSaved(result.data.views); setFeedback({error:false,text:'流程默认值已保存；未调用模型，未编辑的现役分组保持原配置。'}) }
+      else setFeedback({error:true,text:result.error.user_visible_message || result.error.message})
+    } catch { setFeedback({error:true,text:'保存未确认，请重新载入核对，避免覆盖其他修改。'}) }
+    finally { setSaving(false) }
+  }
+  const handleSave = () => {
     if (!views) return
     const routing: CategoryRoutingRoleUpdateEnvelope['routing'] = {}
-    for (const role of ROLE_ORDER) {
-      const row = draft[role]
-      if (!row || (!row.channelId && row.fallbackIds.length === 0 && row.auditChannelId === undefined)) continue
-      routing[role] = {
+    for (const view of views) {
+      if (!rowChanged(view)) continue
+      const row = draft[view.role]!
+      routing[view.role] = {
         ...(row.channelId ? { channel_id: row.channelId } : {}),
         ...(row.fallbackIds.length ? { fallback_channel_ids: [...row.fallbackIds] } : {}),
-        // 内审渠道仅裁判角色有效；undefined 不携带（main 侧缺省随主渠道展开）
-        ...(role === 'judge' && row.auditChannelId !== undefined ? { audit_channel_id: row.auditChannelId || undefined } : {}),
       }
     }
-    saveRouting(routing)
-  }, [draft, saveRouting, views])
-
-  const handleResetAll = useCallback(() => saveRouting({}), [saveRouting])
+    void saveRouting(routing)
+  }
+  const handleResetAll = () => { void saveRouting({guide:{},programming:{}}) }
 
   const moveFallback = useCallback((role: AgentRoutingRole, index: number, delta: -1 | 1) => {
+    setTouchedRoles(previous => new Set(previous).add(role))
+    setFeedback(null)
     setDraft((previous) => {
       const row = previous[role]
       if (!row) return previous
@@ -867,6 +875,8 @@ const RoleRoutingSection: React.FC<{
   }, [])
 
   const toggleFallback = useCallback((role: AgentRoutingRole, channelId: string) => {
+    setTouchedRoles(previous => new Set(previous).add(role))
+    setFeedback(null)
     setDraft((previous) => {
       const row = previous[role]
       if (!row) return previous
@@ -877,15 +887,7 @@ const RoleRoutingSection: React.FC<{
     })
   }, [])
 
-  const dirty = views?.some((view) => {
-    const row = draft[view.role]
-    if (!row) return false
-    if (view.effective === 'mixed') return row.channelId !== undefined || row.fallbackIds.length > 0
-    if (row.channelId !== view.channel_id || JSON.stringify(row.fallbackIds) !== JSON.stringify(view.fallback_channel_ids ?? [])) return true
-    // 裁判角色：内审渠道独立比较（undefined = 随主渠道）
-    if (view.role === 'judge' && row.auditChannelId !== view.audit?.channel_id) return true
-    return false
-  }) ?? false
+  const dirty = views?.some(rowChanged) ?? false
 
   const selectStyle: React.CSSProperties = {
     height: 32,
@@ -911,21 +913,8 @@ const RoleRoutingSection: React.FC<{
     fontFamily: 'inherit',
   })
 
-  if (!views && !draftReady) return null
-
-  return (
-    <section aria-label="角色配置" data-ai-id="role-routing-section" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-        <div>
-          <h3 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>角色配置</h3>
-          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
-            为向导、编程、裁判三个 Agent 分配模型渠道；一个角色的选择会应用到其全部工作环节
-          </p>
-        </div>
-        <button type="button" onClick={handleResetAll} disabled={saving} data-ai-id="role-routing-reset-all" style={smallButtonStyle('danger')}>恢复全部默认</button>
-      </div>
-
-      {views?.map((view) => {
+  const renderRoutingRow = (view: CategoryRoutingRoleView) => {
+        const copy = FLOW_ROUTING_COPY[view.role]
         const row = draft[view.role]
         if (!row) return null
         const selected = row.channelId ? channels.find((channel) => channel.id === row.channelId) : undefined
@@ -945,12 +934,13 @@ const RoleRoutingSection: React.FC<{
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text)' }}>{view.label}</span>
-                <span style={{ display: 'block', marginTop: 2, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{view.description}</span>
-                {preview && <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>生效模型：{preview}</span>}
+                <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text)' }}>{copy.label}</span>
+                <span style={{ display: 'block', marginTop: 2, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{copy.description}</span>
+                <span style={{display:'block',fontSize:'var(--font-size-xs)',color:'var(--color-text-muted)'}}>已保存设置：{({routed:'已指定类别默认',auto:'使用全局默认',mixed:'旧分项尚未统一',dangling:'引用失效，回退默认'} as const)[view.effective]}</span>
+                {preview && <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{rowChanged(view) ? '待保存候选模型：' : '默认候选模型：'}{preview}</span>}
               </div>
               <select
-                aria-label={`${view.label} 渠道`}
+                aria-label={`${copy.label} 渠道`}
                 data-ai-id={`role-routing-select-${view.role}`}
                 style={selectStyle}
                 value={row.channelId ?? ''}
@@ -960,19 +950,6 @@ const RoleRoutingSection: React.FC<{
                 <option value="">{mixed ? '多个渠道（选择一个渠道统一）' : `自动 / 全局默认${view.channel_name && view.effective === 'auto' ? `（${view.channel_name}）` : ''}`}</option>
                 {selectable.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}（{PROVIDER_LABELS[channel.provider_type] ?? channel.provider_type}）</option>)}
               </select>
-              {view.role === 'judge' && view.audit && (
-                <select
-                  aria-label="内审渠道（攻击 / 修订 / 复核）"
-                  data-ai-id="role-routing-select-judge-audit"
-                  style={selectStyle}
-                  value={row.auditChannelId ?? ''}
-                  disabled={saving}
-                  onChange={(event) => patchRow(view.role, { auditChannelId: event.target.value || undefined })}
-                >
-                  <option value="">内审随主渠道{view.audit.effective === 'auto' && view.audit.channel_name ? `（${view.audit.channel_name}）` : ''}</option>
-                  {selectable.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}（{PROVIDER_LABELS[channel.provider_type] ?? channel.provider_type}）</option>)}
-                </select>
-              )}
               <button type="button" onClick={() => setExpandedRole(expanded ? null : view.role)} style={smallButtonStyle('default')} aria-expanded={expanded} disabled={saving}>
                 备用顺序{row.fallbackIds.length > 0 ? `（${row.fallbackIds.length}）` : ''}
               </button>
@@ -981,21 +958,21 @@ const RoleRoutingSection: React.FC<{
             {mixed && (
               <div role="alert" data-ai-id={`role-routing-mixed-${view.role}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--font-size-xs)', color: '#92400E' }}>
                 <IconAlertTriangle size={14} />
-                <span>该角色沿用了旧的分项配置，当前包含多个渠道。选择一个渠道并保存即可统一。</span>
+                <span>该分组沿用了旧的分项配置，当前包含多个渠道。选择一个渠道并保存即可统一。</span>
                 <button type="button" onClick={() => patchRow(view.role, { channelId: undefined, fallbackIds: [] })} style={smallButtonStyle('default')}>统一为自动</button>
               </div>
             )}
             {dangling && (
               <div role="alert" data-ai-id={`role-routing-dangling-${view.role}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--font-size-xs)', color: '#92400E' }}>
                 <IconAlertTriangle size={14} />
-                <span>指向的渠道已被删除，当前回退全局默认</span>
+                <span>保存的渠道引用已失效；未明确选择会话渠道时回退默认</span>
                 <button type="button" onClick={() => patchRow(view.role, { channelId: undefined })} style={smallButtonStyle('default')}>恢复自动</button>
               </div>
             )}
 
             {expanded && (
               <div data-ai-id={`role-routing-fallback-${view.role}`} style={{ padding: 'var(--space-3)', background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>该角色渠道故障时依次尝试的备用顺序（勾选加入，↑↓ 调整顺序）。</p>
+                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>该分组渠道故障时依次尝试的备用顺序（勾选加入，↑↓ 调整顺序）。</p>
                 {selectable.map((channel) => {
                   const index = row.fallbackIds.indexOf(channel.id)
                   const checked = index >= 0
@@ -1019,8 +996,27 @@ const RoleRoutingSection: React.FC<{
             )}
           </div>
         )
-      })}
+  }
 
+  if (!views && !draftReady) return null
+
+  return (
+    <section aria-label="流程模型路由" data-ai-id="role-routing-section" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+        <div>
+          <h3 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>流程模型路由</h3>
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+            按流程环节选择默认模型；保存不会启动 Agent 或增加并行任务。
+          </p>
+        </div>
+        <button type="button" onClick={handleResetAll} disabled={saving} data-ai-id="role-routing-reset-all" style={smallButtonStyle('danger')}>恢复当前流程默认</button>
+      </div>
+
+      {views?.map(renderRoutingRow)}
+
+      <p style={{fontSize:'var(--font-size-xs)',color:'var(--color-text-muted)',margin:0}}>选路顺序：会话明确选择的渠道 → 此处流程默认值 → 全局默认。上方候选值不代表当前会话实际使用的模型。</p>
+      <p style={{fontSize:'var(--font-size-xs)',color:'var(--color-text-muted)',margin:0}}>协作子任务由制作负责人按需安排；B 的案例设计与预算请到“验收设计”中单独配置，平台依据实际检查裁决交付。</p>
+      {feedback && <p role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
       {views && (
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button type="button" onClick={handleSave} disabled={!dirty || saving} data-ai-id="role-routing-save" style={{
@@ -1034,7 +1030,7 @@ const RoleRoutingSection: React.FC<{
             borderRadius: 'var(--radius-sm)',
             cursor: dirty && !saving ? 'pointer' : 'not-allowed',
             fontFamily: 'inherit',
-          }}>{saving ? '保存中…' : '保存角色配置'}</button>
+          }}>{saving ? '保存中…' : '保存流程默认值'}</button>
         </div>
       )}
     </section>
@@ -1095,7 +1091,7 @@ export const ChannelSettingsPage: React.FC = () => {
     void api.channels
       .categoryRoutingRoleList({ request_id: crypto.randomUUID() })
       .then((result) => {
-        if (result.ok) setRoutingRoleViews(result.data.views)
+        if(result.ok)setRoutingRoleViews(result.data.views)
       })
       .catch(() => {
         // 角色配置区不可用不阻塞普通渠道管理

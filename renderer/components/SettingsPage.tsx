@@ -9,7 +9,7 @@ import { StudioPageFrame, type StudioNavigationProps } from './StudioPageFrame'
 type SettingsTab = 'channels' | 'prompts' | 'sound' | 'verification'
 const tabs = [
   { id: 'channels' as const, label: '模型渠道', Icon: Conversation },
-  { id: 'verification' as const, label: '验收模型', Icon: Conversation },
+  { id: 'verification' as const, label: '验收设计', Icon: Conversation },
   { id: 'prompts' as const, label: '提示词配置', Icon: FileText },
   { id: 'sound' as const, label: '通知与声音', Icon: IconMic },
 ]

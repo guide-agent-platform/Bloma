@@ -37,9 +37,8 @@ const CHANNELS: Channel[] = [
 
 function makeViews(overrides: Array<Partial<CategoryRoutingRoleListResult['views'][number]>> = []): CategoryRoutingRoleListResult['views'] {
   const base: CategoryRoutingRoleListResult['views'] = [
-    { role: 'guide', label: '向导 Agent', description: '澄清需求、提取 PRD 与整理项目记忆', categories: ['guide', 'prd', 'summary'], channel_id: 'ch-kimi', channel_name: 'Kimi 渠道', model_name: 'kimi-k2.6', effective: 'routed' },
-    { role: 'programming', label: '编程 Agent', description: '生成草图与完整可运行版本', categories: ['sketch', 'mvp'], channel_name: 'Kimi 渠道', model_name: 'kimi-k2.6', effective: 'auto' },
-    { role: 'judge', label: '裁判 Agent', description: '审查需求与交付是否达到要求', categories: ['judge'], channel_name: 'Kimi 渠道', model_name: 'kimi-k2.6', effective: 'auto' },
+    { role: 'guide', label: '需求沟通', description: '澄清需求、提取 PRD 与整理项目记忆', categories: ['guide'], channel_id: 'ch-kimi', channel_name: 'Kimi 渠道', model_name: 'kimi-k2.6', effective: 'routed' },
+    { role: 'programming', label: '界面与制作', description: '生成草图与完整可运行版本', categories: ['sketch', 'mvp'], channel_name: 'Kimi 渠道', model_name: 'kimi-k2.6', effective: 'auto' },
   ]
   for (const override of overrides) {
     const index = base.findIndex((view) => view.role === override.role)
@@ -57,7 +56,7 @@ function installApi(options: {
     channels: {
       list: () => Promise.resolve({ ok: true, request_id: 't', data: CHANNELS }),
       categoryRoutingRoleList: (_input: RequestEnvelope) =>
-        Promise.resolve({ ok: true, request_id: 't', data: { version: 2, views: options.views } }),
+        Promise.resolve({ ok: true, request_id: 't', data: { version: 3, views: options.views } }),
       categoryRoutingRoleUpdate: (input: CategoryRoutingRoleUpdateEnvelope) => {
         updateSpy(input)
         const data = options.onUpdate ? options.onUpdate(input) : { version: 2, views: options.views }
@@ -80,39 +79,17 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
     installApi({ views: makeViews() })
     render(<ChannelSettingsPage />)
 
-    await screen.findByLabelText('向导 Agent 渠道')
-    for (const label of ['向导 Agent', '编程 Agent', '裁判 Agent']) {
+    await screen.findByLabelText('需求沟通 渠道')
+    for (const label of ['需求沟通', '界面与制作']) {
       expect(screen.getByText(label)).toBeDefined()
     }
     expect(screen.queryByText('草图生成')).toBeNull()
 
-    const select = screen.getByLabelText('向导 Agent 渠道') as HTMLSelectElement
+    const select = screen.getByLabelText('需求沟通 渠道') as HTMLSelectElement
     const optionTexts = Array.from(select.options).map((option) => option.textContent ?? '')
     expect(optionTexts.some((text) => text.includes('智谱 OpenAI 协议'))).toBe(true)
     expect(optionTexts.some((text) => text.includes('Kimi 渠道'))).toBe(true)
     expect(select.value).toBe('ch-kimi')
-  })
-
-  it('内审（2026-09-01）：裁判行多一个内审渠道下拉，可选不同厂商渠道并随 judge 角色保存', async () => {
-    const { updateSpy } = installApi({
-      views: makeViews([
-        { role: 'judge', categories: ['judge', 'audit'], audit: { effective: 'auto', channel_name: 'Kimi 渠道' } },
-      ]),
-      onUpdate: () => ({ version: 2, views: makeViews() }),
-    })
-    render(<ChannelSettingsPage />)
-
-    // 内审下拉只在裁判行出现；未配置时随主渠道（auto）
-    const auditSelect = await screen.findByLabelText('内审渠道（攻击 / 修订 / 复核）') as HTMLSelectElement
-    expect(auditSelect.value).toBe('')
-
-    // 选择内审渠道 → dirty 可保存 → payload 带 audit_channel_id（主渠道不动）
-    await act(async () => fireEvent.change(auditSelect, { target: { value: 'ch-kimi' } }))
-    await act(async () => fireEvent.click(screen.getByTestId('role-routing-save')))
-    await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1))
-    const payload = updateSpy.mock.calls[0]![0] as CategoryRoutingRoleUpdateEnvelope
-    expect(payload.routing.judge?.audit_channel_id).toBe('ch-kimi')
-    expect(payload.routing.judge?.channel_id).toBeUndefined()
   })
 
   it('悬空角色显示警示，「恢复自动」后保存不再携带该角色配置', async () => {
@@ -124,13 +101,13 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
     render(<ChannelSettingsPage />)
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('指向的渠道已被删除，当前回退全局默认')
+    expect(alert.textContent).toContain('保存的渠道引用已失效；未明确选择会话渠道时回退默认')
     await act(async () => fireEvent.click(screen.getByText('恢复自动')))
     await act(async () => fireEvent.click(screen.getByTestId('role-routing-save')))
 
     await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1))
     const payload = updateSpy.mock.calls[0]![0] as CategoryRoutingRoleUpdateEnvelope
-    expect(payload.routing.guide).toBeUndefined()
+    expect(payload.routing.guide).toEqual({})
     expect(payload.routing.programming).toBeUndefined()
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
@@ -138,9 +115,9 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
   it('滚轮悬停角色渠道下拉循环切换自动/各渠道', async () => {
     installApi({ views: makeViews() })
     render(<ChannelSettingsPage />)
-    await waitFor(() => expect(screen.getByText('角色配置')).toBeDefined())
+    await waitFor(() => expect(screen.getByText('流程模型路由')).toBeDefined())
 
-    const select = screen.getByLabelText('向导 Agent 渠道') as HTMLSelectElement
+    const select = screen.getByLabelText('需求沟通 渠道') as HTMLSelectElement
     expect(select.value).toBe('ch-kimi')
     await act(async () => fireEvent.wheel(select, { deltaY: 100 }))
     expect(select.value).toBe('ch-zhipu-openai')
@@ -162,7 +139,7 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('沿用了旧的分项配置')
-    const select = screen.getByLabelText('向导 Agent 渠道') as HTMLSelectElement
+    const select = screen.getByLabelText('需求沟通 渠道') as HTMLSelectElement
     await act(async () => fireEvent.change(select, { target: { value: 'ch-kimi' } }))
     await act(async () => fireEvent.click(screen.getByTestId('role-routing-save')))
 
@@ -176,6 +153,14 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
     await waitFor(() => expect(screen.getByTestId('role-routing-reset-all')).toBeDefined())
     await act(async () => fireEvent.click(screen.getByTestId('role-routing-reset-all')))
     await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1))
-    expect((updateSpy.mock.calls[0]![0] as CategoryRoutingRoleUpdateEnvelope).routing).toEqual({})
+    expect((updateSpy.mock.calls[0]![0] as CategoryRoutingRoleUpdateEnvelope).routing).toEqual({guide:{},programming:{}})
+  })
+
+  it('contains no retired judge/compatibility entry and shows candidate route provenance',async()=>{
+    installApi({views:makeViews()});render(<ChannelSettingsPage />);await screen.findByLabelText('需求沟通 渠道')
+    expect(screen.queryByTestId('legacy-routing-details')).toBeNull();expect(screen.queryByText(/旧裁判|旧流程兼容/)).toBeNull();expect(screen.queryByText(/生效模型：/)).toBeNull();expect(screen.getByText(/会话明确选择的渠道/)).toBeDefined()
+  })
+  it('can clear one mixed current group without sending another group',async()=>{
+    const {updateSpy}=installApi({views:makeViews([{role:'programming',effective:'mixed',channel_id:undefined}])});render(<ChannelSettingsPage />);await screen.findByText('统一为自动');fireEvent.click(screen.getByText('统一为自动'));fireEvent.click(screen.getByTestId('role-routing-save'));await waitFor(()=>expect(updateSpy).toHaveBeenCalledTimes(1));expect(updateSpy.mock.calls[0][0].routing).toEqual({programming:{}})
   })
 })

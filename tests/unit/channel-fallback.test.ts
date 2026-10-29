@@ -195,7 +195,7 @@ describe('category routing × resolveChannelEnv（M5）', () => {
     expectChannel('summary', ds.id)
   })
 
-  it.each(['sketch', 'summary'] as const)('路由悬空（渠道已删除）→ 回退全局默认渠道，不崩溃 [%s]', (category) => {
+  it.each(['sketch', 'guide'] as const)('路由悬空（渠道已删除）→ 回退全局默认渠道，不崩溃 [%s]', (category) => {
     const ds = seed('ds', 'deepseek')
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     saveCategoryRouting({ [category]: { channel_id: 'deleted-id' } } as Parameters<typeof saveCategoryRouting>[0])
@@ -205,7 +205,7 @@ describe('category routing × resolveChannelEnv（M5）', () => {
     expect(resolution.env).toBeDefined()
   })
 
-  it.each(['sketch', 'summary'] as const)('路由主渠道 build 失败 → 先按 fallback_channel_ids 顺序切备用 [%s]', (category) => {
+  it.each(['sketch', 'guide'] as const)('路由主渠道 build 失败 → 先按 fallback_channel_ids 顺序切备用 [%s]', (category) => {
     const kimi = seed('kimi', 'kimi-api')
     const glm = seed('glm', 'zhipu-coding')
     seed('ds', 'deepseek')
@@ -224,7 +224,7 @@ describe('category routing × resolveChannelEnv（M5）', () => {
     expect(decisions.some((line) => line.includes('runtime_channel_switch') && line.includes('glm'))).toBe(true)
   })
 
-  it.each(['sketch', 'summary'] as const)('无路由配置时与现状行为一致（回归）：全局第一个启用渠道 [%s]', (category) => {
+  it.each(['sketch', 'guide'] as const)('无路由配置时与现状行为一致（回归）：全局第一个启用渠道 [%s]', (category) => {
     const first = seed('first', 'deepseek')
     seed('second', 'kimi-api')
 
