@@ -1,5 +1,8 @@
 /** Discovery metadata only. Full protocols remain behind the context tool. */
 export const SOFTWARE_CONTEXT_CATALOG = [
+  { name:'product-components',when:'复用成熟模块、选择产品组件组合',topic:'components',tools:['prepare_software_capability'] },
+  { name:'ai-service',when:'产品统一AI服务、路由和自己的Key配置',topic:'ai-service',tools:['prepare_software_capability'] },
+  { name:'diagnostics',when:'一次核对执行、历史验收失败、命令及当前调试截图',topic:'diagnostics',tools:['read_process','inspect_app'] },
   { name: 'commands', when: '安装、构建、测试或持续日志/输入', topic: 'execution', tools: ['run_command','read_process','write_process','stop_process'] },
   { name: 'runtime', when: '运行时缺失、版本不兼容或入口不确定', topic: 'launch', tools: ['inspect_software_environment','prepare_software_environment'] },
   { name: 'ui-testing', when: '真实界面操作、重开或定位失败', topic: 'verification-gui', tools: ['inspect_app','verify_app'] },

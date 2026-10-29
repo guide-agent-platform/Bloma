@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "default_route": "default",
+  "routes": {
+    "default": {
+      "protocol": "openai-chat",
+      "endpoint": "",
+      "model": "",
+      "api_key_env": "APP_AI_API_KEY",
+      "timeout": 30,
+      "max_tokens": 2048,
+      "network": "public"
+    }
+  }
+}

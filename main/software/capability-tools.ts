@@ -13,7 +13,9 @@ import { projectRuntimeRequest, satisfies } from './runtime-manager'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { redactSoftwareOutput } from './process-manager'
 import { DOCUMENT_COMPONENT, inspectDocumentCapability, prepareDocumentCapability } from './document-capability'
-import { INTEGRATION_COMPONENTS, inspectIntegrationCapability, prepareIntegrationCapability } from './integration-capabilities'
+import { INTEGRATION_COMPONENTS, inspectIntegrationCapability, prepareIntegrationCapability, type IntegrationCapability } from './integration-capabilities'
+const CAPABILITY_NAMES=['speech','documents',...Object.keys(INTEGRATION_COMPONENTS)]
+const integrationCapability=(value:unknown):value is IntegrationCapability=>typeof value==='string'&&Object.hasOwn(INTEGRATION_COMPONENTS,value)
 
 export const SPEECH_COMPONENTS=['speech_runtime.py','speech_locator.py','speech_worker.py','speech_bridge.cjs'] as const
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex')
@@ -102,16 +104,16 @@ export async function prepareSpeechCapability(projectId:string,root:string,signa
   }finally{preparing.delete(projectId)}
 }
 export function buildCapabilityTools(projectId:string,policy:ReturnType<typeof createSoftwareCollaborationPolicy>,parent:boolean):AgentLoopTool[]{
-  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查speech语音、documents文本、ocr本机文字识别、vision产品视觉API客户端或http组件；默认speech。不下载、不发模型请求、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:['speech','documents','ocr','http','vision']}}},
-    execute:async(input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');if(Object.keys(input).some(key=>key!=='capability')||input.capability!==undefined&&!['speech','documents','ocr','http','vision'].includes(String(input.capability)))throw Error('CAPABILITY_ARGUMENTS_INVALID');
+  const inspect:AgentLoopTool={name:'inspect_software_capabilities',parallelSafe:true,description:'只读检查speech、documents、ocr、http、ai或vision产品组件；ai为通用文本/图片服务及路由模板。默认speech，不下载、不发模型请求、不签发业务PASS。',input_schema:{type:'object',additionalProperties:false,properties:{capability:{type:'string',enum:CAPABILITY_NAMES}}},
+    execute:async(input,ctx)=>{try{if(ctx.projectId!==projectId)throw Error('CAPABILITY_PROJECT_MISMATCH');if(Object.keys(input).some(key=>key!=='capability')||input.capability!==undefined&&!CAPABILITY_NAMES.includes(String(input.capability)))throw Error('CAPABILITY_ARGUMENTS_INVALID');
       const root=findProject(projectId).root_path
-      const result=input.capability==='ocr'||input.capability==='http'||input.capability==='vision'?await inspectIntegrationCapability(projectId,root,input.capability,ctx.signal):await(input.capability==='documents'?inspectDocumentCapability:inspectSoftwareCapabilities)(projectId,root,ctx.signal)
+      const result=integrationCapability(input.capability)?await inspectIntegrationCapability(projectId,root,input.capability,ctx.signal):await(input.capability==='documents'?inspectDocumentCapability:inspectSoftwareCapabilities)(projectId,root,ctx.signal)
       return{output:redactSoftwareOutput(JSON.stringify(result))}}catch(error){return{output:redactSoftwareOutput(String(error)),isError:true}}}}
-  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'受控准备speech、documents、ocr、http或vision产品组件，保护已有文件。vision为产品自己的图片API客户端，无模型调用或依赖下载；ocr用Windows语言；http用JSON/Webhook；language仅ocr。documents可显式安装依赖。准备不签发业务PASS。',
-    input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:['speech','documents','ocr','http','vision']},install_dependencies:{type:'boolean'},download_models:{type:'boolean'},language:{type:'string',maxLength:40}}},
+  const prepare:AgentLoopTool={name:'prepare_software_capability',description:'物化成熟产品组件：ai通用AI服务+可编辑公开路由，vision沿兼容入口共用AI服务；speech/documents/ocr/http保持原用法。保护已有代码，公开路由可修改但不含明文Key；不调用模型或签发PASS。',
+    input_schema:{type:'object',additionalProperties:false,required:['capability'],properties:{capability:{type:'string',enum:CAPABILITY_NAMES},install_dependencies:{type:'boolean'},download_models:{type:'boolean'},language:{type:'string',maxLength:40}}},
     execute:async(input,ctx)=>{
-      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||!['speech','documents','ocr','http','vision'].includes(String(input.capability))||Object.keys(input).some(key=>!['capability','install_dependencies','download_models','language'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean')||input.language!==undefined&&(input.capability!=='ocr'||typeof input.language!=='string'||input.language.length>40||!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.language)))throw Error('CAPABILITY_ARGUMENTS_INVALID')
-        if(input.capability==='ocr'||input.capability==='http'||input.capability==='vision'){
+      try{policy.assertCommand(ctx);if(ctx.projectId!==projectId||!CAPABILITY_NAMES.includes(String(input.capability))||Object.keys(input).some(key=>!['capability','install_dependencies','download_models','language'].includes(key))||['install_dependencies','download_models'].some(key=>input[key]!==undefined&&typeof input[key]!=='boolean')||input.language!==undefined&&(input.capability!=='ocr'||typeof input.language!=='string'||input.language.length>40||!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.language)))throw Error('CAPABILITY_ARGUMENTS_INVALID')
+        if(integrationCapability(input.capability)){
           if(input.install_dependencies!==undefined||input.download_models!==undefined)throw Error('INTEGRATION_NO_DOWNLOAD_OPTIONS')
           for(const path of INTEGRATION_COMPONENTS[input.capability])policy.assertFileWrite(path,ctx)
           const result=await prepareIntegrationCapability(projectId,findProject(projectId).root_path,input.capability,ctx.signal,input.language as string|undefined)

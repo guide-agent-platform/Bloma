@@ -20,7 +20,8 @@ import { SOFTWARE_CONTEXT_CATALOG } from '../software/context-catalog'
 import { softwareWorkingContext } from '../software/working-context'
 import { DOCUMENT_GUIDANCE } from '../software/document-capability'
 import { COUNTEREXAMPLE_GUIDANCE } from '../software/acceptance-counterexamples'
-import { MULTIMODAL_GUIDANCE, HTTP_GUIDANCE, VISION_GUIDANCE } from '../software/integration-capabilities'
+import { MULTIMODAL_GUIDANCE, HTTP_GUIDANCE, VISION_GUIDANCE, AI_SERVICE_GUIDANCE, PRODUCT_COMPONENT_RECIPES } from '../software/integration-capabilities'
+import {softwareDiagnosticContext} from '../software/diagnostic-context'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -59,15 +60,18 @@ export function productionContext(backplane: PrdBackplane, topic: string, featur
 
 export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
-    description: '只读按需上下文：capabilities列目录；documents看文档，multimodal看OCR/音频，http-integration看API/Webhook；acceptance-counterexamples看反例，existing-project看已有工程；execution/working-state看现场，overview/features看范围，launch/verification-gui/llm/speech看协议，resume/data-update/delivery看恢复交付。',
+    description: '只读按需上下文：components看可复用组合，ai-service看通用AI模板与Key/路由；diagnostics汇总故障现场。capabilities列目录；documents/vision/multimodal/http-integration看能力；existing-project/working-state看工程与现场，features看范围，verification-gui/llm/speech看验收协议。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['capabilities','execution','working-state','documents','multimodal','vision','http-integration','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
+      topic: { type: 'string', enum: ['capabilities','components','ai-service','diagnostics','execution','working-state','documents','multimodal','vision','http-integration','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw Error('PRODUCTION_CONTEXT_PROJECT_MISMATCH')
         if (isSoftwareProject(projectId) && input.topic === 'capabilities') return { output: JSON.stringify({ catalog: SOFTWARE_CONTEXT_CATALOG, note: '目录不代表本轮需求或环境已就绪；按topic读取需要的说明，不扩大目标。' }) }
+        if(isSoftwareProject(projectId)&&input.topic==='components')return{output:JSON.stringify(PRODUCT_COMPONENT_RECIPES)}
+        if(isSoftwareProject(projectId)&&input.topic==='ai-service')return{output:JSON.stringify(AI_SERVICE_GUIDANCE)}
+        if(isSoftwareProject(projectId)&&input.topic==='diagnostics')return{output:JSON.stringify(softwareDiagnosticContext(projectId,ctx.sessionId))}
         if (isSoftwareProject(projectId) && input.topic === 'documents') return { output: JSON.stringify(DOCUMENT_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'multimodal') return { output: JSON.stringify(MULTIMODAL_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'vision') return { output: JSON.stringify(VISION_GUIDANCE) }

@@ -8,6 +8,7 @@ import { resolveProjectRoot } from '../../shared/project-root-override'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { importedProjectContext, importedProjectChanges } from './import-project'
 import { redactSoftwareOutput } from './process-manager'
+import {changeImpact} from './change-impact'
 
 const ignored = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.cache', 'dist', 'build', '00_HISTORY', '00_VERIFY'])
 const sourceFile = /\.(?:[cm]?[jt]sx?|py|rs|go|java|cs|cpp|c|h|html|css|json|toml|md|yaml|yml|lock|mod|txt)$|^\.python-version$/i
@@ -50,8 +51,8 @@ export function repositoryFileFacts(projectId: string, root: string, requested: 
   writeTextFileAtomic(cache, JSON.stringify(facts)); return { ...facts, reused: false }
 }
 export function buildRepositoryContextTool(projectId: string): AgentLoopTool {
-  return { name: 'inspect_repository', parallelSafe: true, description: '已有工程按需定位：overview看包脚本/锁文件/测试；changes对比导入基线与当前副本字节，不读取原目录；file提取声明/导入候选；search查相关源码。候选或差异不是测试通过证据。',
-    input_schema: { type: 'object', required: ['mode'], additionalProperties: false, properties: { mode: { type: 'string', enum: ['overview', 'file', 'search', 'changes'] }, path: { type: 'string' }, query: { type: 'string', minLength: 1, maxLength: 120 } } },
+  return { name: 'inspect_repository', parallelSafe: true, description: '已有工程按需定位：overview看脚本/锁文件/测试；changes比较导入字节；impact(paths)沿静态相对导入定位受影响模块与开发期测试候选，不执行、不跳过正式验收；file/search继续定位。候选不是通过证据。',
+    input_schema: { type: 'object', required: ['mode'], additionalProperties: false, properties: { mode: { type: 'string', enum: ['overview', 'file', 'search', 'changes','impact'] }, path: { type: 'string' }, query: { type: 'string', minLength: 1, maxLength: 120 },paths:{type:'array',minItems:1,maxItems:32,items:{type:'string'}} } },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw Error('REPOSITORY_PROJECT_MISMATCH')
@@ -62,6 +63,7 @@ export function buildRepositoryContextTool(projectId: string): AgentLoopTool {
           return { output: redactSoftwareOutput(JSON.stringify(repositoryFileFacts(projectId, root, input.path))) }
         }
         let files = repositoryFiles(root)
+        if(input.mode==='impact')return{output:redactSoftwareOutput(JSON.stringify(changeImpact(root,files,input.paths as string[],ctx.signal)))}
         if (input.mode === 'search' && typeof input.path === 'string' && input.path) {
           const directory = realpathSync(resolve(root, input.path)), rel = relative(realpathSync(root), directory)
           if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) throw Error('REPOSITORY_SEARCH_OUTSIDE_PROJECT')

@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -108,6 +108,11 @@
         "main/software/capability-tools.ts",
         "main/software/document-capability.ts",
         "main/software/integration-capabilities.ts",
+        "main/software/change-impact.ts",
+        "main/software/diagnostic-context.ts",
+        "main/templates/tools/ai_service.cjs",
+        "main/templates/tools/ai_routes.cjs",
+        "main/templates/tools/ai_secrets.cjs",
         "main/software/image-tool.ts",
         "main/software/inspect-tool.ts",
         "main/templates/tools/vision_client.cjs",
@@ -276,6 +281,10 @@
     "confirmMvpDelivered"
   ],
   "asset_terms": [
+    "ai_service.cjs",
+    "ai_routes.cjs",
+    "ai_secrets.cjs",
+    "AI_SERVICE.template.json",
     "vision_client.cjs",
     "llm_entry_probe.cjs",
     "ocr_runtime.cjs",
@@ -295,6 +304,10 @@
     "pending-confirmations"
   ],
   "asset_files": [
+    "main/templates/tools/ai_service.cjs",
+    "main/templates/tools/ai_routes.cjs",
+    "main/templates/tools/ai_secrets.cjs",
+    "main/templates/tools/AI_SERVICE.template.json",
     "main/templates/tools/vision_client.cjs",
     "main/templates/tools/llm_entry_probe.cjs",
     "main/templates/tools/ocr_runtime.cjs",

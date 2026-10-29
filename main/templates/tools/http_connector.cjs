@@ -22,6 +22,15 @@ function createHttpConnector(config) {
   const auth=config.auth
   if(auth&&(!auth.header||!/^[A-Za-z0-9-]+$/.test(auth.header)||['host','content-length','connection','transfer-encoding'].includes(auth.header.toLowerCase())||typeof auth.value!=='string'||!auth.value||/[\r\n]/.test(auth.value)))throw Error('HTTP_AUTH_INVALID')
   // Snapshot caller configuration; mutating settings cannot broaden this client.
+  const extraHeaders={}
+  if(config.headers!==undefined){
+    if(!config.headers||Array.isArray(config.headers)||Object.keys(config.headers).length>12)throw Error('HTTP_HEADERS_INVALID')
+    for(const[name,value]of Object.entries(config.headers)){
+      const lower=name.toLowerCase()
+      if(!/^[A-Za-z0-9-]+$/.test(name)||['host','content-length','connection','transfer-encoding','accept','accept-encoding','content-type','authorization','x-api-key'].includes(lower)||typeof value!=='string'||value.length>1024||/[\r\n]/.test(value))throw Error('HTTP_HEADERS_INVALID')
+      extraHeaders[name]=value
+    }
+  }
   const allowed=new Set(methods),authorization=auth?{[auth.header]:auth.value}:{}
   const requestBytes=config.requestBytes??1024*1024
   if(!Number.isSafeInteger(requestBytes)||requestBytes<1||requestBytes>16*1024*1024)throw Error('HTTP_REQUEST_LIMIT_INVALID')
@@ -52,7 +61,7 @@ function createHttpConnector(config) {
           request=(url.protocol==='https:'?https:http).request(url,{method,agent:false,lookup:(_hostname,settings,callback)=>{
             // Pin the validated DNS answer to this connection; no second lookup.
             if(settings.all)callback(null,[chosen]);else callback(null,chosen.address,chosen.family)
-          },headers:{Accept:'application/json','Accept-Encoding':'identity',...authorization,...(body!==undefined?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}:{})}},response=>{
+          },headers:{Accept:'application/json','Accept-Encoding':'identity',...extraHeaders,...authorization,...(body!==undefined?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}:{})}},response=>{
             const status=response.statusCode??0
             if(status<200||status>=300){
               response.destroy()

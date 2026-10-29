@@ -77,6 +77,7 @@ function environmentTool(projectId: string): AgentLoopTool {
 }
 
 export const SOFTWARE_ENGINEERING_INSTRUCTIONS = [
+  '优先按需读取components复用成熟模块；AI服务用prepare_software_capability(ai)与ai-service说明，只填公开协议/地址/模型，真实Key由产品设置或自己的密钥存储注入，不写进模板或借平台Key。排障先读diagnostics汇总当前现场，未决命令接续读取；修改前可inspect_repository({mode:"impact",paths:[相关文件]})定位开发期测试候选，正式交付门仍完整执行。',
   '优先利用当前模型已有视觉能力：图片附件用于理解用户参考图/草图；开发用inspect_app(include_image:true)附上实际截图，或view_image(debug_session_id)读取本会话当前截图，再结合源码/DOM核对布局、颜色与反馈。附图不等于已审阅，不把旧图当新图或点评当业务PASS。产品需要看图则读取read_production_context(vision)并用自己的视觉模型配置；OCR仅文字提取。',
   '图片OCR与音频复用按需读取read_production_context(multimodal)，JSON API/Webhook读取http-integration；用prepare_software_capability的ocr/http物化产品组件。只实现当前确认范围，产品使用自己的凭据；准备、OCR识别文本、本机HTTP契约和真实外部效果分别报告，不能借平台渠道密钥或用受控服务冒充真实账号集成。',
   '资料解析/检索先按需读取read_production_context(documents)，复用产品自己的成熟解析依赖和document_runtime.cjs，不自写PDF/ZIP解析器替代依赖诊断。已有工程用inspect_repository overview/changes核对原入口与本轮增量；设计验收时可读取acceptance-counterexamples，选择与当前确认范围有关的多对象/异常反例。目录和组件准备不等于产品通过。',

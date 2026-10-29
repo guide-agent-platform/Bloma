@@ -12,6 +12,8 @@
 
 > [模型视觉链路完善](docs/05_PROJECT_PLAN/vision-workflow-20261029.md)：保留已有图片附件与模型传输，补齐当前调试截图的按会话读取；提供产品自有视觉API客户端与换图探针。图片已附上、模型已核对、本机协议通过和真实视觉效果分别表达。
 
+> [通用AI服务与效率支持](docs/05_PROJECT_PLAN/ai-service-efficiency-20261029.md)：文本/图片共用AIService，公开路由模板与运行时产品Key分开，支持OpenAI聊天兼容和Anthropic消息协议；提供组件组合目录、故障现场汇总与静态关联测试候选。正式交付门不跳过，速度收益另做实测。
+
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 
 > 当前执行接手：[Harness 改进交接](docs/05_PROJECT_PLAN/harness-improvement-handoff-20261027.md)，包含已完成版本、验证边界和剩余批次的执行入口。

@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "a0f4f8dad27d13571cbf9aab16c0b1cb775d1b97",
-  "scope_version": 12,
+  "source_revision": "ac2b62e29adb262cbbebecfe42f199f1a2d04cdf",
+  "scope_version": 13,
   "scanner_sha256": "32dd2ea79859d4a0d9332a849b988caf48659d9cbcee3c13b51620835663693a",
-  "scope_sha256": "5a864d38beb5ff28105acd906ca5a4a87e4d595c38026a31aa8a4fca9c3331ec",
-  "source_input_digest": "67b3a6384924462a30efac9c9afa3313b327862bb37054647adf25711103c70b",
+  "scope_sha256": "61b6583a20558b6ccd5e10b66186425560565db89b67bfd7a14e737e5c5382f1",
+  "source_input_digest": "d75ff13cae95de86969b111311b9f4edc689012ccd0846660a919f1c8ba968b7",
   "method": "existing tracked and unignored working files + TypeScript AST static/type/reexport/literal dynamic/require imports; retired paths must remain absent; no app execution or symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,10 +19,10 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 843,
-    "module_edges": 3136,
+    "scanned_sources": 850,
+    "module_edges": 3160,
     "asset_edges": 39,
-    "scoped_modules": 93,
+    "scoped_modules": 98,
     "groups": {
       "legacy_retirement_boundary": 2,
       "production_shared_extracted": 3,
@@ -30,7 +30,7 @@
       "modern_workflow_keep": 15,
       "current_routes_and_storage_keep": 10,
       "frozen_experiment_separate": 5,
-      "shared_capability_keep_migrate": 36,
+      "shared_capability_keep_migrate": 41,
       "history_data_and_user_access_keep": 12,
       "legacy_card_identity_keep": 1,
       "historical_schema_and_shared_diagnostics": 1,
@@ -145,6 +145,11 @@
         "main/software/capability-tools.ts",
         "main/software/document-capability.ts",
         "main/software/integration-capabilities.ts",
+        "main/software/change-impact.ts",
+        "main/software/diagnostic-context.ts",
+        "main/templates/tools/ai_service.cjs",
+        "main/templates/tools/ai_routes.cjs",
+        "main/templates/tools/ai_secrets.cjs",
         "main/software/image-tool.ts",
         "main/software/inspect-tool.ts",
         "main/templates/tools/vision_client.cjs",
@@ -1908,6 +1913,14 @@
           "line": 7
         },
         {
+          "from": "tests/unit/software/efficiency-context.test.ts",
+          "to": "main/desktop/lean-budget.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/lean-budget",
+          "kind": "static_runtime",
+          "line": 10
+        },
+        {
           "from": "tests/unit/software/harness-continuity.test.ts",
           "to": "main/desktop/lean-budget.ts",
           "resolution": "module",
@@ -1986,7 +1999,7 @@
     {
       "path": "main/desktop/llm-verification.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "cac40ba191c474cf5339a73a45298395efa8d9df93fe7131a925657f0b9fc664",
+      "sha256": "7e87ec87e16fcd943ade29c9c69a743165da70bbedfa92d2d16f6c14cddd5967",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2032,6 +2045,14 @@
           "specifier": "../../../main/desktop/llm-verification",
           "kind": "static_runtime",
           "line": 5
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "to": "main/desktop/llm-verification.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/llm-verification",
+          "kind": "static_runtime",
+          "line": 12
         },
         {
           "from": "tests/unit/software/delivery.test.ts",
@@ -2450,7 +2471,7 @@
     {
       "path": "main/desktop/production-context.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "43064299e5f4de9e59b1129a4c5e3250335ed20c88deb1bd58216d40e206f20a",
+      "sha256": "1660a7bf02dc4b28d7c69b0c1b75b547680d2d9a46effd1d0d5204dd548cef50",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2471,6 +2492,14 @@
           "specifier": "../../../main/desktop/production-context",
           "kind": "static_runtime",
           "line": 3
+        },
+        {
+          "from": "tests/unit/software/efficiency-context.test.ts",
+          "to": "main/desktop/production-context.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/production-context",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "tests/unit/software/gui-tool-contract.test.ts",
@@ -2766,6 +2795,14 @@
           "specifier": "../desktop/verification-fingerprint",
           "kind": "static_runtime",
           "line": 19
+        },
+        {
+          "from": "main/software/diagnostic-context.ts",
+          "to": "main/desktop/verification-fingerprint.ts",
+          "resolution": "module",
+          "specifier": "../desktop/verification-fingerprint",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "main/software/image-tool.ts",
@@ -6123,6 +6160,14 @@
           "line": 5
         },
         {
+          "from": "main/software/diagnostic-context.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../project/project-service",
+          "kind": "static_runtime",
+          "line": 5
+        },
+        {
           "from": "main/software/execution-tools.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6862,6 +6907,14 @@
           "line": 8
         },
         {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 8
+        },
+        {
           "from": "tests/unit/software/async-command.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -6932,6 +6985,14 @@
           "specifier": "../../../main/project/project-service",
           "kind": "static_runtime",
           "line": 8
+        },
+        {
+          "from": "tests/unit/software/efficiency-context.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 6
         },
         {
           "from": "tests/unit/software/execution.test.ts",
@@ -7737,7 +7798,7 @@
     {
       "path": "main/software/agent-tools.ts",
       "group": "modern_workflow_keep",
-      "sha256": "527f89efb0794bd1fee6b1e394e0c7965219fef5e1f6e481fe22a8209b6f87a9",
+      "sha256": "32f0df14389f6d162627542ee1e5ebe7128da88f1401d03d78c676f3b053f259",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7751,6 +7812,14 @@
       ],
       "type_importers": [],
       "test_importers": [
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "to": "main/software/agent-tools.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/agent-tools",
+          "kind": "static_runtime",
+          "line": 11
+        },
         {
           "from": "tests/unit/software/capability-tools.test.ts",
           "to": "main/software/agent-tools.ts",
@@ -7917,7 +7986,7 @@
     {
       "path": "main/software/capability-tools.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "381470520ca460b74efa6b4f22a5ceb8253695426ac8de1fb9fd4de5e2091589",
+      "sha256": "2a092b525b1be56047898d0cc0c035764a69f68fa2ad87ea50de05c7557d4f4d",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7947,6 +8016,50 @@
         "speech_worker.py",
         "speech_bridge.cjs"
       ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/software/change-impact.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "fe9d617c60d93d65ffeb5f7ae6750aa5512b41ebc98d51999177b8ef62cffb0c",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/software/repository-context.ts",
+          "to": "main/software/change-impact.ts",
+          "resolution": "module",
+          "specifier": "./change-impact",
+          "kind": "static_runtime",
+          "line": 11
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/software/diagnostic-context.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "a94b873e9d1715527ca987dfdf6bec656e8fb461f745b9e19f621af43583fc7a",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/desktop/production-context.ts",
+          "to": "main/software/diagnostic-context.ts",
+          "resolution": "module",
+          "specifier": "../software/diagnostic-context",
+          "kind": "static_runtime",
+          "line": 24
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [],
+      "asset_terms": [],
       "computed_imports": [],
       "deletion_authorized": false
     },
@@ -8308,7 +8421,7 @@
     {
       "path": "main/software/integration-capabilities.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "7126982089f059e998456011ffcc266911865fd6ad8e6a914191ac0da3160def",
+      "sha256": "2b0ca90e7e5d1545ab9a5d73995bca948d43361c30aca48d5c62603d8dd84b43",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -8332,6 +8445,10 @@
       "test_importers": [],
       "string_references": [],
       "asset_terms": [
+        "ai_service.cjs",
+        "ai_routes.cjs",
+        "ai_secrets.cjs",
+        "AI_SERVICE.template.json",
         "vision_client.cjs",
         "ocr_runtime.cjs",
         "ocr_worker.ps1",
@@ -8685,6 +8802,14 @@
           "line": 7
         },
         {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "to": "main/software/release-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/release-store",
+          "kind": "static_runtime",
+          "line": 13
+        },
+        {
           "from": "tests/unit/software/budget-host-completion.test.ts",
           "to": "main/software/release-store.ts",
           "resolution": "module",
@@ -8803,7 +8928,7 @@
     {
       "path": "main/software/repository-context.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "190a0ee1f9c2764e1db47f5ff23c898202a78ae0db6606e71465f5966ea06070",
+      "sha256": "a6b759ab579a9be40d918b29f440a9fcf8610211a1a8e0d953b5de0291d8efa7",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -8817,6 +8942,14 @@
       ],
       "type_importers": [],
       "test_importers": [
+        {
+          "from": "tests/unit/software/efficiency-context.test.ts",
+          "to": "main/software/repository-context.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/repository-context",
+          "kind": "static_runtime",
+          "line": 8
+        },
         {
           "from": "tests/unit/software/repository-context.test.ts",
           "to": "main/software/repository-context.ts",
@@ -9022,6 +9155,134 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/templates/tools/ai_routes.cjs",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "d5de994285d36cb516081dada0ff3eec4936dfb2d1122d209176dea82c1e7495",
+      "module_load_reachable": false,
+      "runtime_importers": [
+        {
+          "from": "main/templates/tools/ai_service.cjs",
+          "to": "main/templates/tools/ai_routes.cjs",
+          "resolution": "module",
+          "specifier": "./ai_routes.cjs",
+          "kind": "require_runtime",
+          "line": 2
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [],
+      "string_references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        }
+      ],
+      "asset_terms": [
+        "AI_SERVICE.template.json"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/templates/tools/ai_secrets.cjs",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "f87f754a25532342edf2232ba4bc932dbfb5ec505b59e4cd9c922a8c7df6c250",
+      "module_load_reachable": false,
+      "runtime_importers": [],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "to": "main/templates/tools/ai_secrets.cjs",
+          "resolution": "module",
+          "specifier": "../../../main/templates/tools/ai_secrets.cjs",
+          "kind": "require_runtime",
+          "line": 15
+        }
+      ],
+      "string_references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 15,
+          "kind": "test_string"
+        }
+      ],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/templates/tools/ai_service.cjs",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "a4f5695296828be689364cff6fdc023ce3ae894e7aa21ed3ebf89203c05336db",
+      "module_load_reachable": false,
+      "runtime_importers": [
+        {
+          "from": "main/templates/tools/vision_client.cjs",
+          "to": "main/templates/tools/ai_service.cjs",
+          "resolution": "module",
+          "specifier": "./ai_service.cjs",
+          "kind": "require_runtime",
+          "line": 2
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "to": "main/templates/tools/ai_service.cjs",
+          "resolution": "module",
+          "specifier": "../../../main/templates/tools/ai_service.cjs",
+          "kind": "require_runtime",
+          "line": 14
+        }
+      ],
+      "string_references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 14,
+          "kind": "test_string"
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 32,
+          "kind": "test_string"
+        }
+      ],
+      "asset_terms": [
+        "ai_routes.cjs",
+        "http_connector.cjs"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/templates/tools/document_runtime.cjs",
       "group": "shared_capability_keep_migrate",
       "sha256": "ed63408ae712ecc5237071acc97d8f227ff59486ff0406ae23021b2b4325f9cc",
@@ -9077,16 +9338,16 @@
     {
       "path": "main/templates/tools/http_connector.cjs",
       "group": "shared_capability_keep_migrate",
-      "sha256": "93d84fd2b3c36718f91e294446c190483d0f4fd152e1629f099feaa385d2a24c",
+      "sha256": "9781a7cf8b30f7bf1c69b9e594878f7834bbe22ffce903a0a8a65a5808e023f3",
       "module_load_reachable": false,
       "runtime_importers": [
         {
-          "from": "main/templates/tools/vision_client.cjs",
+          "from": "main/templates/tools/ai_service.cjs",
           "to": "main/templates/tools/http_connector.cjs",
           "resolution": "module",
           "specifier": "./http_connector.cjs",
           "kind": "require_runtime",
-          "line": 3
+          "line": 2
         },
         {
           "from": "main/templates/tools/webhook_inbox.cjs",
@@ -9109,6 +9370,11 @@
         }
       ],
       "string_references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
         {
           "from": "main/software/integration-capabilities.ts",
           "line": 7,
@@ -9190,7 +9456,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 18,
+          "line": 20,
           "kind": "source_string"
         },
         {
@@ -9213,7 +9479,7 @@
     {
       "path": "main/templates/tools/vision_client.cjs",
       "group": "shared_capability_keep_migrate",
-      "sha256": "62ecc7a4d69417650774e07566f2c2415032f8df0c3b903dca3c6e7ea350e52a",
+      "sha256": "dc68723efc266a83f0d24ba6292766e012714705c997eca3de7d69b2cbd76516",
       "module_load_reachable": false,
       "runtime_importers": [],
       "type_importers": [],
@@ -9245,7 +9511,7 @@
         }
       ],
       "asset_terms": [
-        "http_connector.cjs"
+        "ai_service.cjs"
       ],
       "computed_imports": [],
       "deletion_authorized": false
@@ -9991,6 +10257,14 @@
         },
         {
           "from": "main/software/debug-workspace.ts",
+          "to": "storage/config-paths.ts",
+          "resolution": "module",
+          "specifier": "../../storage/config-paths",
+          "kind": "static_runtime",
+          "line": 4
+        },
+        {
+          "from": "main/software/diagnostic-context.ts",
           "to": "storage/config-paths.ts",
           "resolution": "module",
           "specifier": "../../storage/config-paths",
@@ -10811,11 +11085,6 @@
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 70,
-          "kind": "source"
-        },
-        {
-          "path": "main/desktop/production-context.ts",
           "line": 71,
           "kind": "source"
         },
@@ -10846,42 +11115,62 @@
         },
         {
           "path": "main/desktop/production-context.ts",
+          "line": 77,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 78,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 79,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
           "line": 80,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 85,
+          "line": 84,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 94,
+          "line": 89,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 99,
+          "line": 98,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 100,
+          "line": 103,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 101,
+          "line": 104,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 102,
+          "line": 105,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 113,
+          "line": 106,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 117,
           "kind": "source"
         },
         {
@@ -11510,6 +11799,136 @@
   ],
   "asset_references": [
     {
+      "term": "ai_service.cjs",
+      "sites": [
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "ai_service.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "ai_service.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 51,
+          "value": "prepare_software_capability({capability:\"ai\"})提供ai_service.cjs、ai_routes.cjs、AI_SERVICE.template.json和HTTP组件。准备不联网，不写Key，不签发业务PASS。可编辑公开路由模板，重跑准备保留用户路由；代码文件冲突拒绝覆盖。"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 53,
+          "value": "const {AIService}=require(\"./ai_service.cjs\"); const ai=new AIService({resolveKey:async name=>产品自己的密钥存储读取(name)}); await ai.generate({route:\"default\",prompt:\"业务问题\",images:可选图片路径数组,dataDir:process.env.APP_DATA_DIR,signal}); 不必每个项目重新写HTTP和解析。"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 56,
+          "value": "CORE_CHECK.json llm:{runtime:\"node\",module:\"ai_service.cjs\",factory:\"AIService\",method:\"generate\",protocol:\"openai-chat\"或\"anthropic-messages\",input:仅图片需求时填\"vision\",covers:[实际功能F编号]}。宿主分别验证协议、鉴权、错误、换图；入口须产品实际使用。不同协议/模型特性需明确配置，未实现的协议不能伪称兼容。"
+        },
+        {
+          "path": "main/templates/tools/vision_client.cjs",
+          "line": 2,
+          "value": "./ai_service.cjs"
+        },
+        {
+          "path": "tests/unit/software/ai-service.test.ts",
+          "line": 14,
+          "value": "../../../main/templates/tools/ai_service.cjs"
+        },
+        {
+          "path": "tests/unit/software/ai-service.test.ts",
+          "line": 32,
+          "value": "ai_service.cjs"
+        }
+      ]
+    },
+    {
+      "term": "ai_routes.cjs",
+      "sites": [
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "ai_routes.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "ai_routes.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 51,
+          "value": "prepare_software_capability({capability:\"ai\"})提供ai_service.cjs、ai_routes.cjs、AI_SERVICE.template.json和HTTP组件。准备不联网，不写Key，不签发业务PASS。可编辑公开路由模板，重跑准备保留用户路由；代码文件冲突拒绝覆盖。"
+        },
+        {
+          "path": "main/templates/tools/ai_service.cjs",
+          "line": 2,
+          "value": "./ai_routes.cjs"
+        }
+      ]
+    },
+    {
+      "term": "ai_secrets.cjs",
+      "sites": [
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "ai_secrets.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "ai_secrets.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 55,
+          "value": "可在产品后台用createSecretStore({dataDir,encrypt:key=>safeStorage.encryptString(key),decrypt:bytes=>safeStorage.decryptString(bytes)})（来自ai_secrets.cjs），先核对产品自己的safeStorage.isEncryptionAvailable()。set(name,key)保存密文，get(name)仅后台调用并注入resolveKey；无可信O"
+        },
+        {
+          "path": "tests/unit/software/ai-service.test.ts",
+          "line": 15,
+          "value": "../../../main/templates/tools/ai_secrets.cjs"
+        }
+      ]
+    },
+    {
+      "term": "AI_SERVICE.template.json",
+      "sites": [
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "AI_SERVICE.template.json"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "AI_SERVICE.template.json"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 11,
+          "value": "AI_SERVICE.template.json"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 51,
+          "value": "prepare_software_capability({capability:\"ai\"})提供ai_service.cjs、ai_routes.cjs、AI_SERVICE.template.json和HTTP组件。准备不联网，不写Key，不签发业务PASS。可编辑公开路由模板，重跑准备保留用户路由；代码文件冲突拒绝覆盖。"
+        },
+        {
+          "path": "main/templates/tools/ai_routes.cjs",
+          "line": 17,
+          "value": "AI_SERVICE.template.json"
+        },
+        {
+          "path": "tests/unit/software/ai-service.test.ts",
+          "line": 24,
+          "value": "AI_SERVICE.template.json"
+        }
+      ]
+    },
+    {
       "term": "vision_client.cjs",
       "sites": [
         {
@@ -11519,17 +11938,17 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 19,
-          "value": "if(typeof require('./vision_client.cjs').VisionClient!=='function')throw Error('VISION_CLIENT_MISSING');console.log(JSON.stringify({node:process.versions.node,protocol:'openai-chat-images'}))"
+          "line": 20,
+          "value": "if(typeof require('./vision_client.cjs').VisionClient!=='function')throw Error('VISION_CLIENT_MISSING');"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 44,
+          "line": 45,
           "value": "const {VisionClient}=require(\"./vision_client.cjs\"); await new VisionClient().analyze({prompt:\"描述图中内容\",images:[产品数据目录内图片路径],dataDir:process.env.APP_DATA_DIR,config:{endpoint:\"https://兼容服务/v1\",model:\"用户选择的视觉模型\",api_key:\"产品自己的Key\",timeout:30}"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 46,
+          "line": 47,
           "value": "CORE_CHECK.json llm:{runtime:\"node\",module:\"vision_client.cjs\",factory:\"VisionClient\",method:\"analyze\",input:\"vision\",covers:[相关F编号]}。入口必须为产品实际调用路径。宿主以本地HTTP检查两张不同图片字节、换图、鉴权和错误，不能据此证明模型看懂图片或真实供应商可用。"
         },
         {
@@ -11554,7 +11973,7 @@
       "sites": [
         {
           "path": "main/desktop/llm-verification.ts",
-          "line": 33,
+          "line": 35,
           "value": "templates/tools/llm_entry_probe.cjs"
         }
       ]
@@ -11569,12 +11988,12 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 19,
+          "line": 20,
           "value": "require('./ocr_runtime.cjs').inspectOcr().then(r=>console.log(JSON.stringify(r))).catch(e=>{console.error(e.message);process.exitCode=1})"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 38,
+          "line": 39,
           "value": "产品Node后端require(\"./ocr_runtime.cjs\").recognizeImage(file,{dataDir:process.env.APP_DATA_DIR,language:\"zh-Hans-CN\",signal,timeoutMs:30000})。PNG/JPEG/BMP最大16MiB；Windows内置引擎返回原图SHA-256、文字、行及词框。空图返回no_text，不伪造文字。"
         },
         {
@@ -11614,22 +12033,27 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 19,
+          "line": 7,
+          "value": "http_connector.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 20,
           "value": "require('./http_connector.cjs');require('./webhook_inbox.cjs');console.log(JSON.stringify({node:process.versions.node,protocol:'json-http-and-hmac-sha256'}))"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 50,
+          "line": 64,
           "value": "prepare_software_capability({capability:\"http\"})物化http_connector.cjs和webhook_inbox.cjs，无额外依赖/网络调用。它是产品后端组件，不是Bloma账号连接或新的需求capabilities标签。"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 51,
+          "line": 65,
           "value": "const {createHttpConnector}=require(\"./http_connector.cjs\"); const api=createHttpConnector({baseUrl:\"https://api.example.com/\",methods:[\"GET\"],auth:{header:\"Authorization\",value:\"Bearer 产品自有凭据\"}}); await api.request(\"items\",{signal,timeoutM"
         },
         {
-          "path": "main/templates/tools/vision_client.cjs",
-          "line": 3,
+          "path": "main/templates/tools/ai_service.cjs",
+          "line": 2,
           "value": "./http_connector.cjs"
         },
         {
@@ -11664,12 +12088,12 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 19,
+          "line": 20,
           "value": "require('./http_connector.cjs');require('./webhook_inbox.cjs');console.log(JSON.stringify({node:process.versions.node,protocol:'json-http-and-hmac-sha256'}))"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 50,
+          "line": 64,
           "value": "prepare_software_capability({capability:\"http\"})物化http_connector.cjs和webhook_inbox.cjs，无额外依赖/网络调用。它是产品后端组件，不是Bloma账号连接或新的需求capabilities标签。"
         },
         {
@@ -11684,7 +12108,7 @@
       "sites": [
         {
           "path": "main/software/agent-tools.ts",
-          "line": 82,
+          "line": 83,
           "value": "资料解析/检索先按需读取read_production_context(documents)，复用产品自己的成熟解析依赖和document_runtime.cjs，不自写PDF/ZIP解析器替代依赖诊断。已有工程用inspect_repository overview/changes核对原入口与本轮增量；设计验收时可读取acceptance-counterexamples，选择与当前确认范围有关的多对象/异常反例。目录和组件准备不等于产品通过。"
         },
         {
@@ -11769,7 +12193,7 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 18,
+          "line": 20,
           "value": "speech_runtime.py"
         },
         {
@@ -11869,7 +12293,7 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 18,
+          "line": 20,
           "value": "speech_locator.py"
         },
         {
@@ -11919,7 +12343,7 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 18,
+          "line": 20,
           "value": "speech_worker.py"
         },
         {
@@ -11944,12 +12368,12 @@
       "sites": [
         {
           "path": "main/desktop/production-context.ts",
-          "line": 97,
+          "line": 101,
           "value": "const {transcribeWav}=require(\"./speech_bridge.cjs\"); await transcribeWav(APP_DATA_DIR内PCM16 WAV绝对路径,{signal,timeoutMs:90000})；由宿主BLOMA_SPEECH_PYTHON绑定项目.venv，不要求用户安装Python或借用平台语音IPC。"
         },
         {
           "path": "main/software/agent-tools.ts",
-          "line": 85,
+          "line": 86,
           "value": "语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立"
         },
         {
@@ -11959,17 +12383,17 @@
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 18,
+          "line": 20,
           "value": "speech_bridge.cjs"
         },
         {
           "path": "main/software/capability-tools.ts",
-          "line": 52,
+          "line": 54,
           "value": "speech_bridge.cjs exports transcribeWav(APP_DATA_DIR下的PCM16 WAV绝对路径)，使用宿主绑定的BLOMA_SPEECH_PYTHON；支持signal和有界timeoutMs，不录音。"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 40,
+          "line": 41,
           "value": "语音沿既有speech准备与speech_bridge.cjs文件转写；真实麦克风另需明确授权和证据。本批不增加采集、TTS或模型调用。"
         },
         {
@@ -12376,8 +12800,8 @@
   ],
   "template_assets": [
     {
-      "path": "main/templates/tools/vision_client.cjs",
-      "sha256": "62ecc7a4d69417650774e07566f2c2415032f8df0c3b903dca3c6e7ea350e52a",
+      "path": "main/templates/tools/ai_service.cjs",
+      "sha256": "a4f5695296828be689364cff6fdc023ce3ae894e7aa21ed3ebf89203c05336db",
       "references": [
         {
           "from": "main/software/integration-capabilities.ts",
@@ -12385,15 +12809,127 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 19
+          "line": 7
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 44
+          "line": 51
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 46
+          "line": 53
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 56
+        },
+        {
+          "from": "main/templates/tools/vision_client.cjs",
+          "line": 2
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 14
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 32
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/ai_routes.cjs",
+      "sha256": "d5de994285d36cb516081dada0ff3eec4936dfb2d1122d209176dea82c1e7495",
+      "references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 51
+        },
+        {
+          "from": "main/templates/tools/ai_service.cjs",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/ai_secrets.cjs",
+      "sha256": "f87f754a25532342edf2232ba4bc932dbfb5ec505b59e4cd9c922a8c7df6c250",
+      "references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 55
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/AI_SERVICE.template.json",
+      "sha256": "15e22a6b146d9221710a43d0919237a87a93abed0656909f5cb18f4eefa10403",
+      "references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 11
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 51
+        },
+        {
+          "from": "main/templates/tools/ai_routes.cjs",
+          "line": 17
+        },
+        {
+          "from": "tests/unit/software/ai-service.test.ts",
+          "line": 24
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/vision_client.cjs",
+      "sha256": "dc68723efc266a83f0d24ba6292766e012714705c997eca3de7d69b2cbd76516",
+      "references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 20
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 45
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 47
         },
         {
           "from": "tests/unit/software/vision-client.test.ts",
@@ -12411,11 +12947,11 @@
     },
     {
       "path": "main/templates/tools/llm_entry_probe.cjs",
-      "sha256": "76ccd89dbcc2db4a855578c6c8d8d04909d3f846d76b737f40e92eeaf072f35e",
+      "sha256": "fe934986f97c39fc79eda4a69c7b7d1bdad55cd252a9487388fe59380ed1aa0d",
       "references": [
         {
           "from": "main/desktop/llm-verification.ts",
-          "line": 33
+          "line": 35
         }
       ]
     },
@@ -12429,11 +12965,11 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 19
+          "line": 20
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 38
+          "line": 39
         },
         {
           "from": "tests/unit/software/integration-capabilities.test.ts",
@@ -12457,7 +12993,7 @@
     },
     {
       "path": "main/templates/tools/http_connector.cjs",
-      "sha256": "93d84fd2b3c36718f91e294446c190483d0f4fd152e1629f099feaa385d2a24c",
+      "sha256": "9781a7cf8b30f7bf1c69b9e594878f7834bbe22ffce903a0a8a65a5808e023f3",
       "references": [
         {
           "from": "main/software/integration-capabilities.ts",
@@ -12469,19 +13005,23 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 19
+          "line": 7
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 50
+          "line": 20
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 51
+          "line": 64
         },
         {
-          "from": "main/templates/tools/vision_client.cjs",
-          "line": 3
+          "from": "main/software/integration-capabilities.ts",
+          "line": 65
+        },
+        {
+          "from": "main/templates/tools/ai_service.cjs",
+          "line": 2
         },
         {
           "from": "main/templates/tools/webhook_inbox.cjs",
@@ -12511,11 +13051,11 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 19
+          "line": 20
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 50
+          "line": 64
         },
         {
           "from": "tests/unit/software/http-connector.test.ts",
@@ -12539,7 +13079,7 @@
       "references": [
         {
           "from": "main/software/agent-tools.ts",
-          "line": 82
+          "line": 83
         },
         {
           "from": "main/software/document-capability.ts",
@@ -12609,7 +13149,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 18
+          "line": 20
         },
         {
           "from": "scripts/audit-workflow-retirement.mjs",
@@ -12691,7 +13231,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 18
+          "line": 20
         },
         {
           "from": "tests/unit/desktop/install-packages-tool.test.ts",
@@ -12733,7 +13273,7 @@
         },
         {
           "from": "main/software/capability-tools.ts",
-          "line": 18
+          "line": 20
         },
         {
           "from": "main/templates/tools/speech_bridge.cjs",
@@ -13497,7 +14037,7 @@
     },
     {
       "path": "main/templates/tools/llm_entry_probe.cjs",
-      "line": 39,
+      "line": 40,
       "expression": "import(pathToFileURL(file).href)"
     },
     {
@@ -13532,6 +14072,13 @@
       "group": "historical_schema_and_shared_diagnostics",
       "type_importers": 1,
       "test_importers": 0,
+      "module_load_reachable": false
+    },
+    {
+      "path": "main/templates/tools/ai_secrets.cjs",
+      "group": "shared_capability_keep_migrate",
+      "type_importers": 0,
+      "test_importers": 1,
       "module_load_reachable": false
     },
     {

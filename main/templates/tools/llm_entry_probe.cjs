@@ -4,6 +4,7 @@ const output = process.stdout.write.bind(process.stdout)
 process.stdout.write = (...args) => process.stderr.write(...args)
 async function probe(root, spec) {
   const vision=spec.input==='vision'
+  const anthropic=spec.protocol==='anthropic-messages'
   const imageBytes=(color)=>{
     const chunk=(name,data)=>{const type=Buffer.from(name),value=Buffer.concat([type,data]);let crc=0xffffffff;for(const byte of value){crc^=byte;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0)}const n=Buffer.alloc(4),c=Buffer.alloc(4);n.writeUInt32BE(data.length);c.writeUInt32BE((crc^0xffffffff)>>>0);return Buffer.concat([n,type,data,c])}
     const header=Buffer.alloc(13);header.writeUInt32BE(16);header.writeUInt32BE(16,4);header[8]=8;header[9]=2
@@ -12,15 +13,15 @@ async function probe(root, spec) {
   }
   const pictures=vision?[imageBytes([255,0,0]),imageBytes([0,0,255])]:[]
   const imageFiles=pictures.map((bytes,index)=>{const file=path.join(process.env.APP_DATA_DIR,`host-vision-${index}.png`);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);return file})
-  const expectedMessages=index=>[{role:'user',content:vision?[{type:'text',text:'host-test-prompt'},{type:'image_url',image_url:{url:'data:image/png;base64,'+pictures[index].toString('base64')}}]:'host-test-prompt'}]
+  const expectedMessages=index=>[{role:'user',content:vision?[{type:'text',text:'host-test-prompt'},anthropic?{type:'image',source:{type:'base64',media_type:'image/png',data:pictures[index].toString('base64')}}:{type:'image_url',image_url:{url:'data:image/png;base64,'+pictures[index].toString('base64')}}]:'host-test-prompt'}]
   const requests = [], state = { status: 200, malformed: false }
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', data => { body += data; if (body.length > 65536) req.destroy() })
     req.on('end', () => { try {
-      requests.push({ path: req.url, auth: req.headers.authorization, body: JSON.parse(body) })
+      requests.push({ path: req.url, auth: anthropic?req.headers['x-api-key']:req.headers.authorization,version:req.headers['anthropic-version'], body: JSON.parse(body) })
       res.writeHead(state.status, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify(state.malformed ? {} : { choices: [{ message: { content: 'host-stub-result' } }] }))
+      res.end(JSON.stringify(state.malformed ? {} : anthropic?{content:[{type:'text',text:'host-stub-result'}]}:{ choices: [{ message: { content: 'host-stub-result' } }] }))
     } catch { res.writeHead(400); res.end('{}') } })
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -38,7 +39,8 @@ async function probe(root, spec) {
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw Error('registered module outside product')
     const module = await import(pathToFileURL(file).href), Constructor = module[spec.factory] ?? module.default?.[spec.factory]
     const instance = new Constructor(), method = instance[spec.method].bind(instance)
-    const config = { endpoint: `http://127.0.0.1:${port}/v1`, model: 'host-test-model', api_key: 'host-test-key', provider: 'real', timeout: 2,...(vision?{network:'loopback'}:{}) }
+    const config = { endpoint: `http://127.0.0.1:${port}/v1`, model: 'host-test-model', api_key: 'host-test-key', provider: 'real', timeout: 2,...(vision||spec.protocol?{network:'loopback'}:{}),...(spec.protocol?{protocol:spec.protocol}:{}) }
+    const validRequest=request=>request?.path===(anthropic?'/v1/messages':'/v1/chat/completions')&&request.auth===(anthropic?'host-test-key':'Bearer host-test-key')&&(!anthropic||request.version==='2023-06-01')&&request.body.model==='host-test-model'
     const invoke = async (config,index=0) => {
       let timer
       try {
@@ -53,15 +55,14 @@ async function probe(root, spec) {
       Object.assign(state, { status, malformed })
       const before = requests.length, response = await invoke(config), request = requests.length === before + 1 ? requests.at(-1) : undefined
       tests.push({ name, passed: !!(response && response.kind === kind && response.ok === (status === 200 && !malformed)
-        && request?.path === '/v1/chat/completions' && request.auth === 'Bearer host-test-key'
-        && request.body.model === 'host-test-model' && JSON.stringify(request.body.messages) === JSON.stringify(expectedMessages(0))
+        && validRequest(request) && JSON.stringify(request.body.messages) === JSON.stringify(expectedMessages(0))
         && (kind !== 'success' || response.text === 'host-stub-result')) })
     }
     if(vision){Object.assign(state,{status:200,malformed:false});const before=requests.length,response=await invoke(config,1),request=requests.length===before+1?requests.at(-1):undefined
-      tests.push({name:'image_changed',passed:response?.ok===true&&response?.text==='host-stub-result'&&request?.path==='/v1/chat/completions'&&request?.auth==='Bearer host-test-key'&&request?.body.model==='host-test-model'&&JSON.stringify(request?.body.messages)===JSON.stringify(expectedMessages(1))})}
+      tests.push({name:'image_changed',passed:response?.ok===true&&response?.text==='host-stub-result'&&validRequest(request)&&JSON.stringify(request?.body.messages)===JSON.stringify(expectedMessages(1))})}
     const before = requests.length, response = await invoke({ ...config, api_key: '' })
     tests.push({ name: 'unconfigured', passed: response?.ok === false && response.kind === 'unconfigured' && requests.length === before })
-    return { probe_version: 1,...(vision?{input_kind:'vision'}:{}), status: tests.every(t => t.passed) ? 'passed' : 'failed', tests, request_count: requests.length }
+    return { probe_version: 1,...(vision?{input_kind:'vision'}:{}),...(spec.protocol?{protocol:spec.protocol}:{}), status: tests.every(t => t.passed) ? 'passed' : 'failed', tests, request_count: requests.length }
   } finally {
     net.Socket.prototype.connect = original
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve))
