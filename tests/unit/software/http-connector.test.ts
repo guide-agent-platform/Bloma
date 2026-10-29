@@ -67,6 +67,7 @@ it('rejects private/reserved targets by default and validates DNS answers before
 const secret='local-test-secret-at-least-16',rawBody=Buffer.from('{"id":"event-1","name":"中文"}'),timestamp=String(Math.floor(Date.now()/1000))
 const signed=(bytes=rawBody,time=timestamp)=>({secret,rawBody:bytes,timestamp:time,signature:'sha256='+createHmac('sha256',secret).update(time+'.').update(bytes).digest('hex')})
 it('authenticates exact webhook bytes and rejects forged, stale and future signatures',()=>{
+ vi.spyOn(Date,'now').mockReturnValue(Number(timestamp)*1000)
  expect(verifyWebhook(signed()).valid).toBe(true)
  expect(verifyWebhook({...signed(),rawBody:Buffer.from('{}')})).toMatchObject({valid:false,kind:'invalid_signature'})
  expect(verifyWebhook(signed(rawBody,String(Number(timestamp)-301))).valid).toBe(false)

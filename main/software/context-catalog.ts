@@ -7,6 +7,7 @@ export const SOFTWARE_CONTEXT_CATALOG = [
   { name: 'speech', when: '语音资源、转写或录音', topic: 'verification-speech', tools: ['inspect_software_capabilities','prepare_software_capability'] },
   { name: 'documents', when: 'PDF/DOCX/TXT解析、资料检索与引用核对', topic: 'documents', tools: ['inspect_software_capabilities','prepare_software_capability'] },
   { name: 'multimodal', when: '图片文字识别、原图位置与已有音频转写', topic: 'multimodal', tools: ['inspect_software_capabilities','prepare_software_capability'] },
+  { name: 'model-vision', when: '制作模型看图/截图核对，或生成软件调用视觉模型API', topic: 'vision', tools: ['view_image','inspect_app','prepare_software_capability'] },
   { name: 'http-integration', when: '产品调用JSON API、鉴权与Webhook通知接收', topic: 'http-integration', tools: ['inspect_software_capabilities','prepare_software_capability'] },
   { name: 'counterexamples', when: '多对象关联、异常输入与旧功能回归的业务反例', topic: 'acceptance-counterexamples', tools: ['inspect_app','verify_app'] },
   { name: 'existing-project', when: '接手已有工程、核对导入基线和本轮改动', topic: 'existing-project', tools: ['inspect_repository','run_command'] },

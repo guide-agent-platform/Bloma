@@ -6,9 +6,10 @@ import { mainRootDir } from '../platform/paths'
 import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type DriverSpawn } from './process-driver'
 import { verificationFingerprint, declaredVerificationPolicy } from './verification-fingerprint'
 
-export interface LlmVerificationSpec { runtime?: 'node'; module: string; factory: string; method: string; covers: string[] }
+export interface LlmVerificationSpec { runtime?: 'node'; module: string; factory: string; method: string; covers: string[]; input?:'vision' }
 export interface LlmVerificationResult {
   probe_version: number
+  input_kind?:'vision'
   status: 'passed' | 'failed' | 'environment_blocked'
   tests?: Array<{ name: string; passed: boolean }>
   request_count?: number
@@ -19,6 +20,7 @@ export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, s
   try {
     signal?.throwIfAborted()
     const identifier = (value: unknown) => typeof value === 'string' && /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(value)
+    if(spec.input!==undefined&&(spec.input!=='vision'||spec.runtime!=='node'))throw Error('视觉模型入口须使用Node及input:vision')
     if (!identifier(spec.factory) || !identifier(spec.method) || (spec.runtime === 'node'
       ? typeof spec.module !== 'string' || isAbsolute(spec.module) || spec.module.split(/[\\/]/).includes('..') || !/\.(?:cjs|mjs|js)$/.test(spec.module)
       : spec.runtime !== undefined || !identifier(spec.module))) throw new Error('模型入口声明不合法')
@@ -38,7 +40,8 @@ export async function runHostLlmProbe(root: string, spec: LlmVerificationSpec, s
     const parsed = JSON.parse(result.stdout.trim()) as LlmVerificationResult
     if (parsed.probe_version !== 1 || !['passed', 'failed', 'environment_blocked'].includes(parsed.status)) throw new Error('模型探针结果不合法')
     const names = ['real_request', 'auth_error', 'model_error', 'rate_limited', 'invalid_response', 'unconfigured']
-    if (parsed.status === 'passed' && (result.code !== 0 || parsed.request_count !== 5 || parsed.tests?.length !== 6 || names.some(name => !parsed.tests?.some(test => test.name === name && test.passed)))) throw new Error('模型探针证据不完整')
+    if(spec.input==='vision')names.push('image_changed')
+    if (parsed.status === 'passed' && (result.code !== 0 || spec.input==='vision'&&parsed.input_kind!=='vision' || parsed.request_count !== (spec.input==='vision'?6:5) || parsed.tests?.length !== names.length || names.some(name => !parsed.tests?.some(test => test.name === name && test.passed)))) throw new Error('模型探针证据不完整')
     if (verificationFingerprint(root, null, policy) !== fingerprint) throw new Error('模型探针期间源码发生变化')
     return parsed
   } catch (error) {

@@ -10,6 +10,8 @@
 
 > 后续优先[多模态与HTTP／Webhook集成](docs/05_PROJECT_PLAN/multimodal-http-first-20261029.md)：首批提供Windows本机图片OCR、产品JSON API客户端及签名通知收件辅助。真实引擎与本地受控服务组合验证通过，真实第三方账号、视觉模型效果及公网部署另验。
 
+> [模型视觉链路完善](docs/05_PROJECT_PLAN/vision-workflow-20261029.md)：保留已有图片附件与模型传输，补齐当前调试截图的按会话读取；提供产品自有视觉API客户端与换图探针。图片已附上、模型已核对、本机协议通过和真实视觉效果分别表达。
+
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 
 > 当前执行接手：[Harness 改进交接](docs/05_PROJECT_PLAN/harness-improvement-handoff-20261027.md)，包含已完成版本、验证边界和剩余批次的执行入口。

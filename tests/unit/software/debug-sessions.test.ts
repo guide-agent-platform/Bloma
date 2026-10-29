@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createProject, updateProject } from '../../../main/project/project-service'
 import { debugWorkspace } from '../../../main/software/debug-workspace'
 import { buildSoftwareInspectTool } from '../../../main/software/inspect-tool'
+import { buildSoftwareImageTool } from '../../../main/software/image-tool'
 import { createSoftwareCollaborationPolicy } from '../../../main/software/collaboration-policy'
 import { closeDebugSessions, readDebugSession, retainedDebugVersion } from '../../../main/software/debug-sessions'
 import { softwareVerificationFingerprint } from '../../../main/desktop/verification-fingerprint'
@@ -61,6 +62,10 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   writeFileSync(join(root, 'sample.txt'), 'frozen persistent fixture')
   const opened = await tool.execute({ mode: 'open', fixtures: [{ path: 'input/sample.txt', source: 'sample.txt' }], steps: [check('initial', '#count', '0'), check('version', '#version', 'v1')] }, context)
   expect(opened.isError, opened.output).not.toBe(true); const id = JSON.parse(opened.output).debug_session_id
+  const viewer=buildSoftwareImageTool(project.project_id),viewed=await viewer.execute({debug_session_id:id},context)
+  expect(viewed.isError,viewed.output).not.toBe(true);expect(viewed.images).toHaveLength(1)
+  expect(JSON.parse(viewed.output)).toMatchObject({visual_review:'image_attached_not_reviewed',source:softwareVerificationFingerprint(root),sha256:expect.stringMatching(/^[a-f0-9]{64}$/)})
+  expect((await viewer.execute({debug_session_id:id},{...context,sessionId:'other'})).isError).toBe(true)
   expect(JSON.parse(opened.output).verification_readiness.verification).toBe('not_run')
   const scripted = await tool.execute({ script: 'browser-check.mjs' }, context)
   expect(scripted.isError, scripted.output).not.toBe(true)
@@ -102,6 +107,7 @@ it.skipIf(process.platform !== 'win32' || !existsSync(electron)).each(['electron
   }
   writeFileSync(join(root, ui === 'electron' ? 'main.cjs' : 'server.cjs'), ui === 'electron' ? mainSource('v2') : serverSource('v2'))
   expect(JSON.parse((await tool.execute({ mode: 'read', debug_session_id: id }, context)).output).stale).toBe(true)
+  expect((await viewer.execute({debug_session_id:id},context)).isError).toBe(true)
   expect(retainedDebugVersion(project.project_id, 's')?.source).not.toBe(softwareVerificationFingerprint(root))
   // An explicit act from a persisted transcript has the same automatic reload
   // semantics as an omitted mode; it must observe the new backend, never v1.

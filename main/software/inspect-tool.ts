@@ -122,7 +122,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
             verification_readiness: guiVerificationReadiness(projectId),
             version: snapshot.version, resumed_from: snapshot.resumed_from, ui: snapshot.ui, steps: snapshot.steps, observations: snapshot.observations, log_cursor: snapshot.log_cursor,
             observations_omitted: snapshot.observations_omitted, data_dir: snapshot.data_dir, url: snapshot.url, screenshot: snapshot.screenshot,
-            screenshot_error: snapshot.screenshot_error, visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
+            screenshot_error: snapshot.screenshot_error, visual_review: images ? 'image_attached_not_reviewed' : 'not_reviewed_by_model', evidence: '持续开发观察，非最终验收凭据' }), images,
             isError: snapshot.state === 'failed' || Boolean(snapshot.error) || snapshot.stale || snapshot.steps.some(step => !step.passed)
               || snapshot.observations.some(row => row.version === snapshot.version && /^renderer\.(?:error|startup_error)$/.test(row.kind)) }
         }
@@ -140,7 +140,7 @@ export function buildSoftwareInspectTool(projectId: string, policy: ReturnType<t
         const name = files.find(file => file.endsWith('-failed.png')) ?? files.at(-1), file = name ? join(screenshotDir, name) : undefined
         const bytes = result.status !== 'unverified' && file ? readFileSync(file) : undefined
         const images = input.include_image === true && bytes && bytes.length <= MAX_PASTED_IMAGE_BYTES ? [savePastedImage(ctx.sessionId, bytes.toString('base64'), 'png')] : undefined
-        return { output: JSON.stringify({ ...result, screenshot: file, visual_review: images ? 'image_attached_for_current_channel' : 'not_reviewed_by_model', evidence: '开发观察，不是最终验收凭据', verification_readiness: guiVerificationReadiness(projectId), source_unchanged: verificationFingerprint(root) === fingerprint }), images, isError: result.status !== 'passed' }
+        return { output: JSON.stringify({ ...result, screenshot: file, visual_review: images ? 'image_attached_not_reviewed' : 'not_reviewed_by_model', evidence: '开发观察，不是最终验收凭据', verification_readiness: guiVerificationReadiness(projectId), source_unchanged: verificationFingerprint(root) === fingerprint }), images, isError: result.status !== 'passed' }
       } catch (error) {
         if (openingDebugId) await closeDebugSession(projectId, ctx.sessionId, openingDebugId)
         if (/^GUI_/.test(error instanceof Error ? error.message : String(error))) return guiInputFailure(error)

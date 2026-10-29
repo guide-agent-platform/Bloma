@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -108,6 +108,9 @@
         "main/software/capability-tools.ts",
         "main/software/document-capability.ts",
         "main/software/integration-capabilities.ts",
+        "main/software/image-tool.ts",
+        "main/software/inspect-tool.ts",
+        "main/templates/tools/vision_client.cjs",
         "main/templates/tools/ocr_runtime.cjs",
         "main/templates/tools/http_connector.cjs",
         "main/templates/tools/webhook_inbox.cjs",
@@ -273,6 +276,8 @@
     "confirmMvpDelivered"
   ],
   "asset_terms": [
+    "vision_client.cjs",
+    "llm_entry_probe.cjs",
     "ocr_runtime.cjs",
     "ocr_worker.ps1",
     "http_connector.cjs",
@@ -290,6 +295,8 @@
     "pending-confirmations"
   ],
   "asset_files": [
+    "main/templates/tools/vision_client.cjs",
+    "main/templates/tools/llm_entry_probe.cjs",
     "main/templates/tools/ocr_runtime.cjs",
     "main/templates/tools/ocr_worker.ps1",
     "main/templates/tools/http_connector.cjs",

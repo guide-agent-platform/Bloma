@@ -8,6 +8,7 @@ import { handleGuideMessage } from '../../../main/guide/stages/guide-pipeline'
 import { getDocumentsDir } from '../../../storage/config-paths'
 import type { SDKQuery } from '../../../main/orchestration/stages/orchestration-contracts'
 import type { AgentEvent, AgentSendMessageInput } from '../../../shared/types'
+import {savePastedImage} from '../../../main/platform/shell/pasted-images'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-lean-guide-')); process.env.PROMA_HOME = home })
@@ -23,6 +24,12 @@ function fixture(reply: unknown) {
   return { project, input, options, publish, calls, events }
 }
 const brief = { action: 'brief', name: '记录', goal: '记录并重开保留', ui: 'required', requirements: [{ description: '保存记录', expected: '重开后记录仍在' }], constraints: ['本地使用'], out_of_scope: [], assumptions: [] }
+it('passes the actual reference image to the existing requirement request without an OCR or extra model stage',async()=>{
+  const f=fixture(brief),image=savePastedImage('session',Buffer.from('actual-reference-bytes').toString('base64'),'png'),query=f.options.query;let seen=0
+  const checked:SDKQuery=async function*(prompt,options){seen++;expect(options.images).toEqual([image]);yield*query(prompt,options)}
+  await handleGuideMessage({...f.input,images:[image]},f.publish,{...f.options,query:checked})
+  expect(seen).toBe(1);expect(f.events.filter(event=>event.type==='user_decision_required').map(event=>event.payload.kind)).toEqual(['lean_scope'])
+})
 it('one model request produces one task confirmation, without audit, research or longterm document expansion', async () => {
   const f = fixture(brief)
   await handleGuideMessage(f.input, f.publish, f.options)

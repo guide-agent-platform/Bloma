@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_revision": "a02524a77ac0d7a328002586680bf002134a5444",
-  "scope_version": 11,
+  "source_revision": "a0f4f8dad27d13571cbf9aab16c0b1cb775d1b97",
+  "scope_version": 12,
   "scanner_sha256": "32dd2ea79859d4a0d9332a849b988caf48659d9cbcee3c13b51620835663693a",
-  "scope_sha256": "f08786e636333d371bf52611948219d2e4075cf7acc93339c992416cfbb1d850",
-  "source_input_digest": "24ba49a2531e039783d13d9f13e38189702e80b20ac87d42b2767bb076c5e945",
+  "scope_sha256": "5a864d38beb5ff28105acd906ca5a4a87e4d595c38026a31aa8a4fca9c3331ec",
+  "source_input_digest": "67b3a6384924462a30efac9c9afa3313b327862bb37054647adf25711103c70b",
   "method": "existing tracked and unignored working files + TypeScript AST static/type/reexport/literal dynamic/require imports; retired paths must remain absent; no app execution or symbol-level dead-code proof",
   "limits": [
     "module loading is not branch execution",
@@ -19,10 +19,10 @@
     "renderer/main.tsx"
   ],
   "counts": {
-    "scanned_sources": 841,
-    "module_edges": 3120,
+    "scanned_sources": 843,
+    "module_edges": 3136,
     "asset_edges": 39,
-    "scoped_modules": 90,
+    "scoped_modules": 93,
     "groups": {
       "legacy_retirement_boundary": 2,
       "production_shared_extracted": 3,
@@ -30,7 +30,7 @@
       "modern_workflow_keep": 15,
       "current_routes_and_storage_keep": 10,
       "frozen_experiment_separate": 5,
-      "shared_capability_keep_migrate": 33,
+      "shared_capability_keep_migrate": 36,
       "history_data_and_user_access_keep": 12,
       "legacy_card_identity_keep": 1,
       "historical_schema_and_shared_diagnostics": 1,
@@ -145,6 +145,9 @@
         "main/software/capability-tools.ts",
         "main/software/document-capability.ts",
         "main/software/integration-capabilities.ts",
+        "main/software/image-tool.ts",
+        "main/software/inspect-tool.ts",
+        "main/templates/tools/vision_client.cjs",
         "main/templates/tools/ocr_runtime.cjs",
         "main/templates/tools/http_connector.cjs",
         "main/templates/tools/webhook_inbox.cjs",
@@ -1983,7 +1986,7 @@
     {
       "path": "main/desktop/llm-verification.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "87b03dc498a41f41eec733ad3915404124bd4e11f2872a200f3a60b1b0f4eb7b",
+      "sha256": "cac40ba191c474cf5339a73a45298395efa8d9df93fe7131a925657f0b9fc664",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2037,10 +2040,20 @@
           "specifier": "../../../main/desktop/llm-verification",
           "kind": "static_runtime",
           "line": 9
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "to": "main/desktop/llm-verification.ts",
+          "resolution": "module",
+          "specifier": "../../../main/desktop/llm-verification",
+          "kind": "static_runtime",
+          "line": 11
         }
       ],
       "string_references": [],
-      "asset_terms": [],
+      "asset_terms": [
+        "llm_entry_probe.cjs"
+      ],
       "computed_imports": [],
       "deletion_authorized": false
     },
@@ -2437,7 +2450,7 @@
     {
       "path": "main/desktop/production-context.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "0f613d69a93e3d70853ca4640d123fa5c515605e4096354788e8738480956732",
+      "sha256": "43064299e5f4de9e59b1129a4c5e3250335ed20c88deb1bd58216d40e206f20a",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -2755,6 +2768,14 @@
           "line": 19
         },
         {
+          "from": "main/software/image-tool.ts",
+          "to": "main/desktop/verification-fingerprint.ts",
+          "resolution": "module",
+          "specifier": "../desktop/verification-fingerprint",
+          "kind": "static_runtime",
+          "line": 5
+        },
+        {
           "from": "main/software/inspect-tool.ts",
           "to": "main/desktop/verification-fingerprint.ts",
           "resolution": "module",
@@ -2819,7 +2840,7 @@
           "resolution": "module",
           "specifier": "../../../main/desktop/verification-fingerprint",
           "kind": "static_runtime",
-          "line": 11
+          "line": 12
         },
         {
           "from": "tests/unit/software/repository-context.test.ts",
@@ -6123,7 +6144,7 @@
           "resolution": "module",
           "specifier": "../project/project-service",
           "kind": "static_runtime",
-          "line": 3
+          "line": 6
         },
         {
           "from": "main/software/import-project.ts",
@@ -6383,6 +6404,14 @@
           "specifier": "../../main/project/project-service",
           "kind": "static_runtime",
           "line": 6
+        },
+        {
+          "from": "tests/integration/pi-runtime-transport.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 9
         },
         {
           "from": "tests/integration/software-document-import.test.ts",
@@ -7113,6 +7142,14 @@
           "line": 6
         },
         {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "to": "main/project/project-service.ts",
+          "resolution": "module",
+          "specifier": "../../../main/project/project-service",
+          "kind": "static_runtime",
+          "line": 7
+        },
+        {
           "from": "tests/unit/software/workflow-retirement.test.ts",
           "to": "main/project/project-service.ts",
           "resolution": "module",
@@ -7700,7 +7737,7 @@
     {
       "path": "main/software/agent-tools.ts",
       "group": "modern_workflow_keep",
-      "sha256": "ac25aafa4aa8c35d9231947044d7971fd9db4002afe180b8c4db42e9fe3e5833",
+      "sha256": "527f89efb0794bd1fee6b1e394e0c7965219fef5e1f6e481fe22a8209b6f87a9",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -7761,6 +7798,14 @@
           "specifier": "../../../main/software/agent-tools",
           "kind": "static_runtime",
           "line": 9
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "to": "main/software/agent-tools.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/agent-tools",
+          "kind": "static_runtime",
+          "line": 10
         }
       ],
       "string_references": [],
@@ -7872,7 +7917,7 @@
     {
       "path": "main/software/capability-tools.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "e3f75769d50491749a1d0725ffccf6ff41f5511421aade214e7bbf6cb4c37835",
+      "sha256": "381470520ca460b74efa6b4f22a5ceb8253695426ac8de1fb9fd4de5e2091589",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -8018,6 +8063,45 @@
           "specifier": "../../../main/software/harness-evaluation",
           "kind": "static_runtime",
           "line": 16
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/software/image-tool.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "590fafaf5b649384d57250f44eb419cbd8933cb56599981c3fa6b93680cdc6a9",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/software/agent-tools.ts",
+          "to": "main/software/image-tool.ts",
+          "resolution": "module",
+          "specifier": "./image-tool",
+          "kind": "static_runtime",
+          "line": 9
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/integration/pi-runtime-transport.test.ts",
+          "to": "main/software/image-tool.ts",
+          "resolution": "module",
+          "specifier": "../../main/software/image-tool",
+          "kind": "static_runtime",
+          "line": 11
+        },
+        {
+          "from": "tests/unit/software/debug-sessions.test.ts",
+          "to": "main/software/image-tool.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/image-tool",
+          "kind": "static_runtime",
+          "line": 9
         }
       ],
       "string_references": [],
@@ -8175,9 +8259,56 @@
       "deletion_authorized": false
     },
     {
+      "path": "main/software/inspect-tool.ts",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "8da2082cfeea9888beaca5f2db805917040f5cb68db68468e04286657983ae53",
+      "module_load_reachable": true,
+      "runtime_importers": [
+        {
+          "from": "main/software/agent-tools.ts",
+          "to": "main/software/inspect-tool.ts",
+          "resolution": "module",
+          "specifier": "./inspect-tool",
+          "kind": "static_runtime",
+          "line": 10
+        }
+      ],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/fixtures/software-recovery/debug-worker.ts",
+          "to": "main/software/inspect-tool.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/inspect-tool",
+          "kind": "static_runtime",
+          "line": 6
+        },
+        {
+          "from": "tests/unit/software/debug-sessions.test.ts",
+          "to": "main/software/inspect-tool.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/inspect-tool",
+          "kind": "static_runtime",
+          "line": 8
+        },
+        {
+          "from": "tests/unit/software/verification.test.ts",
+          "to": "main/software/inspect-tool.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/inspect-tool",
+          "kind": "static_runtime",
+          "line": 14
+        }
+      ],
+      "string_references": [],
+      "asset_terms": [],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
       "path": "main/software/integration-capabilities.ts",
       "group": "shared_capability_keep_migrate",
-      "sha256": "293852770e0b51f31dd1bc771edb3cd3df12de59427ee827fc1bfe49f39c72ce",
+      "sha256": "7126982089f059e998456011ffcc266911865fd6ad8e6a914191ac0da3160def",
       "module_load_reachable": true,
       "runtime_importers": [
         {
@@ -8201,6 +8332,7 @@
       "test_importers": [],
       "string_references": [],
       "asset_terms": [
+        "vision_client.cjs",
         "ocr_runtime.cjs",
         "ocr_worker.ps1",
         "http_connector.cjs",
@@ -8641,6 +8773,14 @@
           "line": 7
         },
         {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "to": "main/software/release-store.ts",
+          "resolution": "module",
+          "specifier": "../../../main/software/release-store",
+          "kind": "static_runtime",
+          "line": 12
+        },
+        {
           "from": "tests/unit/software/workflow-retirement.test.ts",
           "to": "main/software/release-store.ts",
           "resolution": "module",
@@ -8937,9 +9077,17 @@
     {
       "path": "main/templates/tools/http_connector.cjs",
       "group": "shared_capability_keep_migrate",
-      "sha256": "d7c57a7b3ad9e05989812d9454135d1cf99499d9186e36b71434d12360aacf05",
+      "sha256": "93d84fd2b3c36718f91e294446c190483d0f4fd152e1629f099feaa385d2a24c",
       "module_load_reachable": false,
       "runtime_importers": [
+        {
+          "from": "main/templates/tools/vision_client.cjs",
+          "to": "main/templates/tools/http_connector.cjs",
+          "resolution": "module",
+          "specifier": "./http_connector.cjs",
+          "kind": "require_runtime",
+          "line": 3
+        },
         {
           "from": "main/templates/tools/webhook_inbox.cjs",
           "to": "main/templates/tools/http_connector.cjs",
@@ -8961,6 +9109,11 @@
         }
       ],
       "string_references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
         {
           "from": "main/software/integration-capabilities.ts",
           "line": 7,
@@ -9053,6 +9206,46 @@
       ],
       "asset_terms": [
         "speech_worker.py"
+      ],
+      "computed_imports": [],
+      "deletion_authorized": false
+    },
+    {
+      "path": "main/templates/tools/vision_client.cjs",
+      "group": "shared_capability_keep_migrate",
+      "sha256": "62ecc7a4d69417650774e07566f2c2415032f8df0c3b903dca3c6e7ea350e52a",
+      "module_load_reachable": false,
+      "runtime_importers": [],
+      "type_importers": [],
+      "test_importers": [
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "to": "main/templates/tools/vision_client.cjs",
+          "resolution": "module",
+          "specifier": "../../../main/templates/tools/vision_client.cjs",
+          "kind": "require_runtime",
+          "line": 13
+        }
+      ],
+      "string_references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "kind": "source_string"
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "line": 13,
+          "kind": "test_string"
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "line": 25,
+          "kind": "test_string"
+        }
+      ],
+      "asset_terms": [
+        "http_connector.cjs"
       ],
       "computed_imports": [],
       "deletion_authorized": false
@@ -10648,22 +10841,22 @@
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 79,
+          "line": 76,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 84,
+          "line": 80,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 93,
+          "line": 85,
           "kind": "source"
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 98,
+          "line": 94,
           "kind": "source"
         },
         {
@@ -10683,7 +10876,12 @@
         },
         {
           "path": "main/desktop/production-context.ts",
-          "line": 112,
+          "line": 102,
+          "kind": "source"
+        },
+        {
+          "path": "main/desktop/production-context.ts",
+          "line": 113,
           "kind": "source"
         },
         {
@@ -11312,6 +11510,56 @@
   ],
   "asset_references": [
     {
+      "term": "vision_client.cjs",
+      "sites": [
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "vision_client.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 19,
+          "value": "if(typeof require('./vision_client.cjs').VisionClient!=='function')throw Error('VISION_CLIENT_MISSING');console.log(JSON.stringify({node:process.versions.node,protocol:'openai-chat-images'}))"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 44,
+          "value": "const {VisionClient}=require(\"./vision_client.cjs\"); await new VisionClient().analyze({prompt:\"描述图中内容\",images:[产品数据目录内图片路径],dataDir:process.env.APP_DATA_DIR,config:{endpoint:\"https://兼容服务/v1\",model:\"用户选择的视觉模型\",api_key:\"产品自己的Key\",timeout:30}"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
+          "line": 46,
+          "value": "CORE_CHECK.json llm:{runtime:\"node\",module:\"vision_client.cjs\",factory:\"VisionClient\",method:\"analyze\",input:\"vision\",covers:[相关F编号]}。入口必须为产品实际调用路径。宿主以本地HTTP检查两张不同图片字节、换图、鉴权和错误，不能据此证明模型看懂图片或真实供应商可用。"
+        },
+        {
+          "path": "tests/unit/software/vision-client.test.ts",
+          "line": 13,
+          "value": "../../../main/templates/tools/vision_client.cjs"
+        },
+        {
+          "path": "tests/unit/software/vision-client.test.ts",
+          "line": 25,
+          "value": "vision_client.cjs"
+        },
+        {
+          "path": "tests/unit/software/vision-client.test.ts",
+          "line": 29,
+          "value": "const{VisionClient}=require('./vision_client.cjs');exports.Fake=class extends VisionClient{async analyze(input){this.first??=input.images;return super.analyze({...input,images:this.first})}}"
+        }
+      ]
+    },
+    {
+      "term": "llm_entry_probe.cjs",
+      "sites": [
+        {
+          "path": "main/desktop/llm-verification.ts",
+          "line": 33,
+          "value": "templates/tools/llm_entry_probe.cjs"
+        }
+      ]
+    },
+    {
       "term": "ocr_runtime.cjs",
       "sites": [
         {
@@ -11326,7 +11574,7 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 37,
+          "line": 38,
           "value": "产品Node后端require(\"./ocr_runtime.cjs\").recognizeImage(file,{dataDir:process.env.APP_DATA_DIR,language:\"zh-Hans-CN\",signal,timeoutMs:30000})。PNG/JPEG/BMP最大16MiB；Windows内置引擎返回原图SHA-256、文字、行及词框。空图返回no_text，不伪造文字。"
         },
         {
@@ -11361,18 +11609,28 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
+          "line": 7,
+          "value": "http_connector.cjs"
+        },
+        {
+          "path": "main/software/integration-capabilities.ts",
           "line": 19,
           "value": "require('./http_connector.cjs');require('./webhook_inbox.cjs');console.log(JSON.stringify({node:process.versions.node,protocol:'json-http-and-hmac-sha256'}))"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 42,
+          "line": 50,
           "value": "prepare_software_capability({capability:\"http\"})物化http_connector.cjs和webhook_inbox.cjs，无额外依赖/网络调用。它是产品后端组件，不是Bloma账号连接或新的需求capabilities标签。"
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 43,
+          "line": 51,
           "value": "const {createHttpConnector}=require(\"./http_connector.cjs\"); const api=createHttpConnector({baseUrl:\"https://api.example.com/\",methods:[\"GET\"],auth:{header:\"Authorization\",value:\"Bearer 产品自有凭据\"}}); await api.request(\"items\",{signal,timeoutM"
+        },
+        {
+          "path": "main/templates/tools/vision_client.cjs",
+          "line": 3,
+          "value": "./http_connector.cjs"
         },
         {
           "path": "main/templates/tools/webhook_inbox.cjs",
@@ -11411,7 +11669,7 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 42,
+          "line": 50,
           "value": "prepare_software_capability({capability:\"http\"})物化http_connector.cjs和webhook_inbox.cjs，无额外依赖/网络调用。它是产品后端组件，不是Bloma账号连接或新的需求capabilities标签。"
         },
         {
@@ -11426,7 +11684,7 @@
       "sites": [
         {
           "path": "main/software/agent-tools.ts",
-          "line": 81,
+          "line": 82,
           "value": "资料解析/检索先按需读取read_production_context(documents)，复用产品自己的成熟解析依赖和document_runtime.cjs，不自写PDF/ZIP解析器替代依赖诊断。已有工程用inspect_repository overview/changes核对原入口与本轮增量；设计验收时可读取acceptance-counterexamples，选择与当前确认范围有关的多对象/异常反例。目录和组件准备不等于产品通过。"
         },
         {
@@ -11686,12 +11944,12 @@
       "sites": [
         {
           "path": "main/desktop/production-context.ts",
-          "line": 96,
+          "line": 97,
           "value": "const {transcribeWav}=require(\"./speech_bridge.cjs\"); await transcribeWav(APP_DATA_DIR内PCM16 WAV绝对路径,{signal,timeoutMs:90000})；由宿主BLOMA_SPEECH_PYTHON绑定项目.venv，不要求用户安装Python或借用平台语音IPC。"
         },
         {
           "path": "main/software/agent-tools.ts",
-          "line": 84,
+          "line": 85,
           "value": "语音识别等复杂能力先用inspect_software_capabilities检查现有组件、项目运行时和真实资源；speech用prepare_software_capability受控准备，不扫描宿主源码猜协议，不重复手写模型下载/录音内核。Python直接复用SpeechEngine，Node/Electron可用speech_bridge.cjs.transcribeWav处理APP_DATA_DIR内的PCM16 WAV；资源准备、固定音频与真实麦克风/GUI/独立"
         },
         {
@@ -11711,7 +11969,7 @@
         },
         {
           "path": "main/software/integration-capabilities.ts",
-          "line": 39,
+          "line": 40,
           "value": "语音沿既有speech准备与speech_bridge.cjs文件转写；真实麦克风另需明确授权和证据。本批不增加采集、TTS或模型调用。"
         },
         {
@@ -12118,6 +12376,50 @@
   ],
   "template_assets": [
     {
+      "path": "main/templates/tools/vision_client.cjs",
+      "sha256": "62ecc7a4d69417650774e07566f2c2415032f8df0c3b903dca3c6e7ea350e52a",
+      "references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 19
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 44
+        },
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 46
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "line": 13
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "line": 25
+        },
+        {
+          "from": "tests/unit/software/vision-client.test.ts",
+          "line": 29
+        }
+      ]
+    },
+    {
+      "path": "main/templates/tools/llm_entry_probe.cjs",
+      "sha256": "76ccd89dbcc2db4a855578c6c8d8d04909d3f846d76b737f40e92eeaf072f35e",
+      "references": [
+        {
+          "from": "main/desktop/llm-verification.ts",
+          "line": 33
+        }
+      ]
+    },
+    {
       "path": "main/templates/tools/ocr_runtime.cjs",
       "sha256": "5f8e4834ec4feb55f1a10fe5e7ba1d01a92ee644e9f014f0e25391310b3e7f4d",
       "references": [
@@ -12131,7 +12433,7 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 37
+          "line": 38
         },
         {
           "from": "tests/unit/software/integration-capabilities.test.ts",
@@ -12155,8 +12457,12 @@
     },
     {
       "path": "main/templates/tools/http_connector.cjs",
-      "sha256": "d7c57a7b3ad9e05989812d9454135d1cf99499d9186e36b71434d12360aacf05",
+      "sha256": "93d84fd2b3c36718f91e294446c190483d0f4fd152e1629f099feaa385d2a24c",
       "references": [
+        {
+          "from": "main/software/integration-capabilities.ts",
+          "line": 7
+        },
         {
           "from": "main/software/integration-capabilities.ts",
           "line": 7
@@ -12167,11 +12473,15 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 42
+          "line": 50
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 43
+          "line": 51
+        },
+        {
+          "from": "main/templates/tools/vision_client.cjs",
+          "line": 3
         },
         {
           "from": "main/templates/tools/webhook_inbox.cjs",
@@ -12205,7 +12515,7 @@
         },
         {
           "from": "main/software/integration-capabilities.ts",
-          "line": 42
+          "line": 50
         },
         {
           "from": "tests/unit/software/http-connector.test.ts",
@@ -12229,7 +12539,7 @@
       "references": [
         {
           "from": "main/software/agent-tools.ts",
-          "line": 81
+          "line": 82
         },
         {
           "from": "main/software/document-capability.ts",
@@ -13187,7 +13497,7 @@
     },
     {
       "path": "main/templates/tools/llm_entry_probe.cjs",
-      "line": 29,
+      "line": 39,
       "expression": "import(pathToFileURL(file).href)"
     },
     {
@@ -13243,6 +13553,13 @@
       "group": "shared_capability_keep_migrate",
       "type_importers": 0,
       "test_importers": 0,
+      "module_load_reachable": false
+    },
+    {
+      "path": "main/templates/tools/vision_client.cjs",
+      "group": "shared_capability_keep_migrate",
+      "type_importers": 0,
+      "test_importers": 1,
       "module_load_reachable": false
     },
     {

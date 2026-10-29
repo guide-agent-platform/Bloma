@@ -23,6 +23,8 @@ function createHttpConnector(config) {
   if(auth&&(!auth.header||!/^[A-Za-z0-9-]+$/.test(auth.header)||['host','content-length','connection','transfer-encoding'].includes(auth.header.toLowerCase())||typeof auth.value!=='string'||!auth.value||/[\r\n]/.test(auth.value)))throw Error('HTTP_AUTH_INVALID')
   // Snapshot caller configuration; mutating settings cannot broaden this client.
   const allowed=new Set(methods),authorization=auth?{[auth.header]:auth.value}:{}
+  const requestBytes=config.requestBytes??1024*1024
+  if(!Number.isSafeInteger(requestBytes)||requestBytes<1||requestBytes>16*1024*1024)throw Error('HTTP_REQUEST_LIMIT_INVALID')
   return { async request(relative,options={}) {
     const method=options.method??'GET',timeout=options.timeoutMs??15000
     if(typeof relative!=='string'||relative.length>4096||!Number.isInteger(timeout)||timeout<50||timeout>60000||!allowed.has(method))throw Error('HTTP_REQUEST_INVALID')
@@ -33,7 +35,7 @@ function createHttpConnector(config) {
     let body
     try{body=options.body===undefined?undefined:JSON.stringify(options.body)}catch{throw Error('HTTP_BODY_INVALID')}
     if(options.body!==undefined&&body===undefined)throw Error('HTTP_BODY_INVALID')
-    if(body!==undefined&&Buffer.byteLength(body)>1024*1024)throw Error('HTTP_BODY_LIMIT')
+    if(body!==undefined&&Buffer.byteLength(body)>requestBytes)throw Error('HTTP_BODY_LIMIT')
     if(options.signal?.aborted)return {ok:false,kind:'cancelled'}
     return new Promise(resolve=>{
       let settled=false,request,timer

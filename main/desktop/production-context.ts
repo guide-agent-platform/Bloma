@@ -20,7 +20,7 @@ import { SOFTWARE_CONTEXT_CATALOG } from '../software/context-catalog'
 import { softwareWorkingContext } from '../software/working-context'
 import { DOCUMENT_GUIDANCE } from '../software/document-capability'
 import { COUNTEREXAMPLE_GUIDANCE } from '../software/acceptance-counterexamples'
-import { MULTIMODAL_GUIDANCE, HTTP_GUIDANCE } from '../software/integration-capabilities'
+import { MULTIMODAL_GUIDANCE, HTTP_GUIDANCE, VISION_GUIDANCE } from '../software/integration-capabilities'
 
 /** Read the authoritative scope on demand; never rewrite or truncate business requirements. */
 export function productionContext(backplane: PrdBackplane, topic: string, featureIds: string[] = []): unknown {
@@ -61,7 +61,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
     description: '只读按需上下文：capabilities列目录；documents看文档，multimodal看OCR/音频，http-integration看API/Webhook；acceptance-counterexamples看反例，existing-project看已有工程；execution/working-state看现场，overview/features看范围，launch/verification-gui/llm/speech看协议，resume/data-update/delivery看恢复交付。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['capabilities','execution','working-state','documents','multimodal','http-integration','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
+      topic: { type: 'string', enum: ['capabilities','execution','working-state','documents','multimodal','vision','http-integration','acceptance-counterexamples','existing-project','overview', 'features', 'prd', 'launch', 'verification', 'verification-llm', 'verification-speech', 'verification-gui', 'data-update', 'delivery', 'resume', 'independent-design', 'longterm'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
@@ -70,6 +70,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
         if (isSoftwareProject(projectId) && input.topic === 'capabilities') return { output: JSON.stringify({ catalog: SOFTWARE_CONTEXT_CATALOG, note: '目录不代表本轮需求或环境已就绪；按topic读取需要的说明，不扩大目标。' }) }
         if (isSoftwareProject(projectId) && input.topic === 'documents') return { output: JSON.stringify(DOCUMENT_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'multimodal') return { output: JSON.stringify(MULTIMODAL_GUIDANCE) }
+        if (isSoftwareProject(projectId) && input.topic === 'vision') return { output: JSON.stringify(VISION_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'http-integration') return { output: JSON.stringify(HTTP_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'acceptance-counterexamples') return { output: JSON.stringify(COUNTEREXAMPLE_GUIDANCE) }
         if (isSoftwareProject(projectId) && input.topic === 'existing-project') return { output: JSON.stringify({
@@ -109,7 +110,7 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
             authoritative_expectations: Object.fromEntries(brief.requirements.map(row => [row.id, trustedAcceptance(brief, row)])),
             control_bindings: guiControlBindings(projectId), data_directory: 'APP_DATA_DIR' }) }
         }
-        if (input.topic === 'verification-llm' && isSoftwareProject(projectId)) return { output: JSON.stringify({ protocol:
+        if (input.topic === 'verification-llm' && isSoftwareProject(projectId)) return { output: JSON.stringify({ vision:VISION_GUIDANCE.verify, protocol:
           '登记CORE_CHECK.json llm:{runtime:"node",module:"src/llm-client.cjs",factory:"Client",method:"enhance",covers:["模型功能F编号"]}。Node模块须是产品实际使用的入口，导出可无参new的类；method异步接收{prompt,config:{endpoint,model,api_key,provider,timeout}}，返回{ok,kind,text/message}，kind为success/auth_error/model_error/rate_limited/invalid_response/unconfigured。宿主调用真实客户端验证本机HTTP请求及5类异常，不请求付费端点。Python入口沿用module/factory/method协议（不填runtime）。不能登记只为探针伪造的替身；外部质量另列待实测。' }) }
         if (input.topic === 'verification-gui') return { output: JSON.stringify({ control_bindings: guiControlBindings(projectId), note: '实现需保留这些已确认控件身份，固定业务期望由宿主管理。' }) }
         if (input.feature_ids !== undefined && (!Array.isArray(input.feature_ids) || input.feature_ids.some(id => typeof id !== 'string'))) throw new Error('PRODUCTION_INVALID_FEATURES')
