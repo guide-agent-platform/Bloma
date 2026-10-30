@@ -11,6 +11,7 @@ import { syncDocuments } from '../../../main/project/document-sync'
 import { prdScopeFingerprint } from '../../../main/project/requirement-contract'
 import { prepareIndependentDesign, readIndependentDesign, type IndependentDesignPolicy, parseIndependentCases } from '../../../main/software/independent-design'
 import { independentSuite, verifyIndependentDesign } from '../../../main/software/independent-verification'
+import { requirementEvidenceHash } from '../../../main/project/requirement-contract'
 import { prepareSoftwareRelease } from '../../../main/software/release-store'
 import { leanBudget } from '../../../main/desktop/lean-budget'
 import type { SDKQuery } from '../../../main/orchestration/stages/orchestration-contracts'
@@ -21,7 +22,7 @@ import { saveSoftwareRunState } from '../../../main/software/run-state'
 import { execFileSync } from 'node:child_process'
 
 let home:string,old:string|undefined,project:ReturnType<typeof createProject>,policy:IndependentDesignPolicy,calls:number
-const contract={cases:[{id:'save',feature:'F-001',steps:[{kind:'fill',control:'name',value:'Alice'},{kind:'click',control:'save'},{kind:'expect',control:'result',equals:'Alice'}]}]}
+const contract: import('../../../main/software/independent-semantics').IndependentCases={cases:[{id:'save',feature:'F-001',coverage:['normal'],steps:[{kind:'fill',control:'name',value:'Alice'},{kind:'click',control:'save'},{kind:'expect',control:'result',equals:'Alice',oracle:{kind:'input',step:0}}]}]}
 const route=()=>({channel_id:'b',model:'model-b',env:{ANTHROPIC_BASE_URL:'https://b.invalid',ANTHROPIC_MODEL:'model-b'}})
 const query:SDKQuery=async function*(prompt,options){calls++;expect(prompt).not.toContain('IMPLEMENTATION_SENTINEL');expect(options.env.ANTHROPIC_MODEL).toBe('model-b');expect(options.tools).toBeUndefined()
   const aid=JSON.parse(prompt).design_aids;expect(aid.scope).toContain('不新增功能');expect(aid.cases.some((item:{id:string})=>item.id==='historical-step')).toBe(true)
@@ -36,6 +37,8 @@ beforeEach(()=>{old=process.env.PROMA_HOME;home=mkdtempSync(join(tmpdir(),'bloma
   const parsed=parseLeanBrief(JSON.stringify({action:'brief',goal:'保存姓名',ui:'required',delivery:'browser',requirements:[{description:'保存姓名',expected:'保存Alice显示Alice'}]}),{projectId:project.project_id,sessionId:'s',source:'姓名',previous:readPrdBackplane(project.project_id),software:true})!
   if(parsed.action!=='brief')throw Error('fixture');parsed.brief.lean_brief!.preview='skip';syncDocuments({request_id:'sync',project_id:project.project_id,session_id:'s',checkpoint:'requirement_confirmed'},parsed.brief)
   const brief=markPrdUserConfirmed(project.project_id)!,scope=prdScopeFingerprint(brief);updateProject(project.project_id,{ux_confirmation:{prd_fingerprint:scope,design_hash:scope,html_hash:null}})
+  contract.cases[0].basis={requirement_hash:requirementEvidenceHash(brief,brief.requirements[0]),expected_source:'保存Alice显示Alice'}
+  contract.coverage_notes=(['multi_object','exception','cancel','reopen'] as const).map(category=>({feature:'F-001',category,disposition:'not_applicable',reason:'本fixture只确认单次输入显示，不扩展其他行为',source:'保存Alice显示Alice'}))
   mkdirSync(join(home,'software-independent-design'),{recursive:true})
   const money=join(home,'money.json');writeFileSync(money,JSON.stringify({version:1,models:[{host:'b.invalid',model:'model-b',cap_rmb:1,context_tokens:2048,input_rmb_per_million:1,output_rmb_per_million:1,cache_rmb_per_million:0}]}))
   const hash=createHash('sha256').update(readFileSync(money)).digest('hex');writeFileSync(money+'.state.json',JSON.stringify({version:1,policy_hash:hash,entries:[]}))
@@ -145,6 +148,14 @@ it('bounds timeouts and never silently retries an interrupted design under the s
   policy.timeout_ms=100;enable();const never=vi.fn(async function*(){calls++;await new Promise<void>(()=>{})}) as SDKQuery
   const result=await prepareIndependentDesign(input(never));expect(result.status).toBe('blocked');expect(result.reason).toContain('TIMEOUT')
   expect((await prepareIndependentDesign(input())).reason).toContain('NEW_AUTHORIZATION');expect(calls).toBe(1)
+})
+it('requires fresh authorization after a confirmed target change instead of spending the previous B proof again',async()=>{
+  enable();expect((await prepareIndependentDesign(input())).status).toBe('frozen')
+  const revised=readPrdBackplane(project.project_id);revised.positioning+='（澄清后的目标）'
+  syncDocuments({request_id:'revision',project_id:project.project_id,session_id:'s',checkpoint:'requirement_confirmed'},revised)
+  const scope=prdScopeFingerprint(markPrdUserConfirmed(project.project_id)!)
+  updateProject(project.project_id,{ux_confirmation:{prd_fingerprint:scope,design_hash:scope,html_hash:null}})
+  const result=await prepareIndependentDesign(input());expect(result.status).toBe('blocked');expect(result.reason).toContain('NEW_AUTHORIZATION');expect(calls).toBe(1)
 })
 it('blocks a nominal remainder which cannot fund the complete input reserve before calling B',async()=>{
   const file=policy.monetary_policy_path,money=JSON.parse(readFileSync(file,'utf8'));money.models[0].cap_rmb=.001

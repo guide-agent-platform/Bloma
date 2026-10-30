@@ -41,6 +41,7 @@ import { saveSoftwareRunState, readSoftwareRunState, recordSoftwareRepair, type 
 import { monetaryStopMessage, monetaryInputBlocked } from '../platform/llm/monetary-budget'
 import { trialFeedbackText } from '../software/trial'
 import { prepareIndependentDesign } from '../software/independent-design'
+import { currentIndependentSemantics, recordIndependentDisputes } from '../software/independent-quality'
 import { recordEvaluationEvent, activatePendingEvaluation } from '../software/harness-evaluation'
 import { isLongtermSoftware, ensureLongtermState, stageLongtermMilestone, longtermPendingDecision } from '../software/longterm-state'
 import { handleLongtermMessage } from '../software/longterm-message'
@@ -182,6 +183,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   if ((!initialBudgetStop)) {
     const design = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,query:input.query,primaryEnv:input.env,signal})
     if(design.status==='blocked'){blocked(`独立验收设计尚未就绪：${design.reason}`);return}
+    if(design.status==='frozen'&&design.contract){
+      const semantics=currentIndependentSemantics(input.projectId,design.contract)
+      if(!semantics.ready){await recordIndependentDisputes(input.projectId,semantics,signal);blocked(`独立案例的预期或覆盖声明尚有争议，未开始迎合这些预期的实现，也未改动确认目标或冻结断言：\n${JSON.stringify(semantics)}`,true);return}
+    }
   }
   checkpoint('running', { source: softwareVerificationFingerprint(project.root_path) })
   const runSignal = signal
@@ -252,6 +257,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
           const waiting = await guardDispatcherCompletion(ctx)
           if (waiting) return waiting
           const gap = await quality.gate(ctx.signal)
+          if(gap?.startsWith('QUALITY_INDEPENDENT_SEMANTICS_UNRESOLVED'))throw Error(gap)
           if (gap?.startsWith('QUALITY_VISUAL_MODEL_UNSUPPORTED')) throw Error(gap)
           if (gap?.startsWith('QUALITY_REVIEW_REQUIRED') || gap?.startsWith('QUALITY_VISUAL_REVIEW_REQUIRED')) {
             const visual = gap.startsWith('QUALITY_VISUAL_REVIEW_REQUIRED')
@@ -293,6 +299,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         // attempt invalidates earlier receipts, including failures at closure.
         checkpoint('verifying', { source: softwareVerificationFingerprint(project.root_path) })
         const checked = await verifySoftwareCandidate(input.projectId, input.requestId, runSignal)
+        if(checked.status==='unverified'&&checked.independent?.semantics?.ready===false){blocked(`独立案例的业务预期或覆盖声明尚待澄清，未将其记为产品失败，也未改动目标或冻结断言：\n${checked.summary}`,true);return}
         failureCategory=checked.failure?.category??'unknown'
         candidate = checked.candidate
         core = checked.core ?? { status: 'unverified', checked_at: new Date().toISOString(), summary: checked.summary, missing: [checked.summary], evidence: [] }
@@ -399,7 +406,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     blocked(runSignal.aborted ? '执行已停止或到达运行时限，已有结果与用量记录保留。'
       : monetaryNotice ? `${reason}：${monetaryNotice}`
       : /^HARNESS_(?:REQUEST|OUTPUT)_BUDGET_EXHAUSTED$/.test(reason) ? leanBudgetStopMessage(input.projectId, 'desktop-implement', reason)
-      : `当前执行受阻：${reason}`, false, runSignal.aborted ? 'interrupted' : 'blocked')
+      : `当前执行受阻：${reason}`, reason.startsWith('QUALITY_INDEPENDENT_SEMANTICS_UNRESOLVED'), runSignal.aborted ? 'interrupted' : 'blocked')
   } finally {
     runSignal.removeEventListener('abort', cancelChildren)
     disposeParentDelegationState(input.sessionId)

@@ -16,11 +16,14 @@ export interface VerificationFailure {
 }
 export function verificationFailure(result: SoftwareVerification, error?: unknown): VerificationFailure | undefined {
   if (result.status === 'passed') return
+  if(result.status==='unverified'&&result.independent?.semantics?.ready===false)return{
+    category:'unknown',classification_basis:'unresolved',code:'INDEPENDENT_SEMANTICS_UNRESOLVED',expected:'已确认需求和可追溯的冻结独立预期',actual:result.independent.semantics,paths:[],
+    allowed_changes:['核对确认来源与未明确规则，保留争议；不得让实现者修改冻结输入、断言或新增需求'],next_tool:'read_production_context(independent-design)',next:'先澄清业务预期或覆盖争议，保留现有候选和案例；这不是已确认产品缺陷，不自动修产品迎合错误预期，也不自动重发B。'}
   const summary = result.summary, gui = result.core?.host_gui
   const failed = gui?.steps.find(step => !step.passed)
   const independent=result.independent&&'diagnostic'in result.independent?result.independent.diagnostic:undefined
   const assertion = failed?.actual && typeof failed.actual === 'object' ? (failed.actual as { assertion?: { expected?: unknown; actual?: unknown } }).assertion : undefined
-  const adapter = /GUI_NATIVE_(?:PATH|SYNTAX|CASE|REPORT|ASSERTIONS|EVIDENCE|COVERAGE|INPUT|TEST_SOURCE|DEPENDENCY|PACKAGE|BOOTSTRAP)|GUI_EXISTING_EXPECTATIONS|EVIDENCE_(?:PATH|DIRECTORY)|(?:TimeoutError|strict mode violation|waiting for (?:locator|getBy))/.test(summary + JSON.stringify(failed?.actual ?? ''))
+  const adapter = /INDEPENDENT_ADAPTER|GUI_NATIVE_(?:PATH|SYNTAX|CASE|REPORT|ASSERTIONS|EVIDENCE|COVERAGE|INPUT|TEST_SOURCE|DEPENDENCY|PACKAGE|BOOTSTRAP)|GUI_EXISTING_EXPECTATIONS|EVIDENCE_(?:PATH|DIRECTORY)|(?:TimeoutError|strict mode violation|waiting for (?:locator|getBy))/.test(summary + JSON.stringify(failed?.actual ?? ''))
   const kind=gui?.failure_kind
   const explicitAssertion=assertion&&(assertion.expected!==undefined||assertion.actual!==undefined)
   const category:VerificationFailure['category'] = result.status === 'environment_blocked' ? 'environment'

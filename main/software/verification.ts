@@ -25,6 +25,7 @@ import { independentDesignVersion } from './independent-design'
 import { independentAdapterVersion, verifyIndependentDesign } from './independent-verification'
 import { recordEvaluationEvent } from './harness-evaluation'
 import { capabilityBindingVersion } from './capability-bindings'
+import { recordIndependentFindings, independentChallengeVersion } from './independent-quality'
 
 export interface SoftwareVerification { status: 'passed' | 'failed' | 'unverified' | 'environment_blocked'; summary: string; candidate?: SoftwareRelease;
   native_plan?: { suite_hash: string; execution: 'not_started' | 'attempted' }
@@ -65,7 +66,7 @@ async function inputs(projectId: string, requestId: string, signal?: AbortSignal
   }
   return { key: digest({ protocol: 1, hostId, source: (await runtimeInventory(project.root_path, signal)).digest, requestId, operation: project.lean_operation_id,
     scope: prdScopeFingerprint(brief), confirmed: brief.user_confirmed_at, ux: project.ux_confirmation, rules: ruleVersion, fixtures: fixtureVersion,
-    runtime, command: resolved.command, environment: resolved.env, managed: runtimeBindingVersion(projectId),capabilities:capabilityBindingVersion(projectId), independent:independentDesignVersion(projectId),adapter:independentAdapterVersion(project.root_path),implementation, platform: process.platform, arch: process.arch, node: process.versions.node }), reusable }
+    runtime, command: resolved.command, environment: resolved.env, managed: runtimeBindingVersion(projectId),capabilities:capabilityBindingVersion(projectId), independent:independentDesignVersion(projectId),independent_challenges:independentChallengeVersion(projectId),adapter:independentAdapterVersion(project.root_path),implementation, platform: process.platform, arch: process.arch, node: process.versions.node }), reusable }
 }
 export async function recentSoftwareVerification(projectId: string, requestId: string, signal?: AbortSignal): Promise<SoftwareVerification | undefined> {
   const file = receiptPath(projectId); if (poisoned.has(file) || !existsSync(file)) return
@@ -127,7 +128,7 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     if (core.status !== 'passed' && !localPending) { result.status = core.status; result.summary = [core.summary, ...core.missing].join('\n'); return result }
     const independent = result.independent = await verifyIndependentDesign(projectId,candidate,signal)
     if(independent.status!=='disabled'&&independent.status!=='passed'){
-      result.status=independent.status;result.summary=`独立设计的宿主执行未通过：${'error' in independent?independent.error??'实际断言失败':'缺少当前证据'}`;return result
+      result.status=independent.status;result.summary=`独立设计的宿主执行未通过：${independent.error??'实际断言失败'}\n${JSON.stringify({cases:independent.case_results,coverage:independent.semantics?.coverage})}`;return result
     }
     const launch = result.launch = await runLaunchSmoke(candidate.root, { signal, allowCleanExit: candidate.launch.mode === 'command',projectId })
     const brief = readPrdBackplane(projectId), windowReady = brief.lean_brief?.ui !== 'required'
@@ -141,8 +142,15 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
   } catch (error) {
     signal?.throwIfAborted(); result.status = 'unverified'; result.summary = error instanceof Error ? error.message : String(error); result.failure = verificationFailure(result, error); return result
   } finally {
-    active.delete(file)
+    try {
     if (signal?.aborted) { result.status = 'unverified'; result.summary = '验证已取消，当前通过凭据未生效。' }
+    if (result.independent && result.candidate && !signal?.aborted && result.independent.status !== 'disabled') {
+      try {
+        await verifyReleaseSource(result.candidate, signal)
+        if (!version || (await inputs(projectId, requestId, signal)).key !== version.key) throw Error('INDEPENDENT_FINDING_INPUT_CHANGED')
+        await recordIndependentFindings(projectId, result.candidate, result.independent, result.status === 'passed', signal)
+      } catch (error) { result.status = 'unverified'; result.summary = String(error) }
+    }
     result.failure ??= verificationFailure(result)
     // Even cancellation/write failure invalidates an older PASS. No result may
     // outlive changed rule, fixture, environment, binary or source inputs.
@@ -150,5 +158,6 @@ export async function verifySoftwareCandidate(projectId: string, requestId: stri
     writeTextFileAtomic(file, JSON.stringify({ version: 1, state: 'complete', key: version?.key ?? '', at: Date.now(), result, result_hash: digest(result), reusable } satisfies Receipt))
     poisoned.delete(file)
     recordEvaluationEvent(projectId,'verification_result',{status:result.status,category:result.failure?.category,summary:result.summary.slice(0,1600),candidate_id:result.candidate?.id})
+    } finally { active.delete(file) }
   }
 }

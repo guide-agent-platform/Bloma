@@ -1,62 +1,28 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getPromaHome } from '../../storage/config-paths'
-import { writeTextFileAtomic } from '../../storage/json-store'
 import type { AgentLoopTool, ToolContext } from '../agent/loop/agent-loop'
 import { startDelegation, findDelegation } from '../agent/delegation/agent-collaboration'
 import type { DelegationParentContext } from '../agent/delegation/delegation-context'
 import { findProject } from '../project/project-service'
 import { readPrdBackplane } from '../project/prd-store'
 import { readConfirmedUxBinding } from '../project/ux-binding'
-import { prdScopeFingerprint, trustedAcceptance } from '../project/requirement-contract'
+import { trustedAcceptance } from '../project/requirement-contract'
 import { guiSuitePath } from '../desktop/gui-acceptance'
 import { cliSuitePath } from '../desktop/lean-cli-check'
-import { runtimeInventory } from './release-store'
-import { runtimeBindingVersion } from './runtime-bindings'
-import { capabilityBindingVersion } from './capability-bindings'
 import { verifySoftwareCandidate, type SoftwareVerification } from './verification'
 import type { createSoftwareCollaborationPolicy } from './collaboration-policy'
 import { activeSoftwareCommands, redactSoftwareOutput, stopSoftwareSession } from './process-manager'
 import { closeDebugSessions } from './debug-sessions'
-import { captureVisualMaterial, readVisualMaterial, grantVisualImage, validateVisualGrant, assertVisualRequest, type VisualMaterial } from './visual-review-material'
-import type { PastedImageRef } from '../../shared/types'
+import { captureVisualMaterial, readVisualMaterial, grantVisualImage, validateVisualGrant, assertVisualRequest } from './visual-review-material'
+import type { VisualMaterial } from './visual-review-material'
 import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
+import { independentDesignVersion, readIndependentDesign, readIndependentPolicy } from './independent-design'
+import { challengeIndependentCase, currentIndependentSemantics } from './independent-quality'
 
-type Identity = { source: string; target: string; environment: string }
-type ReviewKind = 'code' | 'visual'
-interface Review { id: string; kind?: ReviewKind; identity: Identity; status: 'pending' | 'submitted' | 'complete' | 'interrupted'; child?: string; delegation?: string; at: string
-  visual?: VisualMaterial; image?: PastedImageRef; visual_delivery?: { at: string; image_hash: string; request_hash: string }; visual_observations?: unknown[]
-  visual_error?: 'MODEL_IMAGE_INPUT_UNSUPPORTED'; visual_route?: string }
-export interface QualityFinding {
-  id: string; review: string; identity: Identity; requirement: string; expected_source: string; category: string
-  review_kind?: ReviewKind; visual_material_hash?: string
-  severity: 'critical' | 'high' | 'medium' | 'low'; location: string; trigger: string; evidence: string; reproduction: string; unknowns: string
-  disposition: 'suspected' | 'disputed' | 'suggestion' | 'not_reproduced' | 'confirmed' | 'closed'
-  checks: Array<{ at: string; identity: Identity; case_name: string; rules: string; outcome: 'failed' | 'passed' | 'unverified'; report?: string; candidate?: string; observation: string }>
-}
-interface Ledger { version: 1; reviews: Review[]; findings: QualityFinding[] }
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const same = (a: Identity, b: Identity) => hash(a) === hash(b)
-export function qualityLedgerPath(projectId: string) {
-  if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw Error('QUALITY_PROJECT_INVALID')
-  return join(getPromaHome(), 'software-quality', `${projectId}.json`)
-}
-export function readQualityLedger(projectId: string): Ledger {
-  const path = qualityLedgerPath(projectId)
-  if (!existsSync(path)) return { version: 1, reviews: [], findings: [] }
-  const value = JSON.parse(readFileSync(path, 'utf8')) as Ledger
-  if (value.version !== 1 || !Array.isArray(value.reviews) || !Array.isArray(value.findings)) throw Error('QUALITY_LEDGER_INVALID')
-  return value // Corrupt evidence must fail closed, never silently reset history.
-}
-async function identity(projectId: string, signal?: AbortSignal): Promise<Identity> {
-  const project = findProject(projectId), brief = readPrdBackplane(projectId)
-  if (!brief.user_confirmed_at) throw Error('QUALITY_TARGET_NOT_CONFIRMED')
-  readConfirmedUxBinding(projectId, brief)
-  return { source: (await runtimeInventory(project.root_path, signal)).digest,
-    target: hash([prdScopeFingerprint(brief), brief.user_confirmed_at, project.ux_confirmation]),
-    environment: hash([runtimeBindingVersion(projectId), capabilityBindingVersion(projectId), process.platform, process.arch, process.versions.node]) }
-}
+import { qualityHash as hash, sameIdentity as same, qualityIdentity as identity, readQualityLedger, saveQualityLedger, type Identity, type Review, type ReviewKind, type Ledger, type QualityFinding } from './quality-ledger'
+export { qualityLedgerPath, readQualityLedger } from './quality-ledger'
+export type { QualityFinding } from './quality-ledger'
 function rulesVersion(projectId: string) {
   return hash([guiSuitePath(projectId), cliSuitePath(projectId)].map(path => existsSync(path) ? readFileSync(path).toString('base64') : null))
 }
@@ -82,7 +48,7 @@ export function createQualityReview(projectId: string, parent: string, policy: R
     busy = true
     try { return await work() } finally { busy = false }
   }
-  const save = (ledger: Ledger) => writeTextFileAtomic(qualityLedgerPath(projectId), JSON.stringify(ledger, null, 2))
+  const save = (ledger: Ledger) => saveQualityLedger(projectId, ledger)
   const assertParent = (ctx: ToolContext) => {
     policy.assertCommand(ctx)
     if (ctx.projectId !== projectId || ctx.sessionId !== parent) throw Error('QUALITY_PARENT_ONLY')
@@ -196,6 +162,12 @@ export function createQualityReview(projectId: string, parent: string, policy: R
       if (Object.keys(input).some(k => !['finding_id', 'case_name'].includes(k)) || typeof input.case_name !== 'string' || !input.case_name.trim()) throw Error('QUALITY_CHECK_INVALID')
       const ledger = readQualityLedger(projectId), finding = ledger.findings.find(f => f.id === input.finding_id)
       if (!finding || ['suggestion', 'disputed'].includes(finding.disposition)) throw Error('QUALITY_FINDING_UNGROUNDED')
+      if (finding.independent) {
+        if (finding.disposition === 'superseded' || finding.independent.case_id !== input.case_name || finding.independent.design_version !== independentDesignVersion(projectId)) throw Error('INDEPENDENT_RETEST_CONTRACT_CHANGED')
+        const result = await verifySoftwareCandidate(projectId, ctx.requestId, ctx.signal, true)
+        const updated = readQualityLedger(projectId).findings.find(f => f.id === finding.id)!
+        return { output: JSON.stringify({ finding: updated, status: result.status, summary: result.summary }), isError: result.status !== 'passed' || updated.disposition !== 'closed' }
+      }
       const before = await identity(projectId, ctx.signal), rules = rulesVersion(projectId), baseline = finding.checks.find(c => c.outcome === 'failed')
       if (!baseline && !same(finding.identity, before)) throw Error('QUALITY_REPRODUCTION_CANDIDATE_STALE')
       if (baseline && (baseline.case_name !== input.case_name || baseline.rules !== rules || baseline.identity.target !== before.target || baseline.identity.environment !== before.environment)) throw Error('QUALITY_RETEST_CONTRACT_CHANGED')
@@ -214,11 +186,13 @@ export function createQualityReview(projectId: string, parent: string, policy: R
       return { output: JSON.stringify({ finding, status: result.status, summary: result.summary }), isError: finding.disposition !== 'closed' && finding.disposition !== 'not_reproduced' }
     }) }
   const gate = async (signal?: AbortSignal): Promise<string | undefined> => {
+    const design=readIndependentPolicy(projectId)?.enabled?readIndependentDesign(projectId):undefined
+    if(design?.contract){const semantics=currentIndependentSemantics(projectId,design.contract);if(!semantics.ready)return `QUALITY_INDEPENDENT_SEMANTICS_UNRESOLVED: B预期或覆盖争议尚待澄清，不能改目标或断言过关：${JSON.stringify(semantics)}`}
     const current = await identity(projectId, signal), ledger = readQualityLedger(projectId)
     const latest = ledger.reviews.filter(r => (r.kind ?? 'code') === 'code').at(-1)
     if (!latest || latest.status !== 'complete' || !same(latest.identity, current)) return 'QUALITY_REVIEW_REQUIRED: 当前候选尚无有效结构化C审阅；用start_quality_review，等待并处理台账。'
-    const blocking = ledger.findings.filter(f => ['critical', 'high'].includes(f.severity) && f.checks.some(c => c.outcome === 'failed')
-      && !(f.disposition === 'closed' && same(f.checks.at(-1)!.identity, current) && f.checks.at(-1)!.rules === rulesVersion(projectId)))
+    const blocking = ledger.findings.filter(f => f.disposition !== 'superseded' && ['critical', 'high'].includes(f.severity) && f.checks.some(c => c.outcome === 'failed')
+      && !(f.disposition === 'closed' && same(f.checks.at(-1)!.identity, current) && f.checks.at(-1)!.rules === (f.independent ? independentDesignVersion(projectId) : rulesVersion(projectId))))
     if (blocking.length) return `QUALITY_FINDINGS_OPEN: 重要已确认缺陷尚未在当前候选闭合：${JSON.stringify(blocking)}`
     if (readPrdBackplane(projectId).lean_brief?.ui === 'required') {
       const visual = ledger.reviews.filter(r => r.kind === 'visual').at(-1)
@@ -229,7 +203,9 @@ export function createQualityReview(projectId: string, parent: string, policy: R
       return 'QUALITY_VISUAL_REVIEW_REQUIRED: 当前界面候选尚无有效V图片审阅；用start_visual_review，不能用DOM或文件名冒充看图。'
     }
   }
-  const parentTools: AgentLoopTool[] = [{ name: 'start_quality_review', description: '冻结稳定候选，启动独立只读C审阅；继承当前Pi模型、共享预算及两并发限制。等待期间不能写文件或执行命令。修改后须重新审阅。', input_schema: { type: 'object', additionalProperties: false, properties: {} }, execute: async (_input, ctx) => ({ output: JSON.stringify(await begin(ctx)) }) },
+  const parentTools: AgentLoopTool[] = [{name:'challenge_independent_case',description:'提出B案例的业务预期/范围争议，须给具体理由和证据。只保留待核对主张并使旧PASS失效，不删除案例、不改冻结断言、不关闭已确认缺陷，也不自动重发B。需要用户澄清或新的确认设计才能解除；不要为适配器缺失擅自新增功能。',
+    input_schema:{type:'object',additionalProperties:false,required:['case_id','reason','evidence'],properties:{case_id:{type:'string'},reason:{type:'string',maxLength:2000},evidence:{type:'string',maxLength:2000}}},
+    execute:async(input,ctx)=>{assertParent(ctx);return{output:JSON.stringify({finding:await challengeIndependentCase(projectId,input,ctx.signal),verification:'unverified'})}}}, { name: 'start_quality_review', description: '冻结稳定候选，启动独立只读C审阅；继承当前Pi模型、共享预算及两并发限制。等待期间不能写文件或执行命令。修改后须重新审阅。', input_schema: { type: 'object', additionalProperties: false, properties: {} }, execute: async (_input, ctx) => ({ output: JSON.stringify(await begin(ctx)) }) },
     { name: 'start_visual_review', description: '宿主实际采集当前候选PNG和同次DOM/操作事实，封存并授权独立V子会话；继承父模型与共享预算。可指定本会话当前debug_session_id保留操作状态，否则复用当前实例或打开正常入口。图片缺失或渠道拒绝图像不能记为已审阅。', input_schema: { type: 'object', additionalProperties: false, properties: { debug_session_id: { type: 'string' } } }, execute: async (input, ctx) => {
       if (Object.keys(input).some(k => k !== 'debug_session_id') || input.debug_session_id !== undefined && typeof input.debug_session_id !== 'string') throw Error('VISUAL_INPUT_INVALID')
       return { output: JSON.stringify(await begin(ctx, 'visual', input.debug_session_id as string | undefined)) }

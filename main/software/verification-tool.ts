@@ -42,7 +42,7 @@ export function buildSoftwareVerifyTool(projectId: string, policy: ReturnType<ty
           case_count:result.core?.host_gui?.case_results?.length,requirements: result.core?.requirements?.slice(0,64), acceptance_evidence:result.core?.acceptance_evidence,verification_scope:'local_behavior_and_capability_contracts',
           issues: result.security?.issues.slice(0, 8), candidate_id: result.candidate?.id, report: result.report_path, evidence_dir: result.core?.host_gui?.evidence_dir,
           evidence_warnings: result.core?.host_gui?.evidence_warnings,
-          independent:result.independent&&('diagnostic'in result.independent?{status:result.independent.status,diagnostic:result.independent.diagnostic,report:result.independent.report_path}:{status:result.independent.status}),
+          independent:result.independent&&{status:result.independent.status,diagnostic:result.independent.diagnostic,report:result.independent.report_path,semantics:result.independent.semantics,cases:result.independent.case_results},
           next: result.status === 'passed' ? '已登记的本机检查通过，可以结束制作；宿主核对版本后交付，完整需求效果仍需独立核对。' : result.failure?.next ?? '按实际失败修复，再verify_app；不要降低已确认预期。' })),
           isError: result.status !== 'passed', feedback: { schema_version: 1, execution: 'completed', source: 'host', scope: 'software_candidate',
             verification: result.status === 'passed' ? 'passed' : result.status === 'failed' ? 'failed' : 'unverified',
