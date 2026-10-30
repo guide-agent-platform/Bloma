@@ -11,6 +11,7 @@ import { prdScopeFingerprint } from '../../../main/project/requirement-contract'
 import { createSoftwareCollaborationPolicy } from '../../../main/software/collaboration-policy'
 import { createQualityReview, readQualityLedger } from '../../../main/software/quality-review'
 import { buildSoftwareAgentTools } from '../../../main/software/agent-tools'
+import { activeSoftwareRelease } from '../../../main/software/release-store'
 import { buildLeanGuiTool } from '../../../main/desktop/lean-gui-tool'
 import { leanBudget } from '../../../main/desktop/lean-budget'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
@@ -49,7 +50,7 @@ function send(response: ServerResponse, blocks: Array<Record<string, unknown>>) 
   events.push({ type: 'message_delta', delta: { stop_reason: blocks.some(b => b.type === 'tool_use') ? 'tool_use' : 'end_turn' }, usage: { output_tokens: 10 } }, { type: 'message_stop' })
   response.writeHead(200, { 'content-type': 'text/event-stream' }); response.end(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
 }
-const html = (broken: boolean) => `<html><head><title>器材计数</title></head><body><h1>器材小站</h1><p id="total"><strong id="value">3</strong><span>${broken ? '00' : ''}件</span></p><button id="inc" onclick="document.getElementById('value').textContent='4'">增加</button></body></html>`
+const html = (broken: boolean) => `<html><head><title>器材计数</title><link rel="stylesheet" href="theme.css"></head><body><h1>器材小站</h1><p id="total"><strong id="value">3</strong><span>${broken ? '00' : ''}件</span></p><button id="inc" onclick="document.getElementById('value').textContent='4'">增加</button></body></html>`
 beforeEach(async () => {
   previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-visual-review-')); process.env.PROMA_HOME = home
   rejectImages = false; reportFinding = true; wireBodies = []
@@ -66,6 +67,7 @@ beforeEach(async () => {
   const probe = createServer(); await new Promise<void>(done => probe.listen(0, '127.0.0.1', done))
   const port = (probe.address() as { port: number }).port; await new Promise<void>(done => probe.close(() => done()))
   writeFileSync(join(project.root_path, 'index.html'), html(true))
+  writeFileSync(join(project.root_path,'theme.css'),'p { color: #111; padding: 4px; }')
   writeFileSync(join(project.root_path, 'server.cjs'), `const http=require('node:http'),fs=require('node:fs');http.createServer((q,s)=>{s.setHeader('content-type','text/html;charset=utf-8');s.end(fs.readFileSync('index.html'))}).listen(${port},'127.0.0.1')`)
   writeFileSync(join(project.root_path, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, command: ['node', 'server.cjs'], ui: 'browser', url: `http://127.0.0.1:${port}` }))
   const registered = await buildLeanGuiTool(project.project_id).execute({ steps: [{ id: 'inc', kind: 'click', selector: '#inc' }, { id: 'total', kind: 'expect', selector: '#total', equals: '4件' }], acceptance_refs: { total: ['F-001'] } }, ctx())
@@ -191,6 +193,33 @@ it('normal production automatically runs C/V, repairs a V finding and reviews th
   expect(leanBudget(project.project_id, 'desktop-implement').snapshot().requests).toBe(step + wireBodies.length + 4)
   const artifacts = join(process.cwd(), 'run-artifacts', 'q2-visual'); mkdirSync(artifacts, { recursive: true })
   writeFileSync(join(artifacts, 'production-ledger.json'), JSON.stringify(ledger, null, 2))
+  // A real verified baseline, not selector fixture metadata: only cosmetic CSS
+  // changes select V, then an unchanged candidate selects no automatic agents.
+  let styleCalls=0
+  const beforeWire=wireBodies.length,beforeReviews=ledger.reviews.length
+  const styleQuery:SDKQuery=async function*(prompt,options){
+    if(options.sessionId!==parent){yield*route(prompt,options);return}
+    const call=styleCalls++
+    const content=call===0?[use('read_file',{path:'theme.css'}),use('write_file',{path:'theme.css',content:'p { color: #236; padding: 8px; }'})]
+      :call===1?[use('check_quality_finding',{finding_id:ledger.findings[0].id,case_name:'total'})]:[{type:'text' as const,text:'样式已调整，旧缺陷已由宿主复测，请按当前候选选择协作。'}]
+    yield{type:'assistant',message:{role:'assistant',content}};yield{type:'result',subtype:'success',usage:{input_tokens:10,output_tokens:10}}
+  }
+  await enterDesktopLine({projectId:project.project_id,sessionId:parent,requestId:'style',content:'只调整现有颜色和间距',maxTokens:4096,signal:AbortSignal.timeout(120000)},styleQuery,env,{publish:()=>{},persistAssistant:()=>{},persistSystem:()=>{},complete:()=>{}})
+  const styled=readQualityLedger(project.project_id)
+  expect(findProject(project.project_id).status,JSON.stringify(findProject(project.project_id).desktop_blocked)).toBe('completed')
+  expect(styled.reviews.slice(beforeReviews).map(r=>r.kind)).toEqual(['visual'])
+  expect(styled.collaboration?.at(-1)).toMatchObject({risk:'visual_only',required:['visual']})
+  expect((await activeSoftwareRelease(project.project_id))?.verified?.collaboration_id).toBe(styled.collaboration?.at(-1)?.id)
+  expect(leanBudget(project.project_id,'desktop-implement').snapshot().requests).toBe(styleCalls+wireBodies.length-beforeWire)
+  const stableWire=wireBodies.length,stableReviews=styled.reviews.length;let unchangedCalls=0
+  const unchanged:SDKQuery=async function*(_prompt,options){unchangedCalls++;expect(options.sessionId).toBe(parent);yield{type:'assistant',message:{role:'assistant',content:[{type:'text',text:'保留当前实现，只核对宿主结果。'}]}};yield{type:'result',subtype:'success',usage:{input_tokens:10,output_tokens:10}}}
+  await enterDesktopLine({projectId:project.project_id,sessionId:parent,requestId:'unchanged',content:'重新核对当前实现，不修改',maxTokens:4096,signal:AbortSignal.timeout(90000)},unchanged,env,{publish:()=>{},persistAssistant:()=>{},persistSystem:()=>{},complete:()=>{}})
+  const stable=readQualityLedger(project.project_id)
+  expect(findProject(project.project_id).status,JSON.stringify(findProject(project.project_id).desktop_blocked)).toBe('completed')
+  expect(stable.collaboration?.at(-1)).toMatchObject({risk:'unchanged',required:[]})
+  expect(unchangedCalls).toBe(1);expect(wireBodies.length).toBe(stableWire);expect(stable.reviews.length).toBe(stableReviews)
+  const evidence=join(process.cwd(),'run-artifacts','q4-selection');mkdirSync(evidence,{recursive:true});writeFileSync(join(evidence,'production-ledger.json'),JSON.stringify(stable,null,2))
+
 }, 180000)
 it('production stops on the first actual image rejection without retrying V or changing route', async () => {
   const { enterDesktopLine } = await import('../../../main/desktop/desktop-route')

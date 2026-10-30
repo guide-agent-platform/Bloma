@@ -19,6 +19,7 @@ import type { VisualMaterial } from './visual-review-material'
 import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
 import { independentDesignVersion, readIndependentDesign, readIndependentPolicy } from './independent-design'
 import { challengeIndependentCase, currentIndependentSemantics } from './independent-quality'
+import { selectQualityCollaboration } from './collaboration-selection'
 
 import { qualityHash as hash, sameIdentity as same, qualityIdentity as identity, readQualityLedger, saveQualityLedger, type Identity, type Review, type ReviewKind, type Ledger, type QualityFinding } from './quality-ledger'
 export { qualityLedgerPath, readQualityLedger } from './quality-ledger'
@@ -189,12 +190,13 @@ export function createQualityReview(projectId: string, parent: string, policy: R
     const design=readIndependentPolicy(projectId)?.enabled?readIndependentDesign(projectId):undefined
     if(design?.contract){const semantics=currentIndependentSemantics(projectId,design.contract);if(!semantics.ready)return `QUALITY_INDEPENDENT_SEMANTICS_UNRESOLVED: B预期或覆盖争议尚待澄清，不能改目标或断言过关：${JSON.stringify(semantics)}`}
     const current = await identity(projectId, signal), ledger = readQualityLedger(projectId)
+    const selection = await selectQualityCollaboration(projectId,current,signal)
     const latest = ledger.reviews.filter(r => (r.kind ?? 'code') === 'code').at(-1)
-    if (!latest || latest.status !== 'complete' || !same(latest.identity, current)) return 'QUALITY_REVIEW_REQUIRED: 当前候选尚无有效结构化C审阅；用start_quality_review，等待并处理台账。'
+    if (selection.required.includes('code') && (!latest || latest.status !== 'complete' || !same(latest.identity, current))) return 'QUALITY_REVIEW_REQUIRED: 当前候选尚无所需的有效结构化C审阅；用start_quality_review，等待并处理台账。'
     const blocking = ledger.findings.filter(f => f.disposition !== 'superseded' && ['critical', 'high'].includes(f.severity) && f.checks.some(c => c.outcome === 'failed')
       && !(f.disposition === 'closed' && same(f.checks.at(-1)!.identity, current) && f.checks.at(-1)!.rules === (f.independent ? independentDesignVersion(projectId) : rulesVersion(projectId))))
     if (blocking.length) return `QUALITY_FINDINGS_OPEN: 重要已确认缺陷尚未在当前候选闭合：${JSON.stringify(blocking)}`
-    if (readPrdBackplane(projectId).lean_brief?.ui === 'required') {
+    if (selection.required.includes('visual')) {
       const visual = ledger.reviews.filter(r => r.kind === 'visual').at(-1)
       if (visual?.visual_error === 'MODEL_IMAGE_INPUT_UNSUPPORTED' && visual.visual_route === activeRoute) return 'QUALITY_VISUAL_MODEL_UNSUPPORTED: 当前模型已实际拒绝图片输入，V仍未验证；请更换支持图片的当前制作路由后继续，不能改用文字或自动重试同一路由。'
       if (visual?.status === 'complete' && same(visual.identity, current) && visual.visual && visual.image && visual.child && visual.visual_delivery?.image_hash === visual.visual.image_hash && visual.visual_observations?.length) {
@@ -203,7 +205,7 @@ export function createQualityReview(projectId: string, parent: string, policy: R
       return 'QUALITY_VISUAL_REVIEW_REQUIRED: 当前界面候选尚无有效V图片审阅；用start_visual_review，不能用DOM或文件名冒充看图。'
     }
   }
-  const parentTools: AgentLoopTool[] = [{name:'challenge_independent_case',description:'提出B案例的业务预期/范围争议，须给具体理由和证据。只保留待核对主张并使旧PASS失效，不删除案例、不改冻结断言、不关闭已确认缺陷，也不自动重发B。需要用户澄清或新的确认设计才能解除；不要为适配器缺失擅自新增功能。',
+  const parentTools: AgentLoopTool[] = [{name:'inspect_collaboration_plan',description:'只读核对当前候选相对已验证发布基线的宿主协作选择、实际差异及理由；不是PASS，不能传入低风险/跳过角色。B授权、重要缺陷和原交付检查不因此绕过。需要时仍可显式请求额外C/V审阅。',input_schema:{type:'object',additionalProperties:false,properties:{}},execute:async(input,ctx)=>{assertParent(ctx);if(Object.keys(input).length)throw Error('COLLABORATION_SELECTION_HOST_ONLY');return{output:JSON.stringify(await selectQualityCollaboration(projectId,await identity(projectId,ctx.signal),ctx.signal))}}}, {name:'challenge_independent_case',description:'提出B案例的业务预期/范围争议，须给具体理由和证据。只保留待核对主张并使旧PASS失效，不删除案例、不改冻结断言、不关闭已确认缺陷，也不自动重发B。需要用户澄清或新的确认设计才能解除；不要为适配器缺失擅自新增功能。',
     input_schema:{type:'object',additionalProperties:false,required:['case_id','reason','evidence'],properties:{case_id:{type:'string'},reason:{type:'string',maxLength:2000},evidence:{type:'string',maxLength:2000}}},
     execute:async(input,ctx)=>{assertParent(ctx);return{output:JSON.stringify({finding:await challengeIndependentCase(projectId,input,ctx.signal),verification:'unverified'})}}}, { name: 'start_quality_review', description: '冻结稳定候选，启动独立只读C审阅；继承当前Pi模型、共享预算及两并发限制。等待期间不能写文件或执行命令。修改后须重新审阅。', input_schema: { type: 'object', additionalProperties: false, properties: {} }, execute: async (_input, ctx) => ({ output: JSON.stringify(await begin(ctx)) }) },
     { name: 'start_visual_review', description: '宿主实际采集当前候选PNG和同次DOM/操作事实，封存并授权独立V子会话；继承父模型与共享预算。可指定本会话当前debug_session_id保留操作状态，否则复用当前实例或打开正常入口。图片缺失或渠道拒绝图像不能记为已审阅。', input_schema: { type: 'object', additionalProperties: false, properties: { debug_session_id: { type: 'string' } } }, execute: async (input, ctx) => {

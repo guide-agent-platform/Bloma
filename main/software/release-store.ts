@@ -38,7 +38,7 @@ export interface SoftwareRelease { version: 1; id: string; projectId: string; so
   speech_resources?:SpeechResourceSnapshot
   source: RuntimeInventory; runtime: RuntimeInventory; launch: LaunchDeclaration; dependencies: Record<string, string>;
   external_files?: Array<{ path: string; sha256: string }>
-  verified?: { version: string; scope: string; at: string } }
+  verified?: { version: string; scope: string; at: string; collaboration_id?: string } }
 const IGNORED = new Set(['.git', '00_HISTORY', '.cache', '__pycache__', '.pytest_cache', 'data-backups'])
 const MUTABLE = new Set(['data', '00_VERIFY', '00_UX'])
 const CODE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css)$/i

@@ -12,6 +12,7 @@ import { runtimeBindingVersion } from './runtime-bindings'
 import { capabilityBindingVersion } from './capability-bindings'
 import type { VisualMaterial } from './visual-review-material'
 import type { PastedImageRef } from '../../shared/types'
+import type { CollaborationSelection } from './collaboration-selection'
 
 export type Identity = { source: string; target: string; environment: string }
 export type ReviewKind = 'code' | 'visual'
@@ -27,7 +28,7 @@ export interface QualityFinding {
   disposition: 'suspected' | 'disputed' | 'suggestion' | 'not_reproduced' | 'confirmed' | 'closed' | 'superseded'
   checks: Array<{ at: string; identity: Identity; case_name: string; rules: string; outcome: 'failed' | 'passed' | 'unverified'; report?: string; candidate?: string; observation: string }>
 }
-export interface Ledger { version: 1; reviews: Review[]; findings: QualityFinding[] }
+export interface Ledger { version: 1; reviews: Review[]; findings: QualityFinding[]; collaboration?: CollaborationSelection[] }
 export const qualityHash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export const sameIdentity = (a: Identity, b: Identity) => qualityHash(a) === qualityHash(b)
 export function qualityLedgerPath(projectId: string) {
@@ -38,7 +39,7 @@ export function readQualityLedger(projectId: string): Ledger {
   const path = qualityLedgerPath(projectId)
   if (!existsSync(path)) return { version: 1, reviews: [], findings: [] }
   const value = JSON.parse(readFileSync(path, 'utf8')) as Ledger
-  if (value.version !== 1 || !Array.isArray(value.reviews) || !Array.isArray(value.findings)) throw Error('QUALITY_LEDGER_INVALID')
+  if (value.version !== 1 || !Array.isArray(value.reviews) || !Array.isArray(value.findings) || value.collaboration!==undefined&&!Array.isArray(value.collaboration)) throw Error('QUALITY_LEDGER_INVALID')
   return value // Corrupt evidence must fail closed, never silently reset history.
 }
 export async function qualityIdentity(projectId: string, signal?: AbortSignal): Promise<Identity> {
