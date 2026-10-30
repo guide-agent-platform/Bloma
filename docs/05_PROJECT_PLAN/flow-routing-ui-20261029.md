@@ -26,4 +26,4 @@
 
 新构建需要正常重启Bloma后加载主进程和renderer；本轮未代用户重启其在用实例。没有push或收费模型调用。用户原有 `production-workflow-v2-20261020.md` 两行仍保持未暂存，hash-object为 `53c7abb3aef8497d8b0522b8aab806c82b2ec164`。外部原立项书未改写。
 
-后续架构与研究安排见 `multi-agent-research-plan-20261029.md`：先可观测G/A交接及少量按需预设，再视觉材料/案例质量和受控研究；不以旧版本兼容、多Agent数量或“零Bug”作为目标。
+用户随后明确当前目标是通过多Agent提高实际生成质量。现行工程入口为 [质量工程方案](multi-agent-generation-quality-plan-20261030.md) 与 [最新会话交接](session-handoff-quality-20261030.md)：先Q1只读找错与宿主复现/修复/复测，再视觉材料与案例质量。[研究规划](multi-agent-research-plan-20261029.md)留作背景，不作为工程前置；不以旧版本兼容、多Agent数量或“零Bug”作为目标。
