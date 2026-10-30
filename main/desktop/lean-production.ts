@@ -189,10 +189,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   let monetaryFailure: unknown
   // Pi persists an error string. Retain this run's typed refusal at the query
   // boundary so its cost breakdown survives the native session adapter.
-  const query: SDKQuery = async function* (prompt, options) {
+  const query: SDKQuery = quality.wrapQuery(async function* (prompt, options) {
     try { yield* budgetedQuery(prompt, options) }
     catch (error) { if (monetaryStopMessage(error)) monetaryFailure = error; throw error }
-  }
+  })
   const baseTools = buildSoftwareAgentTools(input.projectId, 'parent', collaboration,
     url => emit('software_preview_changed', { preview_url: url ?? null }), () => emit('software_suggestions_changed', {}),()=>emit('longterm_changed',{summary:findProject(input.projectId).longterm_summary}))
   let scopePending = false
@@ -203,6 +203,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   const system = [
     SOFTWARE_ENGINEERING_INSTRUCTIONS,
     '稳定候选结束制作前须经独立只读C审阅。用start_quality_review、wait_for_delegations、read_quality_findings处理宿主台账。审阅期间不写不运行；finding是疑点，按确认预期登记必要复现案例，再check_quality_finding实际复现。修复后同案例复测并重新审阅当前候选，不能自报关闭或更改预期过关。',
+    '界面候选还须经独立V审阅。start_visual_review封存当前真实PNG与同次DOM/操作事实，子会话用专属图片授权，不能传父debug_session_id替代。必要操作先inspect_app，再启动V；未看图、图像渠道拒绝或旧图不能当视觉通过，不另选付费渠道或用OCR代替。',
     `项目根：${project.root_path}。已有平台组件和骨架优先复用，当前未有的环境先探测；不重做已证明的环境研究。不要求架构文档、阶段任务书或推进标记。`,
     ...(project.imported_source ? [JSON.stringify(importedProjectContext(input.projectId))] : []),
     ux?.html_path ? `已确认外观：${ux.html_path}，先读后沿用；用户后续修改仅改相关部分。` : brief.lean_brief.ui === 'required' ? '用户明确授权直接制作界面，无需先画草图。' : '本任务无需额外外观设计。',
@@ -221,13 +222,14 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   registerParentLoopContext(input.sessionId, { query, env: input.env, maxTokens: Math.min(input.maxTokens, 16384), maxTurns,
     delegationMaxTurns: 24, permissionMode: 'allow-all', temperature: .1, system, editFormat: 'diff', runtime: 'pi', runtimeScope: 'lean-build',
     executionScope: budget.executionScope, materials: sessionMaterials(input.projectId, input.sessionId), publish: emit,
+    childMaterialsBuilder: child => quality.isQualityChild(child) ? undefined : sessionMaterials(input.projectId, input.sessionId),
     ...(({ maxConcurrentDelegations: 2, allowChannelOverrides: false, delegationSummaryLimit: 3000,
       prepareDelegation: quality.prepare,
       childSystemBuilder: (_role: import('../../shared/delegation-run-context').DelegationRunRole, child: string) =>
         quality.system(child) ?? `完成主负责人交付的具体子任务，先读相关文件，沿用现有接口。项目根：${project.root_path}。文件权限：${collaboration.describe(child)}。仅在归属范围内修改；不运行命令、不再委派、不修改目标/验收输入。需要跨边界修改时回报主负责人。简短交接实际修改、检查和未验证项，不自报产品通过。全局约束：${JSON.stringify(brief.constraints)}` })),
-    childToolsBuilder: (id, role) => {
+    childToolsBuilder: (id, role, _format, child) => {
       const childTools = buildSoftwareAgentTools(id, role, collaboration)
-      return role === 'review' ? quality.reviewTools(childTools) : childTools
+      return role === 'review' ? quality.reviewTools(childTools, child) : childTools
     } })
   const cancelChildren = () => { stopDelegations(input.sessionId) }
   runSignal.addEventListener('abort', cancelChildren, { once: true })
@@ -250,10 +252,14 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
           const waiting = await guardDispatcherCompletion(ctx)
           if (waiting) return waiting
           const gap = await quality.gate(ctx.signal)
-          if (gap?.startsWith('QUALITY_REVIEW_REQUIRED')) {
-            const review = await quality.begin(ctx)
+          if (gap?.startsWith('QUALITY_VISUAL_MODEL_UNSUPPORTED')) throw Error(gap)
+          if (gap?.startsWith('QUALITY_REVIEW_REQUIRED') || gap?.startsWith('QUALITY_VISUAL_REVIEW_REQUIRED')) {
+            const visual = gap.startsWith('QUALITY_VISUAL_REVIEW_REQUIRED')
+            const review = await quality.begin(ctx, visual ? 'visual' : 'code')
             const summary = await guardDispatcherCompletion(ctx)
-            return `宿主已为稳定候选启动独立C审阅：${JSON.stringify(review)}。读取finding台账。\n${summary ?? ''}`
+            const afterReview = await quality.gate(ctx.signal)
+            if (afterReview?.startsWith('QUALITY_VISUAL_MODEL_UNSUPPORTED')) throw Error(afterReview)
+            return `宿主已为稳定候选启动独立${visual ? 'V' : 'C'}审阅：${JSON.stringify(review)}。读取finding台账。\n${summary ?? ''}`
           }
           return gap
         }, recoveryContext: () => renderSoftwareWorkingContext(input.projectId), publish: emit }) }

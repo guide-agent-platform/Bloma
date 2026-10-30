@@ -11,6 +11,8 @@ export interface DelegationParentContext {
   delegationSummaryLimit?: number
   prepareDelegation?: (input: { parent: import('../loop/agent-loop').ToolContext; args: import('./agent-collaboration').DelegateAgentArgs; childSessionId: string; delegationId: string }) => { release: () => void; completionNote?: () => string }
   materials?: import('../../../shared/attachment-types').MaterialContext
+  /** Domain may give a quality reviewer only its own candidate material. */
+  childMaterialsBuilder?: (childSessionId: string) => import('../../../shared/attachment-types').MaterialContext | undefined
   query: SDKQuery
   env: Record<string, string>
   maxTokens: number

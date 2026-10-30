@@ -143,7 +143,7 @@ import { resolveDelegationTurns, type DelegationParentContext } from './delegati
 export type { DelegationParentContext } from './delegation-context'
 
 /** 子 agent 工具集构建器（按 role 裁剪；programming-orchestrator 注入 buildAgentTools）。 */
-export type ChildToolsBuilder = (projectId: string, role: DelegationRole, editFormat: 'diff' | 'whole') => AgentLoopTool[]
+export type ChildToolsBuilder = (projectId: string, role: DelegationRole, editFormat: 'diff' | 'whole', childSessionId?: string) => AgentLoopTool[]
 
 
 export interface WaitForDelegationsArgs {
@@ -328,8 +328,8 @@ async function runChildLoop(opts: {
     system: `${buildChildSystemPrompt(parentCtx.childSystemBuilder?.(role, record.childSessionId) ?? parentCtx.system, role)}${isolationNote}`,
     task: parentCtx.delegationTurnLimits?.[role] ? prompt + '\n\n【执行预算】本轮上限 ' + maxTurns + ' 轮，每轮为一次模型请求。沿用历史中的已读事实，避免重复通读；保留最后约 1/4 轮数用于真实验证与交付收口。未完成时明确列出未落盘/未验证项，不得声称工作已完成。' : prompt,
     historyTurns: opts.replayTurns,
-    materials: parentCtx.materials,
-    tools: [...(parentCtx.childToolsBuilder ?? childToolsBuilder)(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
+    materials: parentCtx.childMaterialsBuilder ? parentCtx.childMaterialsBuilder(record.childSessionId) : parentCtx.materials,
+    tools: [...(parentCtx.childToolsBuilder ?? childToolsBuilder)(parent.projectId, role, parentCtx.editFormat, record.childSessionId), ...(parentCtx.childExtraTools ?? [])],
     query: parentCtx.query,
     // C1：渠道覆盖从 record 取（query 复用，env/providerType/maxTokens 换子渠道值；continue 同源）
     env: record.channelOverride?.env ?? parentCtx.env,
