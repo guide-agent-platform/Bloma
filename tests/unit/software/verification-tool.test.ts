@@ -1,3 +1,4 @@
+import { withEmptyQualityReview } from '../../fixtures/quality-review-query'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -63,7 +64,7 @@ it('runs real checks from a parent action and reuses them at final delivery only
   expect(await recentSoftwareVerification(project.project_id, 'another-request')).toBeUndefined()
   const cached = await recentSoftwareVerification(project.project_id, 'r'); expect(cached?.core?.reused).toBe(true)
   const query: SDKQuery = async function* () { yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '当前版本已验证，请交付。' }] } }; yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } } }
-  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '完成原任务', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, query, {},
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '完成原任务', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, withEmptyQualityReview(query), {},
     { publish: () => {}, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} })
   expect(findProject(project.project_id).status).toBe('completed'); expect(count()).toBe(2)
 }, 120000)
@@ -96,7 +97,7 @@ it('invalidates an earlier tool PASS when final delivery checks fail, even after
     yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '请执行实际收口检查。' }] } }
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
   }
-  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '完成原任务', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, query, {},
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '完成原任务', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, withEmptyQualityReview(query), {},
     { publish: () => {}, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} })
   expect(queries).toBe(2)
   expect(findProject(project.project_id).status).not.toBe('completed')

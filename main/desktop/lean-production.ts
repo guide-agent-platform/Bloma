@@ -46,6 +46,7 @@ import { isLongtermSoftware, ensureLongtermState, stageLongtermMilestone, longte
 import { handleLongtermMessage } from '../software/longterm-message'
 import { workflowRetirementReason } from './workflow-retirement'
 import { renderSoftwareWorkingContext } from '../software/working-context'
+import { createQualityReview } from '../software/quality-review'
 
 // Dissatisfaction is a repair request, not cancellation of the new workflow.
 const isStop = (text: string) => text.split(/[，。；！？,;!?\n]+/).some(part => /^(?:(?:请|先|现在|马上|暂时)\s*)*(?:停止|取消|暂停|停下|先停|别推进|暂缓|先别做|不要开工|stop|cancel|pause)(?:(?:当前|本次|这个)?(?:任务|流程|运行|执行|制作)|一下|吧|了|\s)*$/i.test(part.trim()))
@@ -132,6 +133,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     saveSoftwareRunState({ projectId: input.projectId, sessionId: input.sessionId, runId, status, ...patch })
   }
   const collaboration = createSoftwareCollaborationPolicy(input.projectId, project.root_path, input.sessionId)
+  const quality = createQualityReview(input.projectId, input.sessionId, collaboration)
   const versionOf = () => {
     const current = readPrdBackplane(input.projectId)
     const rules = [guiSuitePath(input.projectId), cliSuitePath(input.projectId)].map(file =>
@@ -195,10 +197,12 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     url => emit('software_preview_changed', { preview_url: url ?? null }), () => emit('software_suggestions_changed', {}),()=>emit('longterm_changed',{summary:findProject(input.projectId).longterm_summary}))
   let scopePending = false
   const tools = productionAgentTools(baseTools, [
+    ...quality.parentTools,
     buildLeanScopeTool(input.projectId, input.content, emit, () => { scopePending = true }),
     brief.lean_brief.ui === 'required' ? buildLeanGuiTool(input.projectId) : buildLeanCliTool(input.projectId)])
   const system = [
     SOFTWARE_ENGINEERING_INSTRUCTIONS,
+    '稳定候选结束制作前须经独立只读C审阅。用start_quality_review、wait_for_delegations、read_quality_findings处理宿主台账。审阅期间不写不运行；finding是疑点，按确认预期登记必要复现案例，再check_quality_finding实际复现。修复后同案例复测并重新审阅当前候选，不能自报关闭或更改预期过关。',
     `项目根：${project.root_path}。已有平台组件和骨架优先复用，当前未有的环境先探测；不重做已证明的环境研究。不要求架构文档、阶段任务书或推进标记。`,
     ...(project.imported_source ? [JSON.stringify(importedProjectContext(input.projectId))] : []),
     ux?.html_path ? `已确认外观：${ux.html_path}，先读后沿用；用户后续修改仅改相关部分。` : brief.lean_brief.ui === 'required' ? '用户明确授权直接制作界面，无需先画草图。' : '本任务无需额外外观设计。',
@@ -218,10 +222,13 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     delegationMaxTurns: 24, permissionMode: 'allow-all', temperature: .1, system, editFormat: 'diff', runtime: 'pi', runtimeScope: 'lean-build',
     executionScope: budget.executionScope, materials: sessionMaterials(input.projectId, input.sessionId), publish: emit,
     ...(({ maxConcurrentDelegations: 2, allowChannelOverrides: false, delegationSummaryLimit: 3000,
-      prepareDelegation: collaboration.prepare,
+      prepareDelegation: quality.prepare,
       childSystemBuilder: (_role: import('../../shared/delegation-run-context').DelegationRunRole, child: string) =>
-        `完成主负责人交付的具体子任务，先读相关文件，沿用现有接口。项目根：${project.root_path}。文件权限：${collaboration.describe(child)}。仅在归属范围内修改；不运行命令、不再委派、不修改目标/验收输入。需要跨边界修改时回报主负责人。简短交接实际修改、检查和未验证项，不自报产品通过。全局约束：${JSON.stringify(brief.constraints)}` })),
-    childToolsBuilder: (id, role, format) => buildSoftwareAgentTools(id, role, collaboration) })
+        quality.system(child) ?? `完成主负责人交付的具体子任务，先读相关文件，沿用现有接口。项目根：${project.root_path}。文件权限：${collaboration.describe(child)}。仅在归属范围内修改；不运行命令、不再委派、不修改目标/验收输入。需要跨边界修改时回报主负责人。简短交接实际修改、检查和未验证项，不自报产品通过。全局约束：${JSON.stringify(brief.constraints)}` })),
+    childToolsBuilder: (id, role) => {
+      const childTools = buildSoftwareAgentTools(id, role, collaboration)
+      return role === 'review' ? quality.reviewTools(childTools) : childTools
+    } })
   const cancelChildren = () => { stopDelegations(input.sessionId) }
   runSignal.addEventListener('abort', cancelChildren, { once: true })
   let task = input.observedSoftwareVersion ? trialFeedbackText(input.projectId, input.observedSoftwareVersion, input.content) : input.content
@@ -239,7 +246,17 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         materials: sessionMaterials(input.projectId, input.sessionId), images: initial ? input.images : undefined,
         initialMessagePersisted: initial ? input.initialMessagePersisted : false,
         shouldPause: () => scopePending,
-        beforeComplete: ctx => guardDispatcherCompletion(ctx), recoveryContext: () => renderSoftwareWorkingContext(input.projectId), publish: emit }) }
+        beforeComplete: async ctx => {
+          const waiting = await guardDispatcherCompletion(ctx)
+          if (waiting) return waiting
+          const gap = await quality.gate(ctx.signal)
+          if (gap?.startsWith('QUALITY_REVIEW_REQUIRED')) {
+            const review = await quality.begin(ctx)
+            const summary = await guardDispatcherCompletion(ctx)
+            return `宿主已为稳定候选启动独立C审阅：${JSON.stringify(review)}。读取finding台账。\n${summary ?? ''}`
+          }
+          return gap
+        }, recoveryContext: () => renderSoftwareWorkingContext(input.projectId), publish: emit }) }
       catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         const detailedError = monetaryFailure instanceof Error && reason.includes(monetaryFailure.message) ? monetaryFailure : error
@@ -328,6 +345,8 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
         task = `宿主实际验证反馈（修复${attempt.used}${'，共享原请求与费用预算'}）：\n${failure}\n保留已正确实现，不改已确认目标或测试期望；核对失败入口后做最小修复。`
         continue
       }
+      const qualityGap = await quality.gate(runSignal)
+      if (qualityGap) { blocked(qualityGap); return }
       if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) {
         blocked('验证期间目标或产物发生变化，本次通过记录未用于交付。'); return
       }
@@ -336,6 +355,8 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       const text = `${modelBudgetStop ? '模型调用已停止；宿主沿已登记规则完成了实际验证。' : ''}已登记的本机案例、安全与启动检查通过，可从项目交付入口启动试用。完整需求效果尚未独立评定。${core.llm ? 'AI请求与异常分支已做本机HTTP检查，外部供应商连通与生成效果尚未实测。' : ''}继续修改可直接描述或点选。`
       return async () => {
         runSignal.throwIfAborted()
+        const finalQualityGap = await quality.gate(runSignal)
+        if (finalQualityGap) { blocked(finalQualityGap); return }
         if (prdScopeFingerprint(readPrdBackplane(input.projectId)) !== scope || versionOf() !== version) { blocked('收口前产物或验证输入发生变化，本次未交付。'); return }
         if (candidate) {
           const began = Date.now(); let accounted = false

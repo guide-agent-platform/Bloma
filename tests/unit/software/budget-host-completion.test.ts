@@ -31,7 +31,8 @@ it.each([{rules:true,content:'继续',passed:true},{rules:false,content:'继续'
   const query:SDKQuery=async function*(){calls++;throw Error('The host should not call this model')}
   await enterDesktopLine({projectId:project.project_id,sessionId:'s',requestId:'r',content,signal:AbortSignal.timeout(60000),maxTokens:8192},query,
     {ANTHROPIC_BASE_URL:'https://test.invalid',ANTHROPIC_MODEL:'M1'},{publish:()=>{},persistAssistant:()=>{},persistSystem:()=>{},complete:()=>{}})
-  expect(calls).toBe(0);expect(findProject(project.project_id).status==='completed').toBe(passed)
+  expect(calls).toBe(0);expect(findProject(project.project_id).status==='completed').toBe(false)
+  if (passed) expect(findProject(project.project_id).desktop_blocked?.note).toContain('QUALITY_REVIEW_REQUIRED')
   expect(existsSync(policy+'.state.json')).toBe(false)
 },90000)
 it.each([{ output: 5, rules: true, cancel: false, passed: true }, { output: 999, rules: true, cancel: false, passed: false },
@@ -66,8 +67,9 @@ it.each([{ output: 5, rules: true, cancel: false, passed: true }, { output: 999,
   }
   await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '实现输出5', signal: controller.signal, maxTokens: 4096 }, query, {},
     { publish: () => {}, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} })
-  expect(calls).toBe(2); expect(findProject(project.project_id).status === 'completed').toBe(passed)
-  expect(Boolean(await activeSoftwareRelease(project.project_id))).toBe(passed)
+  expect(calls).toBe(2); expect(findProject(project.project_id).status === 'completed').toBe(false)
+  expect(Boolean(await activeSoftwareRelease(project.project_id))).toBe(false)
+  if (passed) expect(findProject(project.project_id).desktop_blocked?.note).toContain('QUALITY_REVIEW_REQUIRED')
   if (cancel) expect(existsSync(join(project.root_path, '00_VERIFY/launch-smoke.json'))).toBe(false)
   if (monetary && !rules) expect(findProject(project.project_id).desktop_blocked?.note).toContain('上次宿主观察之后的修改')
 }, 60000)

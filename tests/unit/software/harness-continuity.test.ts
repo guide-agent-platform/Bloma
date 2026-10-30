@@ -1,3 +1,4 @@
+import { withEmptyQualityReview } from '../../fixtures/quality-review-query'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -41,14 +42,14 @@ it('runs real Pi tools beyond both old 96-turn and 160-request cutoffs, then ver
     yield { type: 'assistant', message: { role: 'assistant', content } }
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
   }
-  await enterDesktopLine(input, query, {}, deps)
+  await enterDesktopLine(input, withEmptyQualityReview(query), {}, deps)
   expect(calls, JSON.stringify(findProject(project.project_id).desktop_blocked)).toBe(164)
   expect(findProject(project.project_id)).toMatchObject({status:'active',longterm_summary:{status:'awaiting_confirmation'}})
-  await enterDesktopLine({...input,requestId:'user-confirm',content:'确认本阶段'},query,{},deps)
+  await enterDesktopLine({...input,requestId:'user-confirm',content:'确认本阶段'},withEmptyQualityReview(query),{},deps)
   expect(calls).toBe(164)
   expect(findProject(project.project_id).status).toBe('completed')
   expect(readFileSync(join(project.root_path, 'parts/step-163.txt'), 'utf8')).toBe('completed 163')
-  expect(leanBudget(project.project_id, 'desktop-implement').snapshot()).toMatchObject({ requests: 164, limits: { requests: 256, phaseRequests: 256 } })
+  expect(leanBudget(project.project_id, 'desktop-implement').snapshot()).toMatchObject({ requests: 167, limits: { requests: 256, phaseRequests: 256 } })
   expect(deps.complete).toHaveBeenLastCalledWith('s', project.project_id)
 }, 180000)
 it('rejects an exhausted continuation before a model call, preserves its counters and persists the real incomplete reason', async () => {
@@ -57,7 +58,7 @@ it('rejects an exhausted continuation before a model call, preserves its counter
   writeFileSync(budget.snapshot().file, JSON.stringify({ version: 1, requests: 256, output: 12000, phases: { 'desktop-implement': 253, prepare: 3 }, runtimeMs: 99 }))
   const query = vi.fn(async function* () { throw Error('must-not-call-provider') })
   deps.complete = (sid, pid, outcome) => persistTerminalMessage(sid, outcome === 'incomplete' ? 'incomplete' : 'completed', { message: findProject(pid).desktop_blocked?.note })
-  await enterDesktopLine({ ...input, content: '继续' }, query, {}, deps)
+  await enterDesktopLine({ ...input, content: '继续' }, withEmptyQualityReview(query), {}, deps)
   expect(query).not.toHaveBeenCalled()
   expect(budget.snapshot()).toMatchObject({ requests: 256, output: 12000, phases: { 'desktop-implement': 253, prepare: 3 } })
   expect(deps.persistAssistant).toHaveBeenCalledWith('s', expect.stringContaining('累计请求 256/256'))
@@ -83,13 +84,10 @@ it.each([5, 999])('checks already registered behavior after a fully exhausted co
   mkdirSync(join(home, 'harness-budgets'), { recursive: true })
   writeFileSync(budget.snapshot().file, JSON.stringify({ version: 1, requests: 256, output: 12000, phases: { 'desktop-implement': 253, prepare: 3 }, runtimeMs: 99 }))
   const query = vi.fn(async function* () { throw Error('must-not-call-provider') })
-  await enterDesktopLine({ ...input, content: '继续' }, query, {}, deps)
+  await enterDesktopLine({ ...input, content: '继续' }, withEmptyQualityReview(query), {}, deps)
   expect(query).not.toHaveBeenCalled()
-  if(actual===5){
-    expect(findProject(project.project_id)).toMatchObject({status:'active',longterm_summary:{status:'awaiting_confirmation'}})
-    await enterDesktopLine({...input,requestId:'user-confirm',content:'确认本阶段'},query,{},deps)
-  }
+  if(actual===5) expect(findProject(project.project_id).desktop_blocked?.note).toContain('QUALITY_REVIEW_REQUIRED')
   expect(query).not.toHaveBeenCalled()
-  expect(findProject(project.project_id).status === 'completed').toBe(actual === 5)
+  expect(findProject(project.project_id).status === 'completed').toBe(false)
   expect(budget.snapshot()).toMatchObject({ requests: 256, output: 12000 })
 }, 90000)

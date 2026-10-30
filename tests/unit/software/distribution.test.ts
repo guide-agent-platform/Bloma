@@ -1,3 +1,4 @@
+import { withEmptyQualityReview } from '../../fixtures/quality-review-query'
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -32,7 +33,7 @@ it.skipIf(process.platform !== 'win32')('keeps an actually checked local trial b
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
   }
   const messages: string[] = [], deps: DesktopRouteDeps = { publish: (_input, type, payload) => { if (type === 'message_delta') messages.push(String(payload.text)) }, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} }
-  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '验证并保留试用版本', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, query, {}, deps)
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '验证并保留试用版本', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, withEmptyQualityReview(query), {}, deps)
   expect(calls).toBe(2); expect(findProject(project.project_id).status).toBe('active')
   const trial = await activeSoftwareRelease(project.project_id)
   expect(trial).toBeDefined()

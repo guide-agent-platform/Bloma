@@ -1,3 +1,4 @@
+import { withEmptyQualityReview } from '../../fixtures/quality-review-query'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -120,7 +121,7 @@ it('continues the real Pi transcript after cancellation without replaying an alr
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 20 } }
   }
   const deps: DesktopRouteDeps = { publish: () => {}, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} }
-  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'first', content: '开始实现', maxTokens: 4096, signal: controller.signal }, query, {}, deps)
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'first', content: '开始实现', maxTokens: 4096, signal: controller.signal }, withEmptyQualityReview(query), {}, deps)
   const file = join(project.root_path, 'completed-setup.txt'), before = readFileSync(file, 'utf8'), usage = leanBudget(project.project_id, 'desktop-implement').snapshot()
   expect(before.split('one real side effect').length - 1).toBe(1)
   expect(readSoftwareRunState(project.project_id)?.status).toMatch(/cancelled|interrupted/)
@@ -129,7 +130,7 @@ it('continues the real Pi transcript after cancellation without replaying an alr
     yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '已有步骤与登记均保留，交给宿主沿当前版本验证。' }] } }
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
   }
-  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'resume', content: '继续', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, resume, {}, deps)
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'resume', content: '继续', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, withEmptyQualityReview(resume), {}, deps)
   expect(findProject(project.project_id).status).toBe('completed'); expect(readFileSync(file, 'utf8')).toBe(before)
   const after = leanBudget(project.project_id, 'desktop-implement').snapshot()
   expect(after.file).toBe(usage.file); expect(after.requests).toBeGreaterThan(usage.requests); expect(after.output).toBeGreaterThanOrEqual(usage.output)
@@ -154,7 +155,7 @@ it.each([{ values: [0, 1, 2, 5], completed: true }, { values: [0, 0, 0, 0], comp
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
   }
   const deps: DesktopRouteDeps = { publish: () => {}, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} }
-  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '完成输出5', maxTokens: 4096, signal: AbortSignal.timeout(120000) }, query, {}, deps)
+  await enterDesktopLine({ projectId: project.project_id, sessionId: 's', requestId: 'r', content: '完成输出5', maxTokens: 4096, signal: AbortSignal.timeout(120000) }, withEmptyQualityReview(query), {}, deps)
   expect(findProject(project.project_id).status === 'completed', JSON.stringify({ calls, blocked: findProject(project.project_id).desktop_blocked,
     state: readSoftwareRunState(project.project_id), app: readFileSync(join(project.root_path, 'app.cjs'), 'utf8') })).toBe(completed)
   expect(calls).toBe(completed ? 8 : 6)
