@@ -29,3 +29,23 @@
 已查看 `run-artifacts/correction-browser-20261101.png` 的实际选区和操作条。类型、构建与隔离Electron启动通过（`point-correction-types-final.log`、`point-correction-build.log`、`point-correction-electron.log`）。UI发送使用受控接收器；未进行真实付费模型的“意见→代码修复”质量验收，不把机制测试说成模型成功率。
 
 两批均未push、未修改真实用户渠道/项目数据/金额策略，也未重启用户当前Bloma实例。用户原有 `production-workflow-v2-20261020.md` 两行修改保持未暂存，hash为 `53c7abb3aef8497d8b0522b8aab806c82b2ec164`。新构建需正常重启应用后加载。
+
+## 第三批：实际重启验收与空技能目录修复
+
+2026-11-01 14:46–15:12，起点 `c6bfd25`。检查时没有存活的 Bloma 进程，先构建并启动正式用户窗口；修复后再次启动最新构建（PID 61560）。原“桌面语音球”保留暂停状态，没有继续模型制作。用户授权直接删除相关旧残留。
+
+实测发现正式 `<PROMA_HOME>/skills` 和当前项目 `.bloma/skills` 均不存在：主动技能机制具备，但没有可选技能。旧 `resources/skills` 的三份种子 SOP 绑定过时的 Sprint 测试及角色流程，不能直接作为生成应用的技能。
+
+- 新增随现有 templates 构建发布的 `software-change`、`software-verification`，内容复用当前制作上下文、正常入口、受管进程与验证工具协议。仅制作作用域加入目录，C/V继续隔离；正文仍由Agent按需调用`read_skill`加载。
+- 目录优先级为项目、全局、内置，不往用户目录复制或覆盖文件；高优先级的`disable-model-invocation`也能屏蔽同名内置项。
+- 删除三份旧种子技能、`seed-skills.cjs`及`seed:skills`命令；保留有效的用户自定义技能与显式加载能力。
+
+实际验收使用独立 Electron 窗口，`PROMA_HOME=C:\Users\17359\AppData\Local\Temp\bloma-live3-FAkUiG`，唯一渠道是本机127.0.0.1受控SSE服务，凭据为无效测试字符串。没有调用真实供应商，正式用量目录在本轮启动后没有新增写入。
+
+1. **上下文**：实际表单保存1000000，进程重启后仍为1000000。真实Pi运行身份记录`contextWindow=1000000`、`reserveTokens=25600`；受控usage回报300000后下一请求保留工具结果，没有提前压缩。另按正式渠道的端点/模型离线调用现有解析器：DeepSeek Flash、GLM 5.3均1000000，Kimi K3为1048576。没有实际发送1M文本，也没有更改金额预留。
+2. **技能**：修复后的真实应用制作会话发现内置目录，受控模型在无slash命令的任务中调用`read_skill(software-verification)`，下一请求收到正文。新项目`63d461a1-ae13-42a1-902b-4142b920efcf`正常完成输出42的命令行制作和宿主检查，`projects.json`为`status=completed/current_stage=completed`；这是受控模型的机制验收，不是模型自主选择质量评测。
+3. **点选**：从真实工作区按钮启动独立Electron产物，点保存不触发业务点击，记录紫色修改意见后宿主显示1处，提交携带`#save`进入composer持久接收箱；重启后记录仍在。预览数据为`preview-only`，原数据仍为`user-original`。该手工构造的点选项目没有确认PRD，因此后续制作被目标门禁拒绝；仅将其记为点选/接收/隔离验收，不称为意见到代码修改成功。正式语音球尚无冻结试用记录时，需先“打开独立试用”才提供试用版本的点选入口，本轮没有启动麦克风或语音模型。
+
+验收脚本首轮把技能正文中的代码示例误认成已写文件，产生空审阅循环，已停止并保留记录；修正后又发现脚本错误填写`ui:"none"`，宿主按预期拒绝。最终独立新项目修正这两个脚本问题后完成，前两轮不计成功。
+
+验证：7文件26项原功能回归通过（含真实Electron、浏览器、固定试用版本点选）；修复后4文件25项通过（包括新增内置技能、覆盖/禁用、实际Pi和Electron适配检查），两组有重叠不累加。typecheck、完整build与`git diff --check`通过，构建未出现`__require(`。证据目录`run-artifacts/live-check-20261101/`，关键文件为`runtime-observation.json`、`skill-wire-evidence.json`、`context-after-restart.png`、`built-in-skill-delivered.png`、`correction-app.png`及各验证日志。保留失败记录，未push，原有用户文档修改未纳入提交。

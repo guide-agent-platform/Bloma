@@ -1,21 +1,29 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { resolveSkillRoots } from '../../platform/mcp/skill-loader'
+import { mainRootDir } from '../../platform/paths'
 import type { AgentLoopTool } from '../loop/agent-loop'
 
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex')
 const inside=(path:string,root:string)=>{const rel=relative(root,path);return rel===''||!rel.startsWith('..')&&!isAbsolute(rel)}
 /** Pi owns parsing/metadata formatting. Bloma limits the reader to discovered
  * skill directories; loading a skill never grants a new command/write privilege. */
-export async function buildActiveSkills(projectRoot:string,disabled=false){
+export async function buildActiveSkills(projectRoot:string,disabled=false,includeBundled=false){
   if(disabled)return{prompt:'',tools:[] as AgentLoopTool[],available:[] as string[],catalogHash:digest('disabled')}
   const {loadSkillsFromDir,formatSkillsForPrompt}=await import('@earendil-works/pi-coding-agent')
   const entries=new Map<string,{skill:ReturnType<typeof loadSkillsFromDir>['skills'][number];root:string;hash:string}>()
-  for(const candidate of resolveSkillRoots(projectRoot)){
+  const seen=new Set<string>()
+  // Shipped production procedures are a last-priority catalog, not user-home
+  // copies. Updates ship with the app; project/global customizations win.
+  const roots=[...resolveSkillRoots(projectRoot),...(includeBundled?[join(mainRootDir(),'templates','skills')]:[])]
+  for(const candidate of roots){
     let root:string;try{root=realpathSync(candidate)}catch{continue}
     for(const skill of loadSkillsFromDir({dir:root,source:'bloma'}).skills){
-      if(skill.disableModelInvocation||entries.has(skill.name))continue
+      if(seen.has(skill.name))continue
+      seen.add(skill.name)
+      // A higher-priority manual-only entry also masks a bundled/global entry.
+      if(skill.disableModelInvocation)continue
       try{const path=realpathSync(skill.filePath);if(!inside(path,root)||statSync(path).size>131072)continue
         entries.set(skill.name,{skill:{...skill,filePath:path,baseDir:dirname(path)},root:dirname(path),hash:digest(readFileSync(path,'utf8'))})
       }catch{/* unavailable skill is not advertised */}

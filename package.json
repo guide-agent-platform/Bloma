@@ -29,8 +29,7 @@
     "test:all": "npm run test:unit && npm run test:integration && npm run test:regression:sprint0 && npm run test:regression:sprint1 && npm run test:acceptance:sprint0 && npm run test:acceptance:sprint1 && npm run test:acceptance:sprint2 && npm run test:acceptance:sprint3",
     "lint": "tsc --noEmit",
     "docs:check": "node scripts/docs-check.mjs",
-    "seed:channel": "electron scripts/seed-channel.cjs",
-    "seed:skills": "node scripts/seed-skills.cjs"
+    "seed:channel": "electron scripts/seed-channel.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",

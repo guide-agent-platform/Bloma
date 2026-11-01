@@ -28,3 +28,19 @@ it('honors manual-only skills, review isolation, scoped resources, and changed s
   expect((await read.execute({name:'manual-only'},ctx)).output).toContain('SKILL_NOT_AVAILABLE')
   writeFileSync(join(dir,'SKILL.md'),'changed');expect((await read.execute({name:'formatter'},ctx)).output).toContain('SKILL_CHANGED_RELOAD_REQUIRED')
 })
+it('loads shipped production skills without installation and respects overrides and review isolation',async()=>{
+  expect((await buildActiveSkills(home)).available).toEqual([])
+  const bundled=await buildActiveSkills(home,false,true)
+  expect(bundled.available).toEqual(['software-change','software-verification'])
+  expect(bundled.prompt).not.toContain('省略 `ui`')
+  const ctx={projectId:'p',sessionId:'s',requestId:'r',signal:new AbortController().signal,state:createToolState()}
+  const read=bundled.tools.find(t=>t.name==='read_skill')!
+  expect((await read.execute({name:'software-verification'},ctx)).output).toContain('command')
+  seed('software-change')
+  const customized=await buildActiveSkills(home,false,true)
+  expect((await customized.tools.find(t=>t.name==='read_skill')!.execute({name:'software-change'},ctx)).output).toContain('PRIVATE_SKILL_BODY')
+  const dir=join(home,'.bloma','skills','software-change');mkdirSync(dir,{recursive:true})
+  writeFileSync(join(dir,'SKILL.md'),'---\nname: software-change\ndescription: Manual project override\ndisable-model-invocation: true\n---\nmanual only')
+  expect((await buildActiveSkills(home,false,true)).available).toEqual(['software-verification'])
+  expect((await buildActiveSkills(home,true,true)).tools).toEqual([])
+})

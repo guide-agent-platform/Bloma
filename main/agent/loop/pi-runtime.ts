@@ -33,7 +33,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
   let cwd: string
   try { cwd = findProject(input.projectId).root_path || process.cwd() } catch { cwd = process.cwd() }
   // C/V receive only their independently scoped materials, never maker skills.
-  const activeSkills=await buildActiveSkills(cwd,input.accountingRole==='review')
+  const activeSkills=await buildActiveSkills(cwd,input.accountingRole==='review',input.runtimeScope==='lean-build')
   input={...input,system:[input.system,activeSkills.prompt].filter(Boolean).join('\n\n'),tools:[...input.tools,...activeSkills.tools.filter(tool=>!input.tools.some(existing=>existing.name===tool.name))]}
   const scope = input.runtimeScope === 'lean-build' ? 'lean-build' : `${input.runtimeScope ?? 'default'}:${input.executionScope ?? ''}`
   const opened = await openPiSession(input.projectId, input.sessionId, scope, cwd)
