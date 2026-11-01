@@ -160,7 +160,7 @@ describe('CorrectionPanel', () => {
 
   it('发送被拒绝时保留意见，重试复用消息ID且不重复结束预览', async () => {
     const finish = vi.fn(async (input: { recover?: boolean; acknowledge?: string }) => ({ ok: true, data: input.recover || input.acknowledge
-      ? { ok: true, pickCount: 0 } : { ok: true, pickCount: 1, feedback: '修改按钮', feedback_id: 'feedback-1' } }))
+      ? { ok: true, pickCount: 0 } : { ok: true, pickCount: 1, feedback: '修改按钮', feedback_id: 'feedback-1',observed_software_version:'a'.repeat(64) } }))
     const sendMessage = vi.fn().mockResolvedValueOnce({ ok: false, error: { message: 'busy' } }).mockResolvedValueOnce({ ok: true })
     ;(window as unknown as { electronAPI: unknown }).electronAPI = {
       correction: { start: vi.fn(), finish, picks: vi.fn(async () => ({ ok: true, data: { ok: true, done: true, picks: [{ seq: 1, displayName: '发送按钮' }] } })) },
@@ -177,6 +177,7 @@ describe('CorrectionPanel', () => {
     expect(sendMessage).toHaveBeenCalledTimes(2)
     expect(sendMessage.mock.calls[0]![0].client_message_id).toBe('feedback-1')
     expect(sendMessage.mock.calls[1]![0].client_message_id).toBe('feedback-1')
+    expect(sendMessage.mock.calls[1]![0].metadata.observed_software_version).toBe('a'.repeat(64))
     expect(finish.mock.calls.filter(call => !call[0].recover && !call[0].acknowledge)).toHaveLength(1)
   })
 })

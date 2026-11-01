@@ -195,8 +195,10 @@ export async function loadSoftwareRelease(projectId: string, id: string, signal?
   return release
 }
 /** Host-only unpublished candidate lookup; this does not grant delivery. */
-export async function readSoftwareCandidate(projectId: string, id: string, signal?: AbortSignal): Promise<SoftwareRelease> {
+export async function readSoftwareCandidate(projectId: string, id: string, signal?: AbortSignal, verifyBytes=true): Promise<SoftwareRelease> {
   if (!/^[a-f0-9]{64}$/.test(id)) throw Error('RELEASE_CANDIDATE_ID_INVALID')
   const candidate = JSON.parse(await readFile(join(base(projectId), id, 'release.json'), 'utf8')) as SoftwareRelease
-  await validateSoftwareRelease(projectId, candidate, signal); return candidate
+  if(verifyBytes)await validateSoftwareRelease(projectId, candidate, signal)
+  else if(candidate.projectId!==projectId||candidate.id!==id||resolve(candidate.root)!==resolve(base(projectId),id,'app'))throw Error('RELEASE_IDENTITY_INVALID')
+  return candidate
 }

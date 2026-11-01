@@ -12,7 +12,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration } from './launch-smoke'
 import { resolveDriverVenvCommand } from './process-driver'
@@ -21,6 +21,8 @@ import { violatesCommandBlacklist } from './contract-schema'
 import { clearCorrectionSubmission, readCorrectionSubmission, saveCorrectionSubmission } from './correction-outbox'
 import { isSoftwareProject } from './workflow-policy'
 import { getPromaHome } from '../../storage/config-paths'
+import { softwareTrial } from '../software/trial'
+import { activeSoftwareRelease, readSoftwareCandidate } from '../software/release-store'
 
 /** 会话目录相对项目根（00_ 前缀对齐工程目录惯例；picks/data/outputs 平铺其内）。 */
 export const CORRECTION_DIR_REL = '00_CORRECTION'
@@ -62,7 +64,8 @@ interface ActiveSession {
   sessionKey: string
   sessionDir: string
   drivePort: number
-  child: ChildProcess
+  child?: ChildProcess
+  observedVersion?:string
   close?: () => Promise<void>
   startedAt: string
   finished: boolean
@@ -151,40 +154,52 @@ function sanitizePick(raw: unknown): CorrectionPick | { type: 'done' } | null {
  * 启动纠错会话（异步）：数据快照 → 可见纠错实例（--correction-session + --drive-port）→
  * 等 DRIVE_SERVER 就绪行（最长 15s，超时按启动失败处理并清理）。
  */
-export async function startCorrectionSession(input: { projectId: string }): Promise<CorrectionStartResult> {
+export async function startCorrectionSession(input: { projectId: string; observedVersion?:string }): Promise<CorrectionStartResult> {
   const project = findProject(input.projectId)
+  if(['archived','abandoned'].includes(project.status))return{ok:false,reason:'not-delivered',error:'项目已归档，不能启动修改预览'}
   if (readCorrectionSubmission(input.projectId)) return { ok: false, reason: 'already-running', error: '上次点选意见尚未提交，请先重试提交或取消' }
   // Archived MVP cards have no authority to launch a correction process.
-  if (project.current_stage !== 'completed') {
+  if (project.current_stage !== 'completed'&&!input.observedVersion) {
     return { ok: false, reason: 'not-delivered', error: 'CORRECTION_NOT_DELIVERED: 项目尚未完成交付，不能进入修改预览' }
   }
   if (activeSessions.has(input.projectId) || startingSessions.has(input.projectId)) {
     return { ok: false, reason: 'already-running', error: 'CORRECTION_ALREADY_RUNNING: 该项目已有一个修改预览在运行' }
   }
-  let raw: string
+  let raw: string,root=project.root_path,sourceData:string|undefined
   try {
-    raw = readFileSync(join(project.root_path, 'LAUNCH.json'), 'utf8')
-  } catch {
-    return { ok: false, reason: 'launch-invalid', error: 'CORRECTION_LAUNCH_MISSING: LAUNCH.json 不存在' }
+    if(input.observedVersion){
+      if(!isSoftwareProject(input.projectId)||!/^[a-f0-9]{64}$/.test(input.observedVersion))throw Error('CORRECTION_VERSION_INVALID')
+      const trial=softwareTrial(input.projectId)
+      if(trial?.release_id!==input.observedVersion)throw Error('CORRECTION_VERSION_CHANGED: 试用版本已变化，请刷新后再点选')
+      const release=await readSoftwareCandidate(input.projectId,input.observedVersion)
+      sourceData=join(getPromaHome(),'software-trials',input.projectId,input.observedVersion,'data')
+      if(resolve(trial.data_dir)!==resolve(sourceData))throw Error('CORRECTION_TRIAL_DATA_INVALID')
+      root=release.root;raw=JSON.stringify(release.launch)
+    }else{
+      const release=isSoftwareProject(input.projectId)?await activeSoftwareRelease(input.projectId):undefined
+      if(release){root=release.root;raw=JSON.stringify(release.launch)}
+      else raw = readFileSync(join(root, 'LAUNCH.json'), 'utf8')
+    }
+  } catch (error) {
+    return { ok: false, reason: 'launch-invalid', error: String(error) }
   }
   const parsed = parseLaunchDeclaration(raw)
   if (!parsed.ok) {
     return { ok: false, reason: 'launch-invalid', error: `CORRECTION_LAUNCH_INVALID: ${parsed.error}` }
   }
-  if (isSoftwareProject(input.projectId) && parsed.launch.ui === 'electron') {
+  if (isSoftwareProject(input.projectId) && ['electron','browser'].includes(parsed.launch.ui??'')) {
     const sessionKey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
     const sessionDir = join(getPromaHome(), 'software-corrections', input.projectId, sessionKey), startedAt = new Date().toISOString()
     startingSessions.add(input.projectId)
     try {
       await settleCorrectionTeardown(input.projectId)
       const { startSoftwareCorrection } = await import('../software/correction-runtime')
-      const runtime = await startSoftwareCorrection(input.projectId, project.root_path, parsed.launch, sessionDir)
-      activeSessions.set(input.projectId, { projectId: input.projectId, sessionKey, sessionDir, drivePort: 0, child: runtime.child, close: runtime.close, startedAt, finished: false })
-      return { ok: true, session: { sessionKey, sessionDir, drivePort: 0, dataSnapshotted: runtime.dataSnapshotted, startedAt, pid: runtime.child.pid } }
+      const runtime = await startSoftwareCorrection(input.projectId, root, parsed.launch, sessionDir,sourceData)
+      activeSessions.set(input.projectId, { projectId: input.projectId, sessionKey, sessionDir, drivePort: 0, child: runtime.child, close: runtime.close, startedAt, finished: false,observedVersion:input.observedVersion })
+      return { ok: true, session: { sessionKey, sessionDir, drivePort: 0, dataSnapshotted: runtime.dataSnapshotted, startedAt, pid: runtime.pid } }
     } catch (error) { return { ok: false, reason: 'spawn-failed', error: String(error) } }
     finally { startingSessions.delete(input.projectId) }
   }
-  if (isSoftwareProject(input.projectId) && parsed.launch.ui === 'browser') return { ok: false, reason: 'unsupported', error: '这个程序暂时不能点选，可直接在聊天中描述要改的位置和效果。' }
   const blacklistHit = violatesCommandBlacklist(parsed.launch.command)
   if (blacklistHit) {
     return { ok: false, reason: 'launch-invalid', error: `CORRECTION_LAUNCH_BLOCKED: ${blacklistHit}` }
@@ -328,7 +343,7 @@ export function readCorrectionPicks(input: { projectId: string }): { ok: boolean
 /** 结束会话：kill 进程树（Windows taskkill /T /F——explorer 桥同款）+ 注册表清理。
  *  返回组装好的回炉反馈文本（buildCorrectionFeedback 单一来源——渲染端经
  *  AGENT_SEND_MESSAGE 代发，走 delivered 反馈回炉链）。 */
-export function finishCorrectionSession(input: { projectId: string; recover?: boolean; discard?: boolean; acknowledge?: string; inline?: boolean }): { ok: boolean; feedback?: string; feedback_id?: string; pickCount: number; error?: string } {
+export function finishCorrectionSession(input: { projectId: string; recover?: boolean; discard?: boolean; acknowledge?: string; inline?: boolean }): { ok: boolean; feedback?: string; feedback_id?: string; observed_software_version?:string; pickCount: number; error?: string } {
   findProject(input.projectId)
   if (input.acknowledge) return { ok: clearCorrectionSubmission(input.projectId, input.acknowledge), pickCount: 0 }
   const session = activeSessions.get(input.projectId)
@@ -339,7 +354,7 @@ export function finishCorrectionSession(input: { projectId: string; recover?: bo
     return { ok: true, pickCount: count }
   }
   const pending = readCorrectionSubmission(input.projectId)
-  if (pending) return { ok: true, feedback: pending.content, feedback_id: pending.id, pickCount: pending.pickCount }
+  if (pending) return { ok: true, feedback: pending.content, feedback_id: pending.id, pickCount: pending.pickCount,observed_software_version:pending.observedVersion }
   if (input.recover) return { ok: true, pickCount: 0 }
   if (!session) return { ok: false, pickCount: 0, error: 'CORRECTION_NOT_RUNNING' }
   const snapshot = readCorrectionPicks(input)
@@ -347,7 +362,7 @@ export function finishCorrectionSession(input: { projectId: string; recover?: bo
   // Persist before killing the instance; failed persistence leaves picks retryable.
   const feedback = snapshot.picks.length > 0 ? buildCorrectionFeedback(snapshot.picks, project.name ?? '这个应用') : undefined
   const submission = feedback && !input.inline
-    ? saveCorrectionSubmission(input.projectId, feedback, snapshot.picks.length) : undefined
+    ? saveCorrectionSubmission(input.projectId, feedback, snapshot.picks.length,session.observedVersion) : undefined
   cleanupSession(input.projectId, session)
   pruneCorrectionSessions(input.projectId)
   return {
@@ -355,6 +370,7 @@ export function finishCorrectionSession(input: { projectId: string; recover?: bo
     pickCount: snapshot.picks.length,
     feedback: submission?.content ?? feedback,
     feedback_id: submission?.id,
+    observed_software_version:submission?.observedVersion??session.observedVersion,
   }
 }
 
@@ -367,7 +383,7 @@ function cleanupSession(projectId: string, session: ActiveSession): void {
     return
   }
   try {
-    if (session.child.pid) {
+    if (session.child?.pid) {
       spawn('taskkill', ['/PID', String(session.child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
     }
   } catch {

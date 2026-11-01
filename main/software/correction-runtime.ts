@@ -1,41 +1,55 @@
-import { appendFileSync, cpSync, existsSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Page, ElectronApplication } from 'playwright'
-import { getPromaHome } from '../../storage/config-paths'
+import type { Page, ElectronApplication, BrowserContext } from 'playwright'
 import { electronEntry } from './gui-observer'
 import { softwareEnvironment } from './command-runtime'
 import type { LaunchDeclaration } from '../desktop/launch-smoke'
 import type { ChildProcess } from 'node:child_process'
-import { softwareDataDirectory } from './data-update'
+import { copyDataForPreview, softwareDataDirectory } from './data-update'
+import { startSoftwareProcess, stopSoftwareProcess } from './process-manager'
+import { isolatedBrowserLaunch } from './isolated-launch'
 
 const pages = new Map<string, Page>()
 /** Host-only handle, never exposed to a product, renderer or model tool. */
 export const activeSoftwareCorrectionPage = (projectId: string) => pages.get(projectId)
 
-/** Run the normal Electron program with copied user data, then install a host
+/** Run the normal Electron/browser program with copied data, then install a host
  * selection overlay. No product-owned Python bridge or template markers needed. */
-export async function startSoftwareCorrection(projectId: string, root: string, launch: LaunchDeclaration, sessionDir: string): Promise<{ child: ChildProcess; close: () => Promise<void>; dataSnapshotted: boolean }> {
-  if (launch.ui !== 'electron') throw Error('CORRECTION_RUNTIME_UNSUPPORTED: 当前点选适配器支持Electron；可直接在聊天描述其它程序的修改')
-  const base = join(getPromaHome(), 'software-app-data', projectId), data = join(sessionDir, 'data')
+export async function startSoftwareCorrection(projectId: string, root: string, launch: LaunchDeclaration, sessionDir: string, sourceData?:string): Promise<{ child?: ChildProcess; pid?:number; close: () => Promise<void>; dataSnapshotted: boolean }> {
+  if (!['electron','browser'].includes(launch.ui??'')) throw Error('CORRECTION_RUNTIME_UNSUPPORTED: 当前点选支持Electron和浏览器界面')
+  const data = join(sessionDir, 'data')
   mkdirSync(data, { recursive: true })
-  const currentData = softwareDataDirectory(projectId), dataSnapshotted = existsSync(currentData)
-  if (dataSnapshotted) cpSync(currentData, data, { recursive: true })
-  if (existsSync(join(currentData, '..', 'environment-home'))) cpSync(join(currentData, '..', 'environment-home'), join(sessionDir, 'environment-home'), { recursive: true })
-  const { _electron } = await import('playwright')
+  const currentData = sourceData??softwareDataDirectory(projectId), dataSnapshotted = existsSync(currentData)
+  if (dataSnapshotted) await copyDataForPreview(currentData, data)
+  if (existsSync(join(currentData, '..', 'environment-home'))) await copyDataForPreview(join(currentData, '..', 'environment-home'), join(sessionDir, 'environment-home'))
+  const { _electron, chromium } = await import('playwright')
   let app: ElectronApplication | undefined
+  let browser:BrowserContext|undefined,serviceId:string|undefined,servicePid:number|undefined
+  const owner=`correction-${sessionDir.split(/[\\/]/).at(-1)}`
   let child: ChildProcess | undefined
   const close = async () => {
     pages.delete(projectId)
-    if (!app) return
     let timer: ReturnType<typeof setTimeout> | undefined
-    try { await Promise.race([app.close(), new Promise((_, reject) => { timer = setTimeout(() => reject(Error('CORRECTION_CLOSE_TIMEOUT')), 7000) })]) }
-    finally { clearTimeout(timer); if (child && child.exitCode === null && !child.signalCode) child.kill() }
+    try { await Promise.race([Promise.all([app?.close(),browser?.close()]), new Promise((_, reject) => { timer = setTimeout(() => reject(Error('CORRECTION_CLOSE_TIMEOUT')), 7000) })]) }
+    finally { clearTimeout(timer); if (child && child.exitCode === null && !child.signalCode) child.kill();if(serviceId)await stopSoftwareProcess(projectId,serviceId,owner) }
   }
   try {
-    const entry = electronEntry(root, launch.command)
-    app = await _electron.launch({ ...entry, args: [...entry.args, `--user-data-dir=${join(sessionDir, 'profile')}`], cwd: root, env: softwareEnvironment(projectId, data), timeout: 20000 })
-    child = app.process()
-    const page = await app.firstWindow({ timeout: 15000 }); pages.set(projectId, page)
+    let page:Page
+    if(launch.ui==='electron'){
+      const entry = electronEntry(root, launch.command)
+      app = await _electron.launch({ ...entry, args: [...entry.args, `--user-data-dir=${join(sessionDir, 'profile')}`], cwd: root, env: softwareEnvironment(projectId, data,root), timeout: 20000 })
+      child = app.process();page=await app.firstWindow({timeout:15000})
+    }else{
+      const isolated=await isolatedBrowserLaunch(launch)
+      if(!isolated.url)throw Error('CORRECTION_URL_REQUIRED')
+      const service=await startSoftwareProcess({projectId,root,sessionId:owner,command:isolated.command,url:isolated.url,dataDir:data,purpose:'correction',readyMs:10000})
+      serviceId=service.id;servicePid=service.pid
+      if(!service.ready)throw Error('CORRECTION_BROWSER_NOT_READY: 程序需使用PORT/APP_PORT或启动端口参数')
+      browser=await chromium.launchPersistentContext(join(sessionDir,'profile'),{headless:false,...(existsSync(chromium.executablePath())?{executablePath:chromium.executablePath()}:{channel:process.platform==='win32'?'msedge':'chrome'}),env:softwareEnvironment(projectId,data,root),timeout:20000})
+      page=browser.pages()[0]??await browser.newPage();await page.goto(isolated.url,{waitUntil:'domcontentloaded',timeout:15000})
+    }
+    pages.set(projectId,page)
+    page.on('close',()=>{pages.delete(projectId);if(serviceId)void stopSoftwareProcess(projectId,serviceId,owner).catch(()=>{})})
     let count = 0
     await page.exposeFunction('__blomaUserPick', async (payload: unknown) => {
       if (!payload || typeof payload !== 'object') throw Error('CORRECTION_PICK_INVALID')
@@ -80,6 +94,6 @@ export async function startSoftwareCorrection(projectId: string, root: string, l
       }
       done.onclick = async () => { try { await host.__blomaUserPick({ type: 'done' }); document.removeEventListener('click', pick, true); hint.textContent = '点选已完成，请回Bloma提交修改' } catch { hint.textContent = '提交未成功，请重试' } }
     })
-    return { child, close, dataSnapshotted }
+    return { child, pid:child?.pid??servicePid, close, dataSnapshotted }
   } catch (error) { await close(); throw error }
 }

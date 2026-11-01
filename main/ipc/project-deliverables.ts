@@ -26,7 +26,7 @@ import { violatesCommandBlacklist } from '../desktop/contract-schema'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import { isSoftwareProject } from '../desktop/workflow-policy'
 import { launchSoftwareForUser } from '../software/user-launch'
-import { activeSoftwareRelease } from '../software/release-store'
+import { activeSoftwareRelease, readSoftwareCandidate } from '../software/release-store'
 import { listSoftwareDataSnapshots, softwareFallbackReleaseId } from '../software/data-update'
 import { launchSoftwareTrial, softwareTrial, closeSoftwareTrial } from '../software/trial'
 import { readPrdBackplane } from '../project/prd-store'
@@ -141,7 +141,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
         result.launch = { declared: false, parse_ok: false }
       } else if (declaration.ok) {
         result.launch = { declared: true, parse_ok: true, command: declaration.launch.command }
-        if (isSoftwareProject(project.project_id)) result.supports_point_selection = declaration.launch.ui === 'electron'
+        if (isSoftwareProject(project.project_id)) result.supports_point_selection = ['electron','browser'].includes(declaration.launch.ui??'')
       } else {
         result.launch = { declared: true, parse_ok: false, parse_error: declaration.error }
       }
@@ -151,6 +151,12 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
         if(isLongtermSoftware(project.project_id))try{result.longterm=readLongtermState(project.project_id)}catch(error){result.longterm_error=String(error)}
         result.improvement_suggestions = readSoftwareSuggestions(project.project_id)
         result.trial = softwareTrial(project.project_id)
+        if(project.current_stage!=='completed'&&result.trial){
+          try{const shown=await readSoftwareCandidate(project.project_id,result.trial.release_id,undefined,false)
+            result.supports_point_selection=['electron','browser'].includes(shown.launch.ui??'')
+            if(result.supports_point_selection)result.point_selection_version=shown.id
+          }catch{result.supports_point_selection=false}
+        }
         result.can_trial = Boolean(readPrdBackplane(project.project_id).user_confirmed_at && readLaunchDeclaration(project.root_path)?.ok)
       }
       return result

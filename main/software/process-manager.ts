@@ -16,7 +16,7 @@ export interface SoftwareProcessSnapshot {
   output_seq?: number
   output?: ProcessOutput[]
   dependency_setup?: { root: string; input_version: string }
-  purpose?: 'trial' | 'development' | 'acceptance' | 'user'
+  purpose?: 'trial' | 'development' | 'acceptance' | 'user' | 'correction'
   source?: string
   data_dir?: string
   root?: string
@@ -110,7 +110,7 @@ export async function startSoftwareProcess(input: { root: string; projectId: str
     probe.listen(Number(address.port || 80), address.hostname.replace(/^\[|\]$/g, ''), () => probe.close(() => resolve()))
   })
   const environment = softwareEnvironment(input.projectId, input.dataDir,input.root)
-  if (url && input.purpose === 'trial') { environment.PORT = new URL(url).port; environment.APP_PORT = new URL(url).port }
+  if (url && (input.purpose === 'trial'||input.purpose==='correction')) { environment.PORT = new URL(url).port; environment.APP_PORT = new URL(url).port }
   const resolved = resolveSoftwareCommand(input.root, input.command, environment)
   resolved.command=bindSoftwareProfile(resolved.command,resolved.env)
   const snapshot: SoftwareProcessSnapshot = { id: randomUUID(), projectId: input.projectId, sessionId: input.sessionId, kind: input.kind ?? 'service', purpose: input.purpose ?? (input.sessionId === 'user-launch' ? 'user' : 'development'), root: projectDirectory(input.root), source, data_dir: environment.APP_DATA_DIR, ...(input.internal ? { internal: true } : {}), state: 'starting', stdout: '', stderr: '', startedAt: new Date().toISOString(), ...(url ? { url } : {}) }

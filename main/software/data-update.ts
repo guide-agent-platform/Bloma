@@ -55,6 +55,12 @@ async function dataFiles(root: string) {
   if (existsSync(root)) await visit(root)
   return files.sort((a, b) => a.path.localeCompare(b.path))
 }
+
+/** A writable preview copy must not retain links back into the user's data. */
+export async function copyDataForPreview(source:string,target:string):Promise<void>{
+  if(lstatSync(source).isSymbolicLink())throw Error('DATA_SNAPSHOT_LINK_UNSUPPORTED')
+  await consistentCopy(source,target)
+}
 async function consistentCopy(source: string, destination: string) {
   const before = await dataFiles(source)
   mkdirSync(destination, { recursive: true })

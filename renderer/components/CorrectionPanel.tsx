@@ -32,7 +32,7 @@ const AVA_GRADIENTS = [
   ['linear-gradient(135deg,#10b981,#0ea5e9)', '#fff'],
 ]
 
-export const CorrectionPanel: React.FC = () => {
+export const CorrectionPanel: React.FC<{trialVersion?:string}> = ({trialVersion}) => {
   const project = useAtomValue(currentProjectAtom)
   const projectId = project?.project_id
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
@@ -42,7 +42,7 @@ export const CorrectionPanel: React.FC = () => {
   const [sending, setSending] = React.useState(false)
   const [sent, setSent] = React.useState(false)
   const [applyError, setApplyError] = React.useState<string | undefined>(undefined)
-  const [prepared, setPrepared] = React.useState<{ projectId: string; content: string; id: string } | undefined>()
+  const [prepared, setPrepared] = React.useState<{ projectId: string; content: string; id: string; observedVersion?:string } | undefined>()
   const projectRef = React.useRef(projectId)
   projectRef.current = projectId
 
@@ -56,7 +56,7 @@ export const CorrectionPanel: React.FC = () => {
     if (projectId && api?.finish) {
       void Promise.resolve(api.finish({ request_id: crypto.randomUUID(), project_id: projectId, recover: true })).then(result => {
         if (!stopped && result?.ok && result.data.ok && result.data.feedback && result.data.feedback_id) {
-          setPrepared({ projectId, content: result.data.feedback, id: result.data.feedback_id })
+          setPrepared({ projectId, content: result.data.feedback, id: result.data.feedback_id,observedVersion:result.data.observed_software_version })
         }
       }).catch(() => { if (!stopped) setApplyError('上次点选意见暂时无法读取，请稍后重试') })
     }
@@ -77,7 +77,7 @@ export const CorrectionPanel: React.FC = () => {
       return
     }
     let result
-    try { result = await api.start({ request_id: crypto.randomUUID(), project_id: projectId }) }
+    try { result = await api.start({ request_id: crypto.randomUUID(), project_id: projectId,...(trialVersion?{observed_software_version:trialVersion}:{}) }) }
     catch { if (projectRef.current === projectId) setSession({ status: 'error', message: '修改预览暂时无法连接，请重试' }); return }
     if (projectRef.current !== projectId) return
     if (result.ok && result.data.ok && result.data.session) {
@@ -138,7 +138,7 @@ export const CorrectionPanel: React.FC = () => {
           setApplyError('提交没有成功，点选意见尚未发送。请重试，或在对话里补充要修改的位置')
           return
         }
-        submission = { projectId, content: result.data.feedback, id: result.data.feedback_id ?? crypto.randomUUID() }
+        submission = { projectId, content: result.data.feedback, id: result.data.feedback_id ?? crypto.randomUUID(),observedVersion:result.data.observed_software_version }
         setPrepared(submission)
       }
       const sentResult = await agentApi.submit({
@@ -151,6 +151,7 @@ export const CorrectionPanel: React.FC = () => {
         content: submission.content,
         mode: project.mode ?? 'longterm',
         current_stage: project.current_stage ?? 'completed',
+        ...(submission.observedVersion?{metadata:{source:'chat' as const,observed_software_version:submission.observedVersion}}:{}),
       })
       if (projectRef.current !== projectId) return
       if (!sentResult?.ok) { setApplyError('修改意见未被接收，已保留，可直接重试提交'); return }
@@ -262,7 +263,7 @@ export const CorrectionPanel: React.FC = () => {
       </div>
 
       <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.6 }}>
-        数据是只读快照，不会动你的真实数据；点完在预览窗口点「完成点选」，或在这里直接开始修改。
+        这里使用独立数据副本；点完在预览窗口点「完成点选」，或在这里直接开始修改。
       </p>
 
       {/* 选区卡片流 */}

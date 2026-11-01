@@ -21,7 +21,8 @@ export function registerCorrectionIpc(ipcMain: IpcMain): void {
   ipcMain.handle(IPC_CHANNELS.CORRECTION_START, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<CorrectionStartInput>(payload, ['project_id'])
-      return startCorrectionSession({ projectId: input.project_id })
+      if(input.observed_software_version!==undefined&&(typeof input.observed_software_version!=='string'||!/^[a-f0-9]{64}$/.test(input.observed_software_version)))throw Error('CORRECTION_VERSION_INVALID')
+      return startCorrectionSession({ projectId: input.project_id,observedVersion:input.observed_software_version })
     })
   })
 

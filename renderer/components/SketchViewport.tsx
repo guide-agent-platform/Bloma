@@ -68,7 +68,7 @@ export const SketchViewport: React.FC<{ src?: string; html?: string; readOnly?: 
       <button type="button" className="theatre-tool" aria-label="缩小草图" disabled={natural || scale <= .02} onClick={() => { setResponsive(false); setZoom(Math.max(.02, scale / 1.25)) }}>−</button>
       <span className="sketch-scale" aria-live="polite">{Math.round(scale * 100)}%</span>
       <button type="button" className="theatre-tool" aria-label="放大草图" disabled={natural || scale >= 2} onClick={() => { setResponsive(false); setZoom(Math.min(2, scale * 1.25)) }}>+</button>
-      {!readOnly && <button type="button" className="theatre-tool" disabled={natural} aria-pressed={marking} onClick={() => setMarking(value => !value)}>{marking ? '退出标记' : '标记修改'}</button>}
+      {!readOnly && <button type="button" className="theatre-tool" disabled={natural} aria-pressed={marking} onClick={() => setMarking(value => !value)}>{marking ? '退出点选' : '点选修改'}</button>}
     </div></div>
     <div ref={surface} className="sketch-surface"><div className="sketch-page" style={{ width: dimensions.width * scale, height: dimensions.height * scale }}><iframe key={token} ref={element => {
       frame.current = element

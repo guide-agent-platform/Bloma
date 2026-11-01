@@ -77,8 +77,10 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
     if (!onConfirmSketch) return
     const onMessage = (event: MessageEvent): void => {
       const data = event.data as { label?: string; pick?: { seq: number; kindLabel: string; target: string; text: string; note: string } } | undefined
-      if (data?.label !== 'bloma-sketch-pick' || !data.pick) return
-      setSketchPicks((prev) => [...prev, data.pick!])
+      if (event.source!==iframeRef.current?.contentWindow||data?.label !== 'bloma-sketch-pick' || !data.pick) return
+      const pick=data.pick
+      if(!Number.isSafeInteger(pick.seq)||typeof pick.target!=='string'||typeof pick.note!=='string'||typeof pick.kindLabel!=='string')return
+      setSketchPicks((prev) => prev.length>=64?prev:[...prev,{seq:pick.seq,kindLabel:pick.kindLabel.slice(0,40),target:pick.target.slice(0,240),text:typeof pick.text==='string'?pick.text.slice(0,240):'',note:pick.note.slice(0,2000)}])
       setSketchSent(false)
     }
     window.addEventListener('message', onMessage)
@@ -86,22 +88,29 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   }, [onConfirmSketch])
 
   const onSketchSend = async (): Promise<void> => {
-    if (sketchPicks.length === 0 || !project) return
-    const api = window.electronAPI?.agent
-    if (!api?.sendMessage || !sessionId) return
+    if (sketchPicks.length === 0 || !project||sketchSending) return
+    const api = window.electronAPI?.composer
+    if (!api?.submit || !sessionId) {setSketchError('当前对话尚未就绪，点选意见已保留');return}
     const lines = sketchPicks.map((pick, index) => `${index + 1}. ${pick.target}——${pick.kindLabel}${pick.note ? `：「${pick.note}」` : ''}`)
     const content = `我在草图上标记了 ${sketchPicks.length} 处不满意的地方：\n${lines.join('\n')}\n请按这些标记调整草图后再给我看。`
-    await api.sendMessage({
+    const submission=sketchSubmission.current??{id:crypto.randomUUID(),content,count:sketchPicks.length};sketchSubmission.current=submission
+    const {id,count}=submission,submittedProject=projectRef.current
+    setSketchSending(true);setSketchError(undefined)
+    try{const result=await api.submit({
       request_id: crypto.randomUUID(),
+      client_message_id:id,draft_id:`sketch-correction-${id}`,attachment_refs:[],
       session_id: sessionId,
       project_id: project.project_id,
-      content,
+      content:submission.content,
       mode: project.mode ?? 'quick',
       current_stage: project.current_stage ?? 'clarifying',
       metadata: { source: 'sketch_correction' },
     })
-    setSketchPicks([])
-    setSketchSent(true)
+    if(projectRef.current!==submittedProject)return
+    if(!result.ok){setSketchError('修改意见未被接收，点选已保留，请重试');return}
+    setSketchPicks(previous=>previous.slice(count));setSketchSent(true);sketchSubmission.current=undefined
+    }catch{if(projectRef.current===submittedProject)setSketchError('提交中断，点选意见已保留，可重试')}
+    finally{if(projectRef.current===submittedProject)setSketchSending(false)}
   }
   const [showControls, setShowControls] = React.useState(false)
   const [correctionActive, setCorrectionActive] = React.useState(false)
@@ -113,8 +122,13 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
      发送 source=sketch_correction 消息（主进程 ux-confirm 一步消化=有要调整的+意见） */
   const [sketchPicks, setSketchPicks] = React.useState<Array<{ seq: number; kindLabel: string; target: string; text: string; note: string }>>([])
   const [sketchSent, setSketchSent] = React.useState(false)
+  const [sketchSending,setSketchSending]=React.useState(false)
+  const [sketchError,setSketchError]=React.useState<string>()
+  const sketchSubmission=React.useRef<{id:string;content:string;count:number}>()
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const project = useAtomValue(currentProjectAtom)
+  const projectRef=React.useRef('');projectRef.current=JSON.stringify([project?.project_id,previewUrl])
+  React.useEffect(()=>{setSketchPicks([]);setSketchSent(false);setSketchError(undefined);setSketchSending(false);sketchSubmission.current=undefined},[project?.project_id,previewUrl])
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
 
   // 纠错模式下转发滚轮/中键拖拽滚动到跨域预览 iframe：捕获层盖在 iframe 上方会挡住滚动，
@@ -331,7 +345,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         {displayStatus === 'loading' && <LoadingState label={loadingLabel} />}
         {displayStatus === 'running' && previewUrl && (
           <>
-            <SketchViewport iframeRef={iframeRef} src={reviewActive && reviewUrl ? reviewUrl : previewUrl} onError={reviewActive ? () => setReviewActive(false) : onPreviewError} natural={correctionMode && !reviewActive} />
+            <SketchViewport iframeRef={iframeRef} src={reviewActive && reviewUrl ? reviewUrl : previewUrl} onError={reviewActive ? () => setReviewActive(false) : onPreviewError} natural={correctionMode && !reviewActive} readOnly={sketchSending||reviewActive} />
             {/* 点选纠错透明捕获层：仅在纠错模式开启时盖在 iframe 上方拦截点击 */}
             {correctionMode && !reviewActive && onCorrectionSubmit && (
               <div
@@ -398,6 +412,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
           </>
         )}
         {/* 草图点选标记浮条（批11 ①，2026-10-08）：草图内注入层标记收集后发送调整意见 */}
+        {sketchError&&<p role="alert" data-ai-id="sketch-correction-error">{sketchError}</p>}
         {onConfirmSketch && (sketchPicks.length > 0 || sketchSent) && (
           <div
             data-ai-id="sketch-picks-bar"
@@ -418,6 +433,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                 <button
                   data-ai-id="sketch-picks-send"
                   onClick={() => void onSketchSend()}
+                  disabled={sketchSending}
                   style={{
                     border: 'none', borderRadius: 8, padding: '4px 12px', cursor: 'pointer',
                     background: 'linear-gradient(90deg,#4f46e5,#6366f1)', color: '#fff',

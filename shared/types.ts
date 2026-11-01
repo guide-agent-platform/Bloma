@@ -475,6 +475,7 @@ export interface ProjectDeliverablesResult {
   delivery_qualification?: { detail: string; independent_verified: boolean }
   /** Host-known support; omitted for historical projects. */
   supports_point_selection?: boolean
+  point_selection_version?: string
   /** Frozen confirmed UX, returned read-only for continuity during implementation. */
   confirmed_sketch_url?: string
   /** 项目产物文件（相对路径，≤200；跳过归档/依赖/构建产物目录） */
@@ -540,6 +541,7 @@ export interface ProjectLaunchAppResult {
 /** 点选纠错：启动修改预览（批11 MVP-E）。 */
 export interface CorrectionStartInput extends RequestEnvelope {
   project_id: string
+  observed_software_version?: string
 }
 
 /** 点选纠错会话信息（渲染端呈现/轮询用）。 */
@@ -598,6 +600,7 @@ export interface CorrectionFinishResult {
   pickCount: number
   feedback?: string
   feedback_id?: string
+  observed_software_version?: string
   error?: string
 }
 

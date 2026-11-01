@@ -49,6 +49,15 @@ function renderPanel(stage: string): void {
 }
 
 describe('DeliveryPanel', () => {
+  it('shows point correction in the top toolbar for a browser trial before delivery',async()=>{
+    const version='c'.repeat(64),start=vi.fn(async()=>({ok:true,data:{ok:true,session:{sessionKey:'c',startedAt:'now'}}}))
+    ;(window as unknown as {electronAPI:unknown}).electronAPI={projectDeliverables:{get:vi.fn(async()=>({ok:true,data:{files:[],launch:{declared:true,parse_ok:true},can_launch:false,supports_point_selection:true,point_selection_version:version,trial:{release_id:version,state:'exited',source:'d'.repeat(64),qualification:'unverified_test_data',process_id:'owned',data_dir:'isolated',at:'now'}}}))},correction:{start,finish:vi.fn(async()=>({ok:true,data:{ok:true,pickCount:0}})),picks:vi.fn(async()=>({ok:true,data:{ok:true,picks:[],done:false}}))}}
+    const store=createStore();store.set(currentProjectAtom,{project_id:'p1',current_stage:'generating_mvp',template_type:'desktop_tool',workflow_version:'software-v1'} as never)
+    render(<Provider store={store}><DeliveryPanel embedded /></Provider>)
+    fireEvent.click(await screen.findByTestId('delivery-point-correction'))
+    fireEvent.click(await screen.findByTestId('correction-start-button'))
+    await waitFor(()=>expect(start).toHaveBeenCalledWith(expect.objectContaining({observed_software_version:version})))
+  })
   it('separates an ended execution and a historical passed check from an undelivered goal', async () => {
     mockBloma({ deliverables: { files: [], launch: { declared: true, parse_ok: true }, can_launch: false,
       status_view: { execution: { status: 'ended', label: '本轮已结束' }, verification: { status: 'last_passed', label: '最近检查通过（对应记录版本）',scope_note:'仅本机检查；真实模型效果尚未验证。' }, goal: { status: 'not_delivered', label: '本轮尚未交付' }, active_commands: 0 } } })

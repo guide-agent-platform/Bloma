@@ -43,13 +43,15 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
   const [needsRestart, setNeedsRestart] = React.useState(false)
   const [restartPrevious, setRestartPrevious] = React.useState(false)
   const [showCorrection, setShowCorrection] = React.useState(false)
+  const correctionSection=React.useRef<HTMLDivElement>(null)
+  React.useEffect(()=>{if(showCorrection)correctionSection.current?.scrollIntoView?.({block:'start',behavior:'smooth'})},[showCorrection])
   const [restoreId, setRestoreId] = React.useState('')
   const [confirmRestore, setConfirmRestore] = React.useState(false)
   const [restorePrevious, setRestorePrevious] = React.useState(false)
   const currentProjectId = React.useRef(projectId)
   const refreshSequence = React.useRef(0)
   currentProjectId.current = projectId
-  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null); setNeedsRestart(false); setRestartPrevious(false); setRestoreId(''); setConfirmRestore(false); setRestorePrevious(false) }, [projectId])
+  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null); setNeedsRestart(false); setRestartPrevious(false); setRestoreId(''); setConfirmRestore(false); setRestorePrevious(false);setShowCorrection(false) }, [projectId])
 
   const refresh = React.useCallback(async () => {
     if (!projectId) return
@@ -132,6 +134,8 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
         <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500 }}>{project?.name ?? '你的软件'}</span>
         <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{data?.status_view?.goal.label ?? (project && longtermStatusLabel(project) || (liveUrl ? '程序试用 · 测试数据 · 尚未交付' : project?.current_stage === 'completed' ? '可以使用' : project?.desktop_blocked && !running ? '制作暂时停止' : desktopPhase ? '正在制作' : '等待想法成形'))}</span>
         <div style={{ flex: 1 }} />
+        {(project?.current_stage==='completed'||data?.trial?.release_id)&&data?.supports_point_selection!==false&&<button type="button" data-ai-id="delivery-point-correction" className="theatre-tool"
+          disabled={loading||!data?.launch.parse_ok&&!data?.point_selection_version} aria-expanded={showCorrection} onClick={()=>setShowCorrection(value=>!value)}>{showCorrection?'收起点选面板':'点选修改'}</button>}
         <button
           data-ai-id="delivery-refresh"
           aria-label="刷新产物"
@@ -210,11 +214,10 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
         {!loading && !liveUrl && !project?.longterm_summary && data?.trial?.state !== 'running' && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
         {/* 点选纠错（批11 MVP-E，2026-10-08）：入口/会话视图内嵌交付面板；completed 项目
             可用（主进程校验，旧骨架产物返回 unsupported 如实置灰提示） */}
-        {project?.current_stage === 'completed' && (
-          <div style={{ marginBottom: 8 }}>
+        {(project?.current_stage === 'completed'||data?.trial?.release_id) && (
+          <div ref={correctionSection} style={{ marginBottom: 8 }}>
             {data?.supports_point_selection === false ? <p>想继续改进，直接在聊天中描述位置和期望效果即可。</p> : <>
-              {embedded && <button type="button" className="theatre-tool" aria-expanded={showCorrection} onClick={() => setShowCorrection(previous => !previous)}>反馈改进与点选修改</button>}
-              {(!embedded || showCorrection) && <CorrectionPanel />}
+              {(!embedded || showCorrection) && <CorrectionPanel trialVersion={project?.current_stage==='completed'?undefined:data?.point_selection_version??data?.trial?.release_id} />}
             </>}
           </div>
         )}

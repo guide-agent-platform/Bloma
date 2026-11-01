@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { createServer } from 'node:net'
+import { isolatedBrowserLaunch } from './isolated-launch'
 import { createHash } from 'node:crypto'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
@@ -27,14 +27,6 @@ export function softwareTrial(projectId: string): SoftwareTrial | undefined {
   if (!current) return
   const state = softwareProcess(projectId, current.process_id, 'user-trial').state
   return { ...current, state }
-}
-async function freePort(): Promise<number> {
-  const server = createServer()
-  await new Promise<void>((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done) })
-  const address = server.address()
-  await new Promise<void>(done => server.close(() => done()))
-  if (!address || typeof address === 'string') throw Error('TRIAL_PORT_UNAVAILABLE')
-  return address.port
 }
 /** User-owned trial snapshots have synthetic data and no delivery authority.
  * A replacement is started and checked before the previous usable one stops. */
@@ -71,15 +63,7 @@ export async function launchSoftwareTrial(projectId: string, expectedVersion?: s
       recordEvaluationEvent(projectId,result.code===0?'trial_ready':'trial_failed',{release_id:release.id,exit_code:result.code})
       return{started:result.code===0,trial,detail:`测试数据命令试用 · 版本 ${release.id.slice(0,12)}\n${trial.last_output||'无输出'}${result.code!==0?`\n退出码 ${result.code}`:''}`}
     }
-    let url = release.launch.url, command = [...release.launch.command]
-    if (release.launch.ui === 'browser' && url) {
-      const original = new URL(url), port = await freePort(), oldPort = original.port || '80'
-      original.port = String(port)
-      // Only explicit launch arguments are relocated. Never rewrite business
-      // source to work around a hardcoded port; report unsupported startup.
-      command = command.map(arg => arg === oldPort ? String(port) : arg === url ? original.href : arg === `--port=${oldPort}` ? `--port=${port}` : arg)
-      url = original.href
-    }
+    const {url,command}=await isolatedBrowserLaunch(release.launch)
     const instance = await startSoftwareProcess({ projectId, root: release.root, sessionId: 'user-trial', command,
       url, dataDir: data, independentUserApp: true, visibleDesktop: release.launch.ui === 'electron', purpose: 'trial', readyMs: 8000 })
     started = instance.id

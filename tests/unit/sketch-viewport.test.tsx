@@ -85,8 +85,8 @@ it('enables click interception only after the user explicitly starts marking', (
   render(<SketchViewport src="bloma-file://p/00_UX/ux-sketch.html" />)
   const frame = document.querySelector('iframe')!
   expect(frame.src).toContain('bloma-readonly=1')
-  fireEvent.click(screen.getByRole('button', { name: '标记修改' }))
+  fireEvent.click(screen.getByRole('button', { name: '点选修改' }))
   expect(frame.src).toContain('bloma-readonly=0')
-  fireEvent.click(screen.getByRole('button', { name: '退出标记' }))
+  fireEvent.click(screen.getByRole('button', { name: '退出点选' }))
   expect(frame.src).toContain('bloma-readonly=1')
 })
