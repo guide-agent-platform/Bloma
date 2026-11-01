@@ -24,6 +24,20 @@ const importProbe=`import importlib,json,sys\nr={'python':sys.executable,'versio
 interface PythonProbe {python:string;version:string;packages:Record<string,{available:boolean;version?:string;path?:string;error?:string}>}
 type Dependencies={execute?:typeof executeSoftwareCommand;probe?:typeof runHostSpeechProbe;download?:DownloadDeps}
 const preparing=new Set<string>()
+function assertSpeechEnvironment(root:string,signal:AbortSignal){
+  signal.throwIfAborted()
+  // These host-managed paths bypass generic file editing, not link checks.
+  // Reject redirected environment/install directories before and after commands.
+  const directories=process.platform==='win32'?['.venv','.venv/Scripts','.venv/Lib','.venv/Lib/site-packages','.venv/Include']:['.venv','.venv/bin','.venv/lib','.venv/include']
+  for(const path of directories){
+    const info=lstatSync(join(root,path),{throwIfNoEntry:false})
+    if(info&&(!info.isDirectory()||info.isSymbolicLink()))throw Error('CAPABILITY_VENV_LINK_UNSUPPORTED: '+path)
+  }
+  // POSIX venv interpreters normally link to the base Python installation.
+  for(const path of ['.venv/pyvenv.cfg',...(process.platform==='win32'?['.venv/Scripts/python.exe']:[])]){
+    if(lstatSync(join(root,path),{throwIfNoEntry:false})?.isSymbolicLink())throw Error('CAPABILITY_VENV_LINK_UNSUPPORTED: '+path)
+  }
+}
 function componentState(root:string){
   return SPEECH_COMPONENTS.map(name=>{
     const source=readFileSync(join(mainRootDir(),'templates/tools',name)),target=join(root,name)
@@ -34,6 +48,7 @@ function componentState(root:string){
 }
 async function pythonProbe(projectId:string,root:string,signal:AbortSignal,deps:Dependencies){
   const result=await(deps.execute??executeSoftwareCommand)({projectId,root,command:['python','-I','-B','-c',importProbe],signal,timeoutMs:30000})
+  signal.throwIfAborted()
   if(result.code!==0)throw Error(`CAPABILITY_PYTHON_UNAVAILABLE: ${result.stderr.slice(-1000)}`)
   const value=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)??'') as PythonProbe
   if(!value.python||!value.version||!value.packages)throw Error('CAPABILITY_IMPORT_REPORT_INVALID')
@@ -63,22 +78,27 @@ export async function prepareSpeechCapability(projectId:string,root:string,signa
     const components=componentState(root),conflicts=components.filter(item=>item.state==='conflict')
     if(conflicts.length)throw Error(`CAPABILITY_EXISTING_FILES_PRESERVED: ${conflicts.map(item=>item.name).join(',')}`)
     const venv=join(root,'.venv')
-    if(existsSync(venv)&&(!lstatSync(venv).isDirectory()||lstatSync(venv).isSymbolicLink()))throw Error('CAPABILITY_VENV_LINK_UNSUPPORTED')
-    let python=await pythonProbe(projectId,root,signal,deps)
+    const execute:typeof executeSoftwareCommand=async input=>{
+      assertSpeechEnvironment(root,signal)
+      const result=await(deps.execute??executeSoftwareCommand)(input)
+      assertSpeechEnvironment(root,signal)
+      return result
+    }
+    const guardedDeps={...deps,execute}
+    let python=await pythonProbe(projectId,root,signal,guardedDeps)
     const request=projectRuntimeRequest(root,'python')
     if(request&&!satisfies(python.version,request,'python'))throw Error(`CAPABILITY_PYTHON_CONSTRAINT_MISMATCH: ${request}；先prepare_software_environment`)
-    const execute=deps.execute??executeSoftwareCommand
     const interpreter=join(venv,process.platform==='win32'?'Scripts/python.exe':'bin/python')
     if(!existsSync(interpreter)){
       const result=await execute({projectId,root,command:['python','-m','venv','.venv'],signal,timeoutMs:120000})
       if(result.code!==0)throw Error(`CAPABILITY_VENV_PREPARATION_FAILED: ${result.stderr.slice(-1000)}`)
-      python=await pythonProbe(projectId,root,signal,deps)
+      python=await pythonProbe(projectId,root,signal,guardedDeps)
     }
     if(packages.some(name=>!python.packages[name]?.available)){
       if(options.install_dependencies===false)throw Error('CAPABILITY_PACKAGES_MISSING: 依赖尚未准备，原有文件保留')
       const result=await execute({projectId,root,command:['python','-m','pip','install','--disable-pip-version-check','numpy==2.5.4','sherpa-onnx==1.13.8','sounddevice==0.5.6'],signal,timeoutMs:300000})
       if(result.code!==0)throw Error(`CAPABILITY_DEPENDENCIES_FAILED: ${redactSoftwareOutput(result.stderr).slice(-1600)}`)
-      python=await pythonProbe(projectId,root,signal,deps)
+      python=await pythonProbe(projectId,root,signal,guardedDeps)
     }
     if(packages.some(name=>!python.packages[name]?.available))throw Error('CAPABILITY_IMPORTS_NOT_READY')
     const modelRoot=executionSpeechBinding(projectId,root)?.model_root??speechModelRoot(),rel=relative(realpathSync(root),modelRoot)
@@ -125,7 +145,9 @@ export function buildCapabilityTools(projectId:string,policy:ReturnType<typeof c
           const result=await prepareDocumentCapability(projectId,findProject(projectId).root_path,ctx.signal,input.install_dependencies===true)
           return{output:redactSoftwareOutput(JSON.stringify(result)),isError:result.status!=='prepared'}
         }
-        for(const path of [...SPEECH_COMPONENTS,'.venv/pyvenv.cfg'])policy.assertFileWrite(path,ctx)
+        // assertCommand above authorizes the integrator's fixed venv/pip setup.
+        // Generic file/delegation tools must continue protecting all of .venv.
+        for(const path of SPEECH_COMPONENTS)policy.assertFileWrite(path,ctx)
         const result=await prepareSpeechCapability(projectId,findProject(projectId).root_path,ctx.signal,input as {install_dependencies?:boolean;download_models?:boolean})
         return{output:JSON.stringify(result),isError:result.status!=='prepared'}
       }catch(error){return{output:redactSoftwareOutput(String(error)),isError:true}}
