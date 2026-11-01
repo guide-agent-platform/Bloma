@@ -194,7 +194,6 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
       if (input.shouldPause?.()) return true
       if (input.signal.aborted) { status = 'cancelled'; return true }
       if (status !== 'completed') return true
-      if (ctx.state.compact_requested && turns < input.maxTurns) return true
       const calls = toolCalls.filter(call => call.turn === turns)
       budgetStalls = budgetHitThisTurn ? budgetStalls + 1 : 0
       if (budgetStalls >= 2) { status = 'budget_exhausted'; return true }
@@ -321,14 +320,6 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     input.signal.throwIfAborted()
     await activeSession.prompt(task, { source: 'rpc', expandPromptTemplates: false, images: input.images?.map(piImage) })
     await activeSession.waitForIdle()
-    while (ctx.state.compact_requested && status === 'completed' && !input.signal.aborted && turns < input.maxTurns) {
-      ctx.state.compact_requested = false
-      if ((ctx.state.explicit_compactions ?? 0) >= 4) throw new Error('PI_EXPLICIT_COMPACTION_LIMIT')
-      ctx.state.explicit_compactions = (ctx.state.explicit_compactions ?? 0) + 1
-      await activeSession.compact()
-      await activeSession.agent.continue()
-      await activeSession.waitForIdle()
-    }
     if (input.signal.aborted) status = 'cancelled'
     else if (errorMessage && status === 'completed') throw new Error(errorMessage)
   } catch (error) {

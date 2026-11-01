@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 
 
-import type { DesktopExecutionLimits } from './execution-limits'
+interface DesktopExecutionLimits { script_runs: number; install_calls: number }
 
 export const EXPERIMENT_SWITCH = 'BLOMA_DISPATCH_EXPERIMENT'
 export const EXPERIMENT_POLICIES = ['single_worker', 'parallel_workers', 'autonomous', 'standalone'] as const

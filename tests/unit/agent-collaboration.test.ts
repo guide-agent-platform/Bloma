@@ -6,7 +6,6 @@ import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/agent/tools/agent-tools'
-import { buildDomainTools } from '../../main/coding/tool-handlers'
 import { buildDelegationTools } from '../../main/agent/delegation/delegation-tools'
 import { buildTaskHandoff } from '../../main/agent/delegation/task-handoff'
 import {
@@ -293,41 +292,6 @@ describe('委派协作 M1', () => {
     await expect(waiting).rejects.toThrow('parent wait cancelled')
     expect(findDelegation(parentSessionId, child.delegation_id)!.status).toBe('running')
     stopDelegation(parentSessionId, child.delegation_id)
-  })
-
-  it('role 裁剪：explore/research 只读+ask；implement 全量+ask；review 无写工具+ask（m-12：话术「不直接修改」与工具面一致）；parent 含全部委派工具', () => {
-    // PR4c/d 口径：生产装配=buildAgentTools（通用件）+buildDomainTools（领域验证面）两拼；
-    // W3 后只读五件套含 find；09-16 前旧断言面（无 find、单 builder）已过时。
-    const surface = (role?: 'explore' | 'research' | 'implement' | 'review') =>
-      [...buildAgentTools({ projectId: 'p', ...(role ? { role } : {}) }), ...buildDomainTools({ projectId: 'p', ...(role ? { role } : {}) })].map((tool) => tool.name)
-    const readOnly = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'ask_delegation_question']
-    expect(surface('explore')).toEqual(readOnly)
-    expect(surface('research')).toEqual(readOnly)
-
-    const genericFull = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file']
-    const domainVerify = ['run_security_scan'] // API 契约工具恒注册（2026-10-01 开关删除）
-    expect(surface('implement')).toEqual([...genericFull, 'ask_delegation_question', ...domainVerify])
-    // review：可验证（预览/测试/扫描）但不可写（无 write_file/edit_file）
-    expect(surface('review')).toEqual(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'ask_delegation_question', ...domainVerify])
-
-    const parentTools = surface()
-    expect(parentTools).toEqual([
-      ...genericFull,
-      'delegate_agent',
-      'wait_for_delegations',
-      'get_delegation_results',
-      'stop_delegation',
-      'stop_delegations',
-      'answer_delegation_question',
-      'continue_delegation',
-      'web_research',
-      ...domainVerify,
-    ])
-    // 子 agent 无委派/代答/续跑工具（深度限制双保险）；parent 无 ask（父不是子会话）
-    expect(surface('implement')).not.toContain('delegate_agent')
-    expect(surface('implement')).not.toContain('answer_delegation_question')
-    expect(surface('implement')).not.toContain('continue_delegation')
-    expect(parentTools).not.toContain('ask_delegation_question')
   })
 
   it('提示词纯函数：buildChildSystemPrompt 保留父 system + role 指令；buildDelegationPrompt 含 task 与期望输出', () => {

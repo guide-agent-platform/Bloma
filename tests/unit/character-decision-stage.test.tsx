@@ -4,7 +4,6 @@ import { createStore, Provider } from 'jotai'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CharacterDecisionStage } from '../../renderer/components/CharacterDecisionStage'
-import { SketchCharacterReminder } from '../../renderer/components/SketchCharacterReminder'
 import { WorkspaceShell } from '../../renderer/components/WorkspaceShell'
 import { activeAgentSessionIdAtom, currentProjectAtom, workflowStageAtom, prdConfirmFamily } from '../../renderer/agent-atoms'
 import type { Project } from '../../shared/types'
@@ -58,23 +57,6 @@ describe('character-led decision presentation', () => {
     await flush()
     expect(animate).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: '确认需求' })).toBeTruthy()
-  })
-
-  it('the sketch cue is only a dismissible character and one sentence, and a new sketch can remind again', async () => {
-    const cue = crypto.randomUUID()
-    const view = render(<SketchCharacterReminder cue={cue} />)
-    await flush()
-    expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getAllByRole('button')).toHaveLength(2)
-    expect(document.querySelectorAll('.pointing-guide image')).toHaveLength(3)
-    expect(document.querySelector('[data-guide-body]')?.getAttribute('clip-path')).toBeNull()
-    expect(document.querySelector('mask')).toBeNull()
-    expect(document.querySelectorAll('[data-guide-pupil]')).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: '收起角色提醒' }))
-    expect(screen.queryByLabelText('人物草图提醒')).toBeNull()
-    view.rerender(<SketchCharacterReminder cue={crypto.randomUUID()} />)
-    await flush()
-    expect(screen.getByRole('status').textContent).toBe('草图准备好啦，看看是不是你想要的？')
   })
 
   it('recognizes the current UX confirmation action without treating an MVP review as a sketch', async () => {

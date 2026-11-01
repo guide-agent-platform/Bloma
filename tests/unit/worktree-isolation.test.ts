@@ -15,7 +15,6 @@ import { getProjectRootOverride, hasProjectRootOverride, resolveProjectRoot, run
 import { commitProjectState, ensureProjectRepo, gitAvailable } from '../../main/coding/project-git'
 import { createProject, findProject } from '../../main/project/project-service'
 import { buildAgentTools } from '../../main/agent/tools/agent-tools'
-import { buildDomainTools } from '../../main/coding/tool-handlers'
 
 /**
  * 委派 worktree 隔离（2026-09-26 运行审计 P1-06 收尾）：
@@ -146,16 +145,6 @@ describe('工具面在覆盖下的行为（写隔离闭环）', () => {
     expect((outcome as { isError?: boolean }).isError).toBeFalsy()
     expect(existsSync(join(worktree, 'src', 'x.js'))).toBe(true)
     expect(existsSync(join(project.root_path, 'src', 'x.js'))).toBe(false)
-  })
-
-  it('隔离模式下领域验证工具被裁掉（防「改 worktree、验主根」假验证）', () => {
-    const project = createProject({ request_id: 'req-wt4', mode: 'quick' })
-    const outside = buildDomainTools({ projectId: project.project_id, role: 'parent', sessionId: 's', requestId: 'r' } as never)
-    expect(outside.length).toBeGreaterThan(0)
-    const inside = runWithProjectRootOverride('/tmp/wt', () =>
-      buildDomainTools({ projectId: project.project_id, role: 'parent', sessionId: 's', requestId: 'r' } as never),
-    )
-    expect(inside).toEqual([])
   })
 
   it('provider 工厂：开关 off 时返回的 provider 不隔离（不建树；工厂可重复调用）', () => {

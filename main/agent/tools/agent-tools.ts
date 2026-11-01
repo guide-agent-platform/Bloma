@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject } from '../../project/project-service';
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
-import { toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop';
+import { toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop';
 import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
 import { replaceUniqueText } from './text-edit'
 import { resolveProjectRoot } from '../../../shared/project-root-override'
@@ -695,35 +695,6 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
-  // 子 agent（委派子会话）专属：向主 agent 挂起提问（M3 冒泡）。主 agent 用 answer_delegation_question 代答。
-
-  /** W2（Phase 10，同步 Proma CompactContext）：显式压缩——模型完成大阶段后主动交接口收缩窗口。
- *  只置位请求标志（不直接动 messages——压缩必须在 loop 的安全点执行，与自动压缩同路径
- *  同语义：交接 LLM/keep-recent/检查点恢复头/观测埋点全部复用）；不占修复预算与写入预算。 */
-  const compact_context: AgentLoopTool = {
-    name: 'compact_context',
-    description:
-      '主动压缩上下文：把已完成的工作交接成一段摘要并重置对话窗口（保留近期原文与未闭环失败信息）。适合刚完成一个大阶段、或察觉上下文过长影响跟踪时调用；本轮工具结果落盘后立即生效。',
-    input_schema: { type: 'object', properties: {} },
-    execute: async (_toolInput, ctx) => {
-      const used = ctx.state.explicit_compactions ?? 0
-      if (used >= MAX_EXPLICIT_COMPACTIONS) {
-        return {
-          output: `显式压缩已达上限（${MAX_EXPLICIT_COMPACTIONS} 次）。请基于当前上下文继续工作，或直接输出完成总结。`,
-          isError: true,
-        }
-      }
-      if (ctx.state.compact_requested) {
-        return { output: '已登记一次压缩，请勿重复调用；本轮结束后立即生效。' }
-      }
-      ctx.state.compact_requested = true
-      return {
-        output: `已登记压缩（第 ${used + 1}/${MAX_EXPLICIT_COMPACTIONS} 次显式压缩）：本轮工具结果落盘后立即执行，窗口重置为任务+交接文档+近期保留，未闭环失败会进恢复头。下一轮请依据恢复头继续。`,
-        detail: { registered: true },
-      }
-    },
-  }
-
   /** W3（Phase 10，同步 Proma find）：glob 文件名搜索——list_files 看目录、grep 挖内容，
    *  find 按模式定位文件（星号单段、双星跨目录，如所有 js 或 game-前缀模块）。只读并行五件套同档。 */
   const find: AgentLoopTool = {
@@ -769,8 +740,6 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     // 只读角色：探索/调研不需要写文件或跑测试，但可查公网资料、可向主 agent 冒泡提问
     return [read_file, list_files, find, grep, buildWebFetch(), ...buildDelegationTools(role)]
   }
-  // W2（Phase 10，显式压缩）：仅主 loop 注册（BLOMA_COMPACT_TOOL 缺省 off）
-  const compactTools = compactToolEnabled() ? [compact_context] : []
 
   if (role === 'review') {
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
@@ -799,7 +768,6 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     buildWebFetch(),
     write_file,
     edit_file,
-    ...compactTools,
     ...buildDelegationTools('parent'),
     buildWebResearch(projectId),
   ]

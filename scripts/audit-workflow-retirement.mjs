@@ -55,10 +55,25 @@ function selfTest(){
   assert.equal(runtimeTarget('fixture.d.mts','fixture.mjs','static_runtime',true),'fixture.mjs')
   assert.equal(runtimeTarget('fixture.d.mts','fixture.mjs','static_runtime',false),undefined)
   assert.equal(runtimeTarget('fixture.d.mts','fixture.mjs','type',false),'fixture.d.mts')
+  const declared=new Set(['product_store.cjs']),files=['main/templates/components/data-store/product_store.cjs']
+  assert.equal(deployedComponent('main/templates/components/jobs/product_jobs.cjs','./product_store.cjs',files,declared),files[0])
+  assert.equal(deployedComponent('main/software/jobs.ts','./product_store.cjs',files,declared),undefined)
+  assert.equal(deployedComponent('main/templates/components/jobs/product_jobs.cjs','../product_store.cjs',files,declared),undefined)
+  assert.equal(deployedComponent('main/templates/components/jobs/product_jobs.cjs','./product_store.cjs',files,new Set()),undefined)
+  assert.equal(deployedComponent('main/templates/components/jobs/product_jobs.cjs','./product_store.cjs',[...files,'main/templates/tools/product_store.cjs'],declared),undefined)
   console.log(JSON.stringify({self_test:'passed',checks:['type versus value imports','mixed imports','reexports','literal versus computed dynamic imports','require','asset references are not module edges','artifact output bounds','declaration-only runtime imports rejected']}))
 }
 function declarationWithoutRuntime(path,kind){return kind!=='type'&&/\.d\.[cm]?ts$/i.test(path??'')}
 function runtimeTarget(module,asset,kind,exists){return(!declarationWithoutRuntime(module,kind)?module:undefined)??(exists&&!declarationWithoutRuntime(asset,kind)?asset:undefined)}
+/** Product components are materialized side by side. Resolve only uniquely
+ * present filenames declared by the current component contract, never arbitrary
+ * basename fallback for host imports, undeclared files or traversal paths. */
+function deployedComponent(from,specifier,files,declared){
+  if(!from.startsWith('main/templates/components/')||!/^\.\/[A-Za-z0-9_-]+\.cjs$/.test(specifier))return
+  const name=specifier.slice(2);if(!declared.has(name))return
+  const matches=files.filter(file=>file.startsWith('main/templates/')&&basename(file)===name)
+  return matches.length===1?matches[0]:undefined
+}
 if(args.includes('--self-test')){selfTest();process.exit(0)}
 const tracked=[...new Set(execFileSync('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:root}).toString('utf8').split('\0').filter(Boolean).map(slash))].filter(path=>existsSync(join(root,path))).sort()
 const sourcePaths=tracked.filter(path=>/\.(?:[cm]?js|[cm]?ts|tsx)$/.test(path)&&/^(main|preload|renderer|shared|storage|tests|scripts)\//.test(path))
@@ -70,14 +85,17 @@ const records=new Map(sourcePaths.map(path=>{
 }))
 const options={moduleResolution:ts.ModuleResolutionKind.Bundler,module:ts.ModuleKind.ESNext,allowJs:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX}
 const graph=[]
+const componentDeclarations=new Set((records.get('main/software/component-contracts.ts')?.strings??[]).map(row=>row.value).filter(value=>/^[A-Za-z0-9_-]+\.cjs$/.test(value)))
 for(const [from,record]of records)for(const item of record.imports){
   if(!item.specifier.startsWith('.'))continue
   const module=ts.resolveModuleName(item.specifier,join(root,from),options,ts.sys).resolvedModule?.resolvedFileName
   const asset=resolve(root,dirname(from),item.specifier.split('?')[0])
   const declarationOnly=declarationWithoutRuntime(module,item.kind)
-  const found=runtimeTarget(module,asset,item.kind,inside(root,asset)&&existsSync(asset)&&lstatSync(asset).isFile())
+  let found=runtimeTarget(module,asset,item.kind,inside(root,asset)&&existsSync(asset)&&lstatSync(asset).isFile())
+  const deployed=!found&&deployedComponent(from,item.specifier,sourcePaths,componentDeclarations)
+  if(deployed)found=join(root,deployed)
   const code=found&&/\.[cm]?[jt]sx?$/.test(found)
-  graph.push({from,to:found&&inside(root,found)?slash(relative(root,found)):null,resolution:found?(module&&!declarationOnly||code?'module':'asset'):declarationOnly?'missing_runtime':'missing',...(declarationOnly&&!found?{declaration_only:slash(relative(root,module))}:{}),...item})
+  graph.push({from,to:found&&inside(root,found)?slash(relative(root,found)):null,resolution:found?(module&&!declarationOnly||code?'module':'asset'):declarationOnly?'missing_runtime':'missing',...(deployed?{deployment_resolution:'component_flattening'}:{}),...(declarationOnly&&!found?{declaration_only:slash(relative(root,module))}:{}),...item})
 }
 const missing=graph.filter(edge=>!edge.to)
 if(missing.length)throw Error('AUDIT_IMPORT_MISSING: '+JSON.stringify({count:missing.length,edges:missing.slice(0,24)}))

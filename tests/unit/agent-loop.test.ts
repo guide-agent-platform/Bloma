@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { runAgentLoop, keepRecentTurns, estimateBlocksText, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent/loop/agent-loop'
+import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent/loop/agent-loop'
 
 import { estimateTokenCount } from '../../main/agent/loop/usage-guard'
 

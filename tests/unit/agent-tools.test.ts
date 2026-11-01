@@ -10,18 +10,13 @@ import {
   EDIT_BUDGET_AFTER_TEST_FAILURE,
   setJsSyntaxCheckerForTests,
 } from '../../main/agent/tools/agent-tools'
-import { buildDomainTools, domainToolOptionsDefaults } from '../../main/coding/tool-handlers'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
-import { writeRealScaffoldMarker } from '../../main/coding/preview-runtime'
 import { getDocumentsDir } from '../../storage/config-paths'
 
 /** PR4c：生产装配=通用件+领域件拼接（含变体/地图刷新缺省补全）；测试沿用同一口径 */
-const composeTools = (o: Parameters<typeof buildAgentTools>[0]) => {
-  const full = { ...o, ...domainToolOptionsDefaults(o.projectId) }
-  return [...buildAgentTools(full), ...buildDomainTools(full)]
-}
+const composeTools = (o: Parameters<typeof buildAgentTools>[0]) => buildAgentTools(o)
 
 
 /**
@@ -187,32 +182,6 @@ describe('agent-tools（PR2 L2）', () => {
       expect(ext.output).toContain('可写范围')
     })
 
-    it('[W3] 真实脚手架变体写边界：package.json/server.js/任意后缀皆产物可写；node_modules/.git/data-backups/标记拒绝', async () => {
-      const project = createProject({ request_id: 'req-w3-real', mode: 'quick' })
-      writeRealScaffoldMarker(project.root_path, 'real-fullstack')
-      // 先落真实工程件骨架（模拟脚手架已交付），再验证 agent 写边界
-      writeFileSync(join(project.root_path, 'package.json'), '{"name":"skeleton"}', 'utf8')
-      const tools = composeTools({ projectId: project.project_id, realFullstackVariant: true })
-      const ctx = ctxFor(project.project_id)
-      // 已存在的 package.json 是真实工程件（可改）——write 守卫（缺省 on）要求先读
-      // 再改（盲覆盖拦截）；read 后改写即为真实工作流
-      await byName(tools, 'read_file').execute({ path: 'package.json' }, ctx)
-      const pkg = await byName(tools, 'write_file').execute({ path: 'package.json', content: '{"name":"app"}' }, ctx)
-      expect(pkg.isError).toBeFalsy()
-      const route = await byName(tools, 'write_file').execute({ path: 'server/routes/notes.js', content: 'module.exports = {}' }, ctx)
-      expect(route.isError).toBeFalsy()
-      const md = await byName(tools, 'write_file').execute({ path: 'README.md', content: '# app' }, ctx)
-      expect(md.isError).toBeFalsy()
-      // 基础设施目录与变体标记拒绝（边界拒绝先于读守卫——本来就禁止写的路径直接给边界文案）
-      for (const path of ['node_modules/evil.js', '.git/config', 'data-backups/x.json']) {
-        const outcome = await byName(tools, 'write_file').execute({ path, content: 'x' }, ctx)
-        expect(outcome.isError, path).toBe(true)
-      }
-      const marker = await byName(tools, 'write_file').execute({ path: '.bloma-real-variant', content: 'real-static' }, ctx)
-      expect(marker.isError).toBe(true)
-      expect(marker.output).toContain('平台管理')
-    })
-
     it('[PR-1] 骨架参考示例目录只读：src/examples/ 写入拒绝（含大小写变体），read_file 可读', async () => {
       const project = createProject({ request_id: 'req-w2b', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src', 'examples'), { recursive: true })
@@ -372,24 +341,6 @@ describe('agent-tools（PR2 L2）', () => {
   })
 
 
-  describe('run_security_scan', () => {
-    it('高危命中 → 未通过并列出 file:line；干净项目 → 通过', async () => {
-      const project = createProject({ request_id: 'req-s1', mode: 'quick' })
-      mkdirSync(join(project.root_path, 'src'), { recursive: true })
-      writeFileSync(join(project.root_path, 'src', 'evil.js'), 'eval(userInput)\n', 'utf8')
-      const tools = composeTools({ projectId: project.project_id })
-      const ctx = ctxFor(project.project_id)
-
-      const bad = await byName(tools, 'run_security_scan').execute({}, ctx)
-      expect(bad.output).toContain('未通过')
-      expect(bad.output).toContain('src/evil.js:1')
-      expect(bad.output).toContain('更安全的实现方式')
-
-      writeFileSync(join(project.root_path, 'src', 'evil.js'), 'const safe = 1\n', 'utf8')
-      const good = await byName(tools, 'run_security_scan').execute({}, ctx)
-      expect(good.output).toContain('安全扫描通过')
-    })
-  })
 
   describe('web_fetch（联网只读 + SSRF 防护）', () => {
     /** 构造鸭型 Response（不发真实网络）。 */
@@ -566,7 +517,7 @@ describe('web_research 工具面（闭环 PR5）', () => {
     // 工具计数锁：parent 视图当前 16（2026-10-03 删留执行核对；历史口径曾为 19，随
     // 工具面调整递减——改工具面时同步改此数并注明缘由）；浏览器/压缩开关必须显式钉 off
     // （并发测试文件共享 process.env，见 scrape 管道同款先例）
-    expect(parentNames).toHaveLength(16)
+    expect(parentNames).not.toContain('run_security_scan') // retired domain tool; current host verification is separate
 
     for (const role of ['research', 'explore', 'implement', 'review', 'custom'] as const) {
       const names = composeTools({ projectId: 'p', role }).map((tool) => tool.name)

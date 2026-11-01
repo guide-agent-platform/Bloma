@@ -2,9 +2,8 @@
 
 > 2026-11-01：[平台旧流程与重复实现清理](docs/05_PROJECT_PLAN/platform-cleanup-20261101.md)。制作与委派统一使用Pi原生执行器；清理旧压缩/调度/工具协议恢复，保留宿主权限、预算与交付门。
 
-> 基于 Proma fork 的零代码软件生成桌面应用文档集  
-> 当前状态：需求、UX、架构、接口、测试、Sprint、科研计划已完成  
-> 日期：2026-07-10
+> Windows Electron 软件生成平台，使用 Pi 执行持续制作与委派。
+> 当前工程状态和验证范围见下方实施记录；原始设计资料作为历史索引保留。
 
 > 2026-11-01：[模型窗口、主动技能与点选修改](docs/05_PROJECT_PLAN/context-skills-correction-20261101.md)。已知模型按Pi目录使用1M等实际容量，代理可显式覆盖；Agent按需选择技能；草图、浏览器/Electron产物及固定试用版本支持点选反馈，提交保留版本与重试身份。
 
@@ -62,11 +61,11 @@
 
 ## 2. Proma Core 对齐原则
 
-所有实现必须继承 `proma-core-demo` 的底层约束：
+当前实现保留以下平台边界：
 
 - IPC 四层链路：`shared/types.ts -> main/ipc.ts -> preload/bridge.ts -> renderer atoms`。
 - Renderer 不直接访问 Node.js、文件系统、API Key 或 Agent SDK。
-- API Key 只在 main 进程解密，并通过 Electron `safeStorage` 加密保存到 `channels.json`。
+- API Key 只在 main 进程解密，并通过 Electron `safeStorage` 加密保存到 `bloma-channels.json`。
 - Agent 流式输出通过 `AgentOrchestrator -> AgentEvent -> IPC -> Jotai atomFamily(sessionId) -> UI`。
 - 工具权限使用 `canUseTool()` + `pendingRequests Map` + UI 决策回传。
 - 运行时存储只使用 `~/.proma/` 下的 JSON、JSONL 和工作区文件目录。
@@ -74,7 +73,7 @@
 
 ---
 
-## 3. 文档导航
+## 3. 原始设计资料导航（历史）
 
 ### 3.1 需求层
 
@@ -142,94 +141,21 @@ Feature 文件：
 
 ---
 
-## 4. 当前完成状态
+## 4. 当前工程入口
 
-已完成：
+- 接收、恢复与流程分发：`main/orchestration/stages/`；composer持久回执绑定实际执行。
+- 连续制作与交付：`main/desktop/lean-production.ts`、`main/software/`；需求确认、候选版本、独立检查和最终交付分别记录。
+- Pi运行时与委派：`main/agent/loop/pi-runtime.ts`、`main/agent/delegation/`；宿主权限和费用边界不交给模型自报。
+- 模型渠道与计量：`main/platform/llm/`；供应商传输桥保留请求准入、图片授权及用量记录。
+- 界面、桥与类型：`renderer/`、`preload/bridge.ts`、`shared/`。
 
-- 需求层：用户故事、术语表。
-- UX 层：站点地图、用户流程、线框图、设计系统、交互规格。
-- 架构层：架构设计、组件设计、Prompt、数据模型、类图、时序图。
-- 接口层：API 规范。
-- 测试层：测试计划和 6 个 GWT Feature。
-- 测试规范：测试编写、稳定 ID、失败分类和报告要求。
-- 计划层：Sprint 计划和科研计划。
-- 顶层：README。
-
-架构层已按 `C:\Users\17359\OneDrive\Desktop\proma-core-demo` 完成 v1.1 对齐。
+旧分阶段制作、静态网页预览和裁判流程已退出现役入口，历史原始文档不作为当前发布门禁。当前验证范围见本页顶部的工程实施记录；模型效果、原生UI、本机交付和干净机器验收分别说明。
 
 ---
 
-## 5. 三人分工
+## 5. 开发与测试环境
 
-Phase 1 按固定三人团队推进：
-
-| 角色 | 职责 |
-|---|---|
-| A：工程负责人 / 全栈 | Proma fork、主进程、IPC、AgentOrchestrator、权限服务、沙箱运行、MCP 工具 |
-| B：前端 / UX 工程 | 工作区 UI、Jotai atoms、全局监听器、预览区、点选纠错、时间轴、P0 用户文案 |
-| C：测试 / 研究工程 | GWT Feature、E2E、文档一致性、埋点、脱敏导出、研究指标校验 |
-
----
-
-## 6. Phase 1 实现顺序
-
-| Sprint | 周期 | 主题 |
-|---|---|---|
-| Sprint 0 | 1 周 | Proma core 对齐与开发底座 |
-| Sprint 1 | 2 周 | 草图生成闭环 |
-| Sprint 2 | 2 周 | MVP 与质量门禁 |
-| Sprint 3 | 2 周 | 纠错、回滚与研究数据 |
-
-进入实现前建议先做：
-
-1. 在真实代码仓库中确认 `proma-core-demo` 与目标 fork 的目录差异。
-2. 建立 `shared/types.ts` 的 IPC 单一真相源。
-3. 设置临时 `PROMA_HOME` 测试环境，避免写入真实用户数据。
-4. 先跑通 `proma-core-boundary.feature` 对应的底层测试骨架。
-
----
-
-## 7. 发布门禁
-
-Phase 1 发布前必须满足：
-
-- 6 个 GWT Feature 全部通过。
-- 自动修复失败后能回滚到最近健康快照。
-- 裁判退回达到上限后用户能选择继续、接受或补充说明。
-- 用户可见错误文案不包含代码、堆栈、HTTP 状态码、XSS、SQL 注入等技术细节。
-- API Key 明文不会进入 renderer、日志、JSONL、埋点。
-- 运行时不创建 SQLite 文件或服务端数据库连接。
-- 13 类埋点能写入 `analytics.jsonl` 并脱敏导出。
-
----
-
-## 8. 推荐阅读顺序
-
-如果准备进入实现，建议按以下顺序阅读：
-
-1. `architecture.md`
-2. `api-spec.md`
-3. `data-model.md`
-4. `component-design.md`
-5. `sprint-plan.md`
-6. `test-plan.md`
-7. `features/proma-core-boundary.feature`
-8. `features/generation-workflow.feature`
-
-如果准备做 UX 或产品评审，建议按以下顺序阅读：
-
-1. `glossary.md`
-2. `user-flows.md`
-3. `interaction-spec.md`
-4. `design-system.md`
-5. `wireframes/`
-6. `features/`
-
----
-
-## 9. 开发与测试环境
-
-### 9.1 环境准备
+### 5.1 环境准备
 
 - Node.js 22.13 或更新版本（本次验证使用 24.12.0），npm 10 或更新版本（本次验证使用 11.6.4）。
 - Windows 10/11；Electron 动态验收需要桌面会话。
@@ -237,7 +163,7 @@ Phase 1 发布前必须满足：
 - 不提交 `node_modules/`、`dist/`、`dist-main/`、`coverage/`、`test-results/`、`.vitest/`、`.proma-test/` 或日志文件。
 - 新增或升级依赖时提交 `package.json` 和 `package-lock.json`，不要提交安装目录或构建产物。
 
-### 9.2 主要依赖
+### 5.2 主要依赖
 
 | 用途 | 依赖 |
 |---|---|
@@ -246,7 +172,7 @@ Phase 1 发布前必须满足：
 | 类型与构建 | TypeScript、Vite、esbuild |
 | 自动化测试 | Vitest、Testing Library、jsdom、Playwright Electron |
 
-### 9.3 验证命令
+### 5.3 验证命令
 
 ```bash
 npm run typecheck
@@ -266,7 +192,7 @@ npm run docs:check
 
 测试写入文件时必须使用临时 `PROMA_HOME`，完整规则见 `docs/06_TESTS/testing-standards.md`。
 
-## 10. 修订记录
+## 6. 原始文档修订记录
 
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|

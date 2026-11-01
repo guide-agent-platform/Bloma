@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyGeneratedProjectName, createProject, findProject, renameProject, sanitizeGeneratedProjectName, updateProject } from '../../main/project/project-service'
 
 import { readPrdBackplane, syncDocuments } from '../../main/project/document-engine'
-import { provisionDesktopSkeletonV2 } from '../../main/desktop/skeleton-provision'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import { restorePromaHome } from '../support/proma-home-guard'

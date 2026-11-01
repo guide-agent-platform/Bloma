@@ -6,8 +6,6 @@ import { buildAttachmentTools } from '../tools/attachment-tools'
 import { materialImageRefs, renderMaterialContext } from '../../platform/attachments/material-context'
 import { canUseTool } from '../permissions/permission-service'
 import { appendLoopPromptOverride } from '../prompting/prompt-config'
-import { estimateTokenCount } from './usage-guard'
-import { closePreviewBrowserSession } from '../../coding/preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from './steer-queue'
 
 /** Pi owns the sole model/tool loop, persistence, retries and compaction.
@@ -67,11 +65,6 @@ export interface AgentLoopToolState {
   api_contract_runs?: number
   /** D4a：本轮已读文件的版本戳（path → rev）；edit_file 的 expected_revision 校验与 write_file 守卫共用 */
   file_revisions?: Map<string, string>
-  /** W2（Phase 10，2026-09-16）：模型已登记的显式压缩请求（compact_context 工具置位；
-   *  loop 在本轮工具结果落盘后与自动压缩同路径处理并复位） */
-  compact_requested?: boolean
-  /** W2：已完成的显式压缩次数（上限 MAX_EXPLICIT_COMPACTIONS，由 loop 在实际压缩后自增） */
-  explicit_compactions?: number
   /** 测试失败后的写入类工具调用次数（edit-after-test-failure 预算，默认上限 3） */
   edits_after_test_failure: number
   /** 修复回合计数（每次新出现的 GWT 失败 +1，对应旧 test_repair_count 口径） */
@@ -341,86 +334,6 @@ export function candidateFingerprintOf(fileRevisions: Record<string, string>): s
 }
 
 
-/** JSONL 审计里单条 tool_result 的截断上限（全文走事件流，防 JSONL 膨胀）。 */
-const JSONL_TOOL_RESULT_CHAR_LIMIT = 4096
-
-
-
-/**
- * 判断是否为工具轮：content 为块数组且含 tool_use / tool_result。
- * （loop 的 messages 中 assistant 轮必含 tool_use、user 轮必含 tool_result——
- * 无工具即返回 completed，因此 messages 里实际没有纯文本轮，F4 窗口化对象是 tool 轮对。）
- */
-function isToolTurn(turn: ConversationTurn): boolean {
-  return Array.isArray(turn.content) && turn.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
-}
-
-
-/** 占用估算文本：text 正文 + tool_result 内容 + tool_use input 序列化 + image 占位（全块口径，r55 队友）。 */
-export function estimateBlocksText(blocks: MessageContentBlock[]): string {
-  return blocks
-    .map((b) => {
-      if (b.type === 'text') return b.text ?? ''
-      if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : ''
-      if (b.type === 'tool_use') return JSON.stringify(b.input ?? {})
-      if (b.type === 'image') return '[图片]' // clipboard-paste P1：防用量估算漏计图片块（占位口径，非 base64）
-      return ''
-    })
-    .join('\n')
-}
-
-
-/** 单轮占用估算（keep-recent 预算累加用；与 usage_summary 的 estContextTokens 同口径）。 */
-function turnEstTokens(turn: ConversationTurn): number {
-  return estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content))
-}
-
-
-/**
- * keep-recent 保留段（P1-1 三段式压缩）：竹节压缩重置时，在「task + 交接文档」之外
- * 保留最近的**原文**轮次——此前压缩一发生窗口历史归零，正常对话细节全丢（pi 参照：
- * 压缩 = 摘要 + 保留近 20k tokens 原文）。
- *
- * 语义（方案 §3.2）：
- * - 预算从尾向头累加（estimateTokenCount 既有估算器），保留集恒为 messages 的**连续后缀**
- *  （首个装不下的单元即停，不留「中空」历史）；
- * - tool_use/tool_result 成对保留（切点永不在 tool_result，按对计数（原窗口化路径同名语义，2026-10-03 已随其删除改述）
- *   配对保护先例）；纯文本轮（退行反馈/steer 注入等）独立成单元，不拆对；
- * - 装不下的整对丢弃（其内容由交接文档兜底）；首条 task（head）不进保留段——新首消息
- *   已含 task+交接；
- * - 交接文档优先级高于保留段（预算冲突先砍保留段）；钉轮不占保留预算（钉轮失败细节已由
- *   pinnedFailureExcerpt 进交接文档，语义共存）。
- */
-export function keepRecentTurns(messages: ConversationTurn[], budgetTokens: number): ConversationTurn[] {
-  if (budgetTokens <= 0 || messages.length <= 1) return []
-  const tail = messages.slice(1)
-  // 尾向头先切单元：user 工具轮与其前邻 assistant 工具轮合为一个完整对；其余独立成单元。
-  // units 为「从新到旧」序。
-  const units: ConversationTurn[][] = []
-  for (let i = tail.length - 1; i >= 0; i -= 1) {
-    const current = tail[i]!
-    if (current.role === 'user' && isToolTurn(current) && i >= 1) {
-      const prev = tail[i - 1]!
-      if (prev.role === 'assistant' && isToolTurn(prev)) {
-        units.push([prev, current])
-        i -= 1
-        continue
-      }
-    }
-    units.push([current])
-  }
-  const kept: ConversationTurn[] = []
-  let used = 0
-  for (const unit of units) {
-    const cost = unit.reduce((n, turn) => n + turnEstTokens(turn), 0)
-    if (used + cost > budgetTokens) break // 连续后缀：首个装不下的单元即停
-    kept.unshift(...unit)
-    used += cost
-  }
-  return kept
-}
-
-
 export function createToolState(delegationDepth = 0): AgentLoopToolState {
   return {
     test_failed: false,
@@ -435,18 +348,6 @@ export function createToolState(delegationDepth = 0): AgentLoopToolState {
     delegation_depth: delegationDepth,
   }
 }
-
-
-/** W2（Phase 10，2026-09-16，同步 Proma CompactContext）：显式压缩工具 compact_context 开关。
- * 缺省 off=字节级现状（工具不注册、loop 无显式触发路径）。对位 W1-E6 发现的「压缩失明」：
- * glm 渠道 input_tokens 恒 0 时自动触发器失效，模型可在完成大阶段后主动交接口收缩窗口。 */
-export function compactToolEnabled(): boolean {
-  return process.env.BLOMA_COMPACT_TOOL === '1' || process.env.BLOMA_COMPACT_TOOL === 'true'
-}
-
-
-/** W2：显式压缩次数上限（独立于自动压缩的 LOOP_MAX_COMPACTIONS=2；防模型滥用交接轮次烧额度）。 */
-export const MAX_EXPLICIT_COMPACTIONS = 4
 
 
 /** D2/D3 开关：验证工具返回的证据边界行 + 失败 [新增]/[持续] 标注。缺省 off=字节级现状。 */
@@ -489,9 +390,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     const { runPiSession } = await import('./pi-runtime')
     return await runPiSession(input)
   } finally {
-    // W1（Phase 10，预览浏览器工具族）：loop 结束即关同会话的持久浏览器句柄
-    // （开关 off 时无会话，重载 map 查找零成本）；看门狗仅作跨 run 泄漏兑底。
-    void closePreviewBrowserSession(input.sessionId).catch(() => undefined)
     if (isMainLoop) {
       const leftovers = drainSteerQueue(input.sessionId)
       if (leftovers.length > 0) {
@@ -502,7 +400,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             if (steerConfirmEnabled() && entry.steerId) settleSteerEntry(input.sessionId, entry.steerId, 'rejected')
           } else {
             // 内容不丢、并入对话历史：下一条消息/下一个 run 恢复时模型可见
-            appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapSteerContent(entry.content) }], 'user')
+            appendSessionMessage(input.sessionId,{role:'user',origin:'user',content:[{type:'text',text:wrapSteerContent(entry.content)}],timestamp:Date.now()})
             if (steerConfirmEnabled() && entry.steerId) settleSteerEntry(input.sessionId, entry.steerId, 'deferred_next_run')
           }
         }
@@ -611,30 +509,7 @@ export function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<
 }
 
 
-interface WhitespaceArtifactCleaner {
-  /** 喂入一个 text 增量，返回应立即放行的增量（0~2 段）。 */
-  push(text: string): string[]
-  /** 流结束/遇到非文本块：把挂起的空白如实放行（一次性，幂等）。 */
-  end(): string[]
-}
-
-
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.length > 500 ? `${message.slice(0, 500)}…` : message
-}
-
-
-/** loop 轮次落盘：assistant 轮（含 tool_use）与 user 轮（tool_result）照常 append JSONL。 */
-function appendLoopMessage(sessionId: string, role: 'assistant' | 'user', blocks: MessageContentBlock[], origin: 'user' | 'system' | 'agent' = role === 'user' ? 'system' : 'agent'): void {
-  appendSessionMessage(sessionId, {
-    role,
-    origin,
-    content: blocks.map((block) =>
-      block.type === 'tool_result' && typeof block.content === 'string' && block.content.length > JSONL_TOOL_RESULT_CHAR_LIMIT
-        ? { ...block, content: `${block.content.slice(0, JSONL_TOOL_RESULT_CHAR_LIMIT)}…[截断，全文见事件流]` }
-        : block,
-    ),
-    timestamp: Date.now(),
-  })
 }

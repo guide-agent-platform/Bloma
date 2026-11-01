@@ -3,7 +3,6 @@ import type { PrdBackplane } from '../../../main/model/prd-backplane'
 import { productionContext, inlineProductionContext } from '../../../main/desktop/production-context'
 import { parseLaunchDeclaration } from '../../../main/desktop/launch-smoke'
 import { bindAcceptance, requirementEvidenceHash } from '../../../main/project/requirement-contract'
-import { productionGuide } from '../../../main/desktop/production-guide'
 
 
 const fixture = () => bindAcceptance({ project_id: 'p', name: 'test', positioning: '离线待办',
@@ -56,9 +55,5 @@ describe('role-directed authoritative production context', () => {
     expect(packet.requirements_model.scenarios).toEqual(full.requirements_model.scenarios)
     expect(packet.requirements_model.sources).toBeUndefined()
     expect(full.requirements_model.sources).toEqual(prd.requirements_model!.sources)
-  })
-  it('derives resource guidance from the actual runtime rather than legacy default text', () => {
-    const guide = productionGuide('executor', { script_runs: 64, install_calls: 8 })
-    expect(guide).toContain('累计64次'); expect(guide).toContain('累计8次'); expect(guide).toContain('续接不清零')
   })
 })

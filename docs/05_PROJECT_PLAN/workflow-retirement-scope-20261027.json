@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "groups": [
     {
       "id": "legacy_retirement_boundary",
@@ -82,9 +82,6 @@
       "action": "keep_current_capabilities_and_verifiers",
       "reason": "Shared resource discovery, project preparation and independent capability verification were retained and migrated in batch B.",
       "paths": [
-        "main/desktop/component-library.ts",
-        "main/desktop/install-packages-tool.ts",
-        "main/desktop/skeleton-provision.ts",
         "main/desktop/process-driver.ts",
         "main/desktop/capability-verifiers.ts",
         "main/desktop/core-verification.ts",
@@ -156,9 +153,7 @@
       "id": "historical_schema_and_shared_diagnostics",
       "action": "keep_readers_no_execution",
       "reason": "Typed shared verification diagnostics; no retired workflow executor or automatic legacy production.",
-      "paths": [
-        "main/desktop/verification-outcome.ts"
-      ]
+      "paths": []
     },
     {
       "id": "connected_prompt_settings",
@@ -1024,6 +1019,366 @@
       "from_revision": "5ae0bc0",
       "git_blob": "5e27da82b207d6557b64253d023db49de1044fd7",
       "reason": "Retired guide/experiment protocol assertions or orphan declaration/driver tests; current scope, cancellation and data gates have direct regression coverage."
+    },
+    {
+      "path": "main/agent/loop/conversation-excerpt.ts",
+      "git_blob": "ba02f894cdafdc75e3fb9843099a139044aecbed",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/agent/prompting/user-facing-output.ts",
+      "git_blob": "675a9057182e9759ba81d47a656b862a34974119",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/channel-failure-watch.ts",
+      "git_blob": "877018f747b75eeff868730a49df3073c3dce789",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/check-env.ts",
+      "git_blob": "3578344c8487f8e6a4fb82cead610fdca90ee3a4",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/early-artifacts.ts",
+      "git_blob": "54735fb5e8bab6c9aa4669a4a35947887cbb7574",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/normal-startup-verification.ts",
+      "git_blob": "814cabf9b30182cb37c62ad54e1137c835ab0b9e",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/production-guide.ts",
+      "git_blob": "dd90789732f708522b3bd64a9f6b5677045b498e",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/production-history.ts",
+      "git_blob": "570b26db5ed1ad0459dabc00b01e376ded96bb4b",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/provider-qualification.ts",
+      "git_blob": "4554577fa7d6f661ea007366174287ad35be1bc1",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/source-write-audit.ts",
+      "git_blob": "f5055869f0ae06ac264ceb5d48e70d2be587b658",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/test-effectiveness.ts",
+      "git_blob": "c5d4563580147cd09b8bf369867e9f1d51ed697f",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/verification-outcome.ts",
+      "git_blob": "2648914f55f279db23853ceadab3a93f35214c12",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/review/review-delegation.ts",
+      "git_blob": "4de68750b949dd76b3a4470cfa9f3f61fcf1906e",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/coding/tool-handlers.ts",
+      "git_blob": "b2f6aaf40bc1bed0e03c1c9943fca9781b61eaba",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/coding/preview-runtime.ts",
+      "git_blob": "af01535c44ff266b199d14d83c06b17400f03a94",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/coding/preview-browser.ts",
+      "git_blob": "1c639f454bfc109987493d7d8c6e2bcd7669f22a",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/project/project-map.ts",
+      "git_blob": "e271f45c41492d25e98712e55192b7308dde8f05",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/driver-runner-tool.ts",
+      "git_blob": "6610e0bc1ee980e8630edee8f230fa1ab19348f5",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/drive-app-tool.ts",
+      "git_blob": "a6b9a3e78525f9afd9cba5f57e5e26400e094821",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/drive-app-session.ts",
+      "git_blob": "be1bb4e8c355ad684a9f0c1f58fb5b7485b42c33",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/desktop/drive-app-webview.ts",
+      "git_blob": "57098c5241f9859af1e8a0eae81dbd70512acb93",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "renderer/components/PointingGuide.tsx",
+      "git_blob": "bddcd9d340661bf3f023ff0d951642b2d35bbabf",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "renderer/components/SketchCharacterReminder.tsx",
+      "git_blob": "790bf962dcd19649699b7f0436d6ad394010169a",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "renderer/hooks/use-preview-pointing.ts",
+      "git_blob": "c9e2a6dcc089e134d3fea64db64b2ebaa2831103",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "scripts/ensure-vendor-express.mjs",
+      "git_blob": "33521d3e65679adb0a84f5b104c6580cf662fad8",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/conversation-excerpt.test.ts",
+      "git_blob": "68ead663b3eb3988f553ff89a580cf6e16884be9",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/channel-failure-watch.test.ts",
+      "git_blob": "6e3b8acfbe3c543995d07ec61e9a699019792051",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/check-env.test.ts",
+      "git_blob": "f8a9c6df3d5e55b746d127945fe8853275a661b6",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/normal-startup-verification.test.ts",
+      "git_blob": "f2fe7381fa64661e86ec1df5a85084964c8cfa6a",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/production-history.test.ts",
+      "git_blob": "533decd57c6c4ffa51bd704ad5885f4a2f39a473",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/provider-qualification.test.ts",
+      "git_blob": "f544129d61df12cf565697f2e61184ef7fb677ec",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/source-write-audit.test.ts",
+      "git_blob": "c80fc60568f495737fe085949e3a08e94d748559",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/test-effectiveness.test.ts",
+      "git_blob": "1d0704caef7edab6aeb794fd84e1fc3b7834cf47",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/review-delegation.test.ts",
+      "git_blob": "d5987887fe70ff731b69705205fcb1190660b92c",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/coding/preview-browser.test.ts",
+      "git_blob": "17e63059ebce012ac08c8c7d4953a494c34de163",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/project-map.test.ts",
+      "git_blob": "3f43ede737f406bc62a3bc7ca3d901d6f1c42e9b",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/driver-runner-tool.test.ts",
+      "git_blob": "befbf40b40894d44e2109d88995080fc35ef1aa5",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/drive-app-tool.test.ts",
+      "git_blob": "ae5906309250d1c663b912f0d5515d46b8c562bb",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "tests/unit/desktop/drive-app-webview.test.ts",
+      "git_blob": "39900f53ef520593a394aedf8ad5153264e9b336",
+      "reason": "No current application consumer; retired workflow implementation or exclusive test.",
+      "from_revision": "01f978d"
+    },
+    {
+      "path": "main/agent/loop/dsml-recovery.ts",
+      "from_revision": "68761a5",
+      "git_blob": "3beabdc2b5baa27c3270d4a4febafca756658b30",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/agent/loop/tool-input-validation.ts",
+      "from_revision": "68761a5",
+      "git_blob": "02edc8fcba1ebb2fdd22d8195c0a3a8cec324889",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/platform/mcp/skill-loader.ts",
+      "from_revision": "68761a5",
+      "git_blob": "40ec9887a8c46b4362741a6718853f67df6fbdb6",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/templates/tools/normal_startup_probe.py",
+      "from_revision": "68761a5",
+      "git_blob": "9b394b4c86f9cee2167cadee47af77dd42c9b9c8",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/agent-loop-parallel.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "329b88ebe990b7e69701de4635f3a5e25aefc7e9",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/coding/compact-tool.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "bca296a187f2c19fb3897476f05594e980fa0346",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/coding/dsml-recovery.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "76e29cb72b82bcf066103f39fe21454ffd740797",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/coding/task-workflow.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "a50a9078c237ccd3425a22399dbc4ba08a6d5902",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/loop-cost-limit.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "d8b58727d675f0d171d12c3fff7c8c26979f96ac",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/skill-loader.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "33bbf1336ec1928528f7c53cdfed9a8d8115e0c1",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/desktop/child-exec-tool.ts",
+      "from_revision": "68761a5",
+      "git_blob": "3fd7861c6717c783488b181b1f0b58424be01d13",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/desktop/component-library.ts",
+      "from_revision": "68761a5",
+      "git_blob": "a47274bfd1c6cb7185b2ad5c28b1d9080fb96f0a",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/desktop/execution-limits.ts",
+      "from_revision": "68761a5",
+      "git_blob": "da900c9cda438ab74e4ac758a2e95d5107298d86",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/desktop/install-packages-tool.ts",
+      "from_revision": "68761a5",
+      "git_blob": "12a3acfc3efe9d7ccc0f45b8ba03de1774310956",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/desktop/script-execution-facts.ts",
+      "from_revision": "68761a5",
+      "git_blob": "75fae96dc5b46698bb99895221dc46ba6a1ad4b7",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "main/desktop/skeleton-provision.ts",
+      "from_revision": "68761a5",
+      "git_blob": "4a582b43ccd974282e10ba32c4abd0c451facae7",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "scripts/prepare-experiment-environment.ts",
+      "from_revision": "68761a5",
+      "git_blob": "ff522184784ec5f06d728a96a19a1734e66e35c0",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/desktop/child-exec-tool.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "c1ea7585b7cce3c1ee0811035bba0774a1024a24",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/desktop/install-packages-tool.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "72dfe239ff2d717ebd81f04b6c503acaf293fda0",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/desktop/skeleton-provision.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "395690befa12970ddd182a53b5f0b88d394102ac",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
+    },
+    {
+      "path": "tests/unit/desktop/verification-receipts.test.ts",
+      "from_revision": "68761a5",
+      "git_blob": "87353185edf65a2eb7c05e538dca75a40b2b443c",
+      "reason": "Retired duplicated executor, skill reader, or unreachable workflow; active contracts tested through current Pi/software paths."
     }
   ]
 }

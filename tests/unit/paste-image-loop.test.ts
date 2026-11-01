@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAgentLoop, estimateBlocksText, type AgentLoopInput } from '../../main/agent/loop/agent-loop'
+import { runAgentLoop, type AgentLoopInput } from '../../main/agent/loop/agent-loop'
 import { anthropicMessagesQueryViaProviders } from '../../main/platform/upstream/providers/loop-query'
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
@@ -127,23 +127,6 @@ describe('runAgentLoop 图片贯通（clipboard-paste）', () => {
     // Pi uses typed content blocks, including text-only prompts.
     const firstUser = received[0].find((t) => t.role === 'user')
     expect(firstUser?.content).toEqual([{type:'text',text:'看看这张图'}])
-  })
-})
-
-describe('estimateBlocksText 图片口径（usage-guard 正确性加固）', () => {
-  it('[S4-AGENT-094] image 块贡献 [图片] 占位而非空串/丢帧；既有三类口径不变', () => {
-    const blocks: MessageContentBlock[] = [
-      { type: 'text', text: '正文' },
-      { type: 'image', imageId: 's/x.png', media_type: 'image/png' },
-      { type: 'tool_use', id: 't1', name: 'edit_file', input: { a: 1 } },
-      { type: 'tool_result', tool_use_id: 't1', content: '结果' },
-    ]
-    const text = estimateBlocksText(blocks)
-    expect(text).toContain('正文')
-    expect(text).toContain('[图片]')
-    expect(text).toContain('结果')
-    // 纯 image 块数组也不空
-    expect(estimateBlocksText([{ type: 'image', imageId: 's/x.png', media_type: 'image/png' }])).toBe('[图片]')
   })
 })
 
