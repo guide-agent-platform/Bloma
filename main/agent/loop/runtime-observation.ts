@@ -45,7 +45,7 @@ function adapterFingerprint(): string {
     const own = fileURLToPath(import.meta.url)
     // Bundled production code is one artifact; source-mode tests fingerprint the
     // executing adapter modules, not a git label or the user's dirty worktree.
-    const files = own.endsWith('.ts') ? ['runtime-observation.ts', 'pi-runtime.ts', 'pi-transport.ts', 'pi-messages.ts', 'pi-session-store.ts', 'agent-loop.ts', '../tools/active-skills.ts', '../../platform/llm/model-context.ts'].map(f => join(dirname(own), f)) : [own]
+    const files = own.endsWith('.ts') ? ['runtime-observation.ts', 'pi-runtime.ts', 'pi-transport.ts', 'pi-messages.ts', 'pi-session-store.ts', 'agent-loop.ts', '../tools/active-skills.ts', '../../platform/mcp/skill-catalog.ts', '../../platform/llm/model-context.ts'].map(f => join(dirname(own), f)) : [own]
     return runtimeHash(files.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')))
   } catch { return 'unknown' }
 }

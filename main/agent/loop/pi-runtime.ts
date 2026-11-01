@@ -4,7 +4,6 @@ import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-age
 import { getPromaHome } from '../../../storage/config-paths'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
 import { findProject } from '../../project/project-service'
-import { prepareTaskWithSkills } from '../../platform/mcp/skill-loader'
 import { renderLearningsSection } from '../../project/learnings-log'
 import { prepareRecallBlock } from './session-recall'
 import { createToolState, executeToolCall, candidateFingerprintOf, type AgentLoopInput, type AgentLoopResult,
@@ -313,7 +312,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         }
       }
     })
-    const [prepared, recall] = await Promise.all([prepareTaskWithSkills(input.task, cwd),
+    const [prepared, recall] = await Promise.all([activeSkills.prepareTask(input.task),
       prepareRecallBlock(input.task, input.delegationDepth ?? 0, `${input.sessionId}.jsonl`, { projectId: input.projectId })])
     const learnings = (input.delegationDepth ?? 0) === 0 ? renderLearningsSection(input.projectId) : ''
     input.onRuntimeObservation?.(observePiRuntime(input, { names: prepared.activatedSkills,
