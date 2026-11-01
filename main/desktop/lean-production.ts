@@ -136,6 +136,11 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   }
   const collaboration = createSoftwareCollaborationPolicy(input.projectId, project.root_path, input.sessionId)
   const quality = createQualityReview(input.projectId, input.sessionId, collaboration)
+  const observeRuntime = (observation: import('../agent/loop/runtime-observation').RuntimeObservation) => {
+    const review = readQualityLedger(input.projectId).reviews.find(r => r.child === observation.session_id)
+    recordEvaluationEvent(input.projectId, 'runtime_identity', { observation: { ...observation,
+      ...(review ? { quality_role: review.kind === 'visual' ? 'V' : 'C' } : {}) } })
+  }
   const versionOf = () => {
     const current = readPrdBackplane(input.projectId)
     const rules = [guiSuitePath(input.projectId), cliSuitePath(input.projectId)].map(file =>
@@ -229,6 +234,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     delegationMaxTurns: 24, permissionMode: 'allow-all', temperature: .1, system, editFormat: 'diff', runtime: 'pi', runtimeScope: 'lean-build',
     executionScope: budget.executionScope, materials: sessionMaterials(input.projectId, input.sessionId), publish: emit,
     childMaterialsBuilder: child => quality.isQualityChild(child) ? undefined : sessionMaterials(input.projectId, input.sessionId),
+    onRuntimeObservation: observeRuntime,
     ...(({ maxConcurrentDelegations: 2, allowChannelOverrides: false, delegationSummaryLimit: 3000,
       prepareDelegation: quality.prepare,
       childSystemBuilder: (_role: import('../../shared/delegation-run-context').DelegationRunRole, child: string) =>
@@ -249,6 +255,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       let result: Awaited<ReturnType<typeof runAgentLoop>> | undefined, modelBudgetStop: string | undefined
       if (initialBudgetStop) { modelBudgetStop = initialBudgetStop; initialBudgetStop = undefined }
       else try { result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'lean-build', system, task, query, env: input.env, tools,
+        onRuntimeObservation: observeRuntime,
         projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, signal: runSignal,
         maxTokens: Math.min(input.maxTokens, 16384), maxTurns, permissionMode: 'allow-all', workMode: 'implementation', executionScope: budget.executionScope,
         materials: sessionMaterials(input.projectId, input.sessionId), images: initial ? input.images : undefined,

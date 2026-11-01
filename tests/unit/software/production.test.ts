@@ -12,6 +12,7 @@ import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/stag
 import { runCoreVerification } from '../../../main/desktop/core-verification'
 import { activeSoftwareRelease } from '../../../main/software/release-store'
 import { launchSoftwareForUser } from '../../../main/software/user-launch'
+import { createEvaluationProtocol, stageEvaluationRun } from '../../../main/software/harness-evaluation'
 
 let home: string, previous: string | undefined
 beforeEach(() => { previous = process.env.PROMA_HOME; home = mkdtempSync(join(tmpdir(), 'bloma-software-loop-')); process.env.PROMA_HOME = home })
@@ -23,6 +24,8 @@ it.each(['quick', 'longterm'] as const)('real Pi software loop writes JS, builds
     { projectId: project.project_id, sessionId: 's', source: '计算加法', previous: readPrdBackplane(project.project_id), software: true })!
   if (parsed.action !== 'brief') throw Error('fixture')
   syncDocuments({ request_id: 'sync', project_id: project.project_id, session_id: 's', checkpoint: 'requirement_confirmed' }, parsed.brief); markPrdUserConfirmed(project.project_id)
+  const confirmed=readPrdBackplane(project.project_id)
+  stageEvaluationRun(project.project_id,createEvaluationProtocol([{id:'sum',goal:confirmed.positioning,delivery:'command',requirements:confirmed.requirements.map(r=>({description:r.description,expected:confirmed.acceptance[r.id]})),constraints:confirmed.constraints??[],out_of_scope:confirmed.out_of_scope??[]}]),'sum','single','production-identity')
   const calls: SDKQueryOptions[] = [], events: Array<{ type: string; payload: Record<string, unknown> }> = []
   const use = (id: string, name: string, input: Record<string, unknown>) => ({ type: 'tool_use' as const, id, name, input })
   const query: SDKQuery = async function* (_prompt, options) {
@@ -49,6 +52,11 @@ it.each(['quick', 'longterm'] as const)('real Pi software loop writes JS, builds
   expect(readFileSync(join(project.root_path, 'dist/app.cjs'), 'utf8')).toContain('console.log')
   expect(existsSync(join(project.root_path, 'app.py'))).toBe(false)
   expect(calls).toHaveLength(2)
+  const evaluation=readFileSync(join(home,'harness-evaluation',project.project_id,'events.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line))
+  const observed=evaluation.filter(e=>e.kind==='runtime_identity').map(e=>e.data.observation)
+  expect(observed.some(o=>o.role==='orchestrator'&&o.runtime.packages['pi-coding-agent']==='0.85.1')).toBe(true)
+  expect(observed.some(o=>o.quality_role==='C'&&o.role==='review')).toBe(true)
+  expect(evaluation.some(e=>e.kind==='collaboration_selected'&&e.data.selection.required.includes('code'))).toBe(true)
   expect(JSON.stringify(calls[0].messages)).not.toContain('schema_version\\":1,\\"command\\":[\\"python\\"')
   expect(events.some(event => event.type === 'stage_changed' && event.payload.stage === 'delivered')).toBe(true)
   expect(isDesktopLineActive({ ...findProject(project.project_id), desktop_phase: undefined })).toBe(true)

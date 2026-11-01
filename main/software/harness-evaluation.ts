@@ -9,13 +9,14 @@ import { prdScopeFingerprint, trustedAcceptance } from '../project/requirement-c
 import { readIndependentPolicy } from './independent-design'
 import { independentPolicyDigest } from './independent-policy'
 import { readConfirmedUxBinding } from '../project/ux-binding'
+import { currentEvaluationStrategy, summarizeRuntimeObservations, sameEvaluationStrategyExceptB, type EvaluationStrategy } from './evaluation-identity'
 
 export interface EvaluationTask {id:string;goal:string;delivery:'browser'|'desktop'|'command';requirements:Array<{description:string;expected:string}>;constraints:string[];out_of_scope:string[]}
 export interface EvaluationProtocol {version:1;id:string;mode:'offline'|'paid';budget_rmb:number;tasks:EvaluationTask[];digest:string}
-export interface EvaluationBinding {version:1;run_id:string;project_id:string;task_id:string;variant:'single'|'independent';protocol:EvaluationProtocol;scope:string;design_hash?:string;independent_policy_digest?:string;at:string}
+export interface EvaluationBinding {version:1|2;run_id:string;project_id:string;task_id:string;variant:'single'|'independent';protocol:EvaluationProtocol;scope:string;design_hash?:string;independent_policy_digest?:string;strategy?:EvaluationStrategy;at:string}
 export interface EvaluationEvent {version:1;seq:number;event_id:string;host_id:string;at:number;kind:string;data:Record<string,unknown>}
 const hostId=randomUUID(),poisoned=new Set<string>()
-const sha=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const sha=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)??'null').digest('hex')
 function folder(projectId:string){if(!/^[A-Za-z0-9_-]+$/.test(projectId))throw Error('EVALUATION_PROJECT_INVALID');return join(getPromaHome(),'harness-evaluation',projectId)}
 /** Confirmation scope includes project ID; paired delegated designs must not. */
 function evaluationDesignHash(projectId:string){
@@ -85,7 +86,7 @@ export function bindEvaluationRun(projectId:string,protocol:EvaluationProtocol,t
   if((readIndependentPolicy(projectId)?.enabled===true)!==(variant==='independent'))throw Error('EVALUATION_VARIANT_ROUTE_MISMATCH')
   const file=join(folder(projectId),'binding.json')
   if(existsSync(file))throw Error('EVALUATION_RUN_ALREADY_BOUND: 保留原失败记录，另用新隔离项目')
-  const value:EvaluationBinding={version:1,run_id:runId,project_id:projectId,task_id:taskId,variant,protocol,scope:prdScopeFingerprint(brief),design_hash:evaluationDesignHash(projectId),independent_policy_digest:independentPolicyDigest(projectId),at:new Date().toISOString()}
+  const value:EvaluationBinding={version:2,run_id:runId,project_id:projectId,task_id:taskId,variant,protocol,scope:prdScopeFingerprint(brief),design_hash:evaluationDesignHash(projectId),independent_policy_digest:independentPolicyDigest(projectId),strategy:currentEvaluationStrategy(variant==='independent'),at:new Date().toISOString()}
   writeTextFileAtomic(file,JSON.stringify(value));recordEvaluationEvent(projectId,'bound',{run_id:runId});return value
 }
 /** Optional observation only. A broken collector cannot create usable study
@@ -100,18 +101,23 @@ export function recordEvaluationEvent(projectId:string,kind:string,data:Record<s
     if(previous.length>=20000)throw Error('EVALUATION_EVENT_LIMIT')
     mkdirSync(base,{recursive:true})
     const event:EvaluationEvent={version:1,seq:previous.length+1,event_id:randomUUID(),host_id:hostId,at,kind,data:{...data,
-      ...(poisoned.has(base)?{recording_error:true}:{}),scope_current:prdScopeFingerprint(readPrdBackplane(projectId)),variant_current:readIndependentPolicy(projectId)?.enabled?'independent':'single',independent_policy_digest_current:independentPolicyDigest(projectId),design_current:evaluationDesignHash(projectId)}}
+      ...(poisoned.has(base)?{recording_error:true}:{}),strategy_current:currentEvaluationStrategy(readIndependentPolicy(projectId)?.enabled===true),scope_current:prdScopeFingerprint(readPrdBackplane(projectId)),variant_current:readIndependentPolicy(projectId)?.enabled?'independent':'single',independent_policy_digest_current:independentPolicyDigest(projectId),design_current:evaluationDesignHash(projectId)}}
     appendFileSync(events,JSON.stringify(event)+'\n');return true
   }catch(error){poisoned.add(base);console.warn('Evaluation evidence unavailable:',String(error).slice(0,160));return false}
 }
 export function summarizeEvaluation(binding:EvaluationBinding,events:EvaluationEvent[]){
   validateEvaluationProtocol(binding.protocol)
   const issues:string[]=[],seen=new Set<string>()
+  if(binding.version!==2||!binding.strategy)issues.push('legacy strategy identity missing')
+  else if(!/^[a-f0-9]{64}$/.test(binding.strategy.implementation_sha256)||sha(binding.strategy)!==sha({...currentEvaluationStrategy(binding.variant==='independent'),implementation_sha256:binding.strategy.implementation_sha256}))issues.push('strategy identity invalid')
+  const runtimeIdentity=summarizeRuntimeObservations(events)
+  issues.push(...runtimeIdentity.issues)
   let previous=-Infinity
   for(const [index,event]of events.entries()){
     if(event.version!==1||event.seq!==index+1||seen.has(event.event_id)||!Number.isFinite(event.at)||event.at<previous)issues.push('invalid event sequence')
     seen.add(event.event_id);previous=event.at
     if(event.data.recording_error)issues.push('recording failure')
+    if(binding.strategy&&!['accounting_snapshot','defect_audit','user_intervention'].includes(event.kind)&&sha(event.data.strategy_current)!==sha(binding.strategy))issues.push('execution strategy changed or unknown')
     if(event.data.scope_current!==binding.scope)issues.push('confirmed target changed')
     if(!['accounting_snapshot','defect_audit','user_intervention'].includes(event.kind)&&event.data.variant_current!==binding.variant)issues.push('execution route changed or unknown')
     if(binding.independent_policy_digest&&!['accounting_snapshot','defect_audit','user_intervention'].includes(event.kind)&&event.data.independent_policy_digest_current!==binding.independent_policy_digest)issues.push('acceptance policy changed or unknown')
@@ -147,6 +153,9 @@ export function summarizeEvaluation(binding:EvaluationBinding,events:EvaluationE
       const bytes=readFileSync(proof.ledger_path)
       if(createHash('sha256').update(bytes).digest('hex')!==proof.ledger_sha256)throw Error('ledger bytes changed')
       const entries=bytes.toString('utf8').split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line))
+      for(const entry of entries.filter(entry=>entry.event==='query_started'&&['loop','handoff'].includes(entry.scope)&&entry.role!=='acceptance_designer')){
+        if(!runtimeIdentity.observations.some(o=>o.session_id===entry.session_id&&o.request_id===entry.run_id&&o.route.model===entry.model&&new URL(o.route.endpoint_origin).host===entry.endpoint_host))issues.push('model request has no matching runtime identity')
+      }
       if(entries.some(entry=>entry.project_id!==binding.project_id))throw Error('foreign project accounting')
       if(entries.some(entry=>entry.event==='transport_started'&&(typeof entry.query_id!=='string'||!Number.isSafeInteger(entry.transport_index)||entry.transport_index<1)))throw Error('transport identity missing')
       physicalRequests=new Set(entries.filter(entry=>entry.event==='transport_started').map(entry=>`${entry.query_id}:${entry.transport_index}`)).size
@@ -186,6 +195,7 @@ export function summarizeEvaluation(binding:EvaluationBinding,events:EvaluationE
     }catch(error){issues.push(`defect audit invalid: ${String(error)}`);missed=null;falsePositives=null}
   }
   return{run_id:binding.run_id,task_id:binding.task_id,variant:binding.variant,mode:binding.protocol.mode,budget_rmb:binding.protocol.budget_rmb,
+    variant_meaning:binding.variant==='single'?'B disabled; C/V and workers remain policy-driven':'B enabled; C/V and workers remain policy-driven',strategy:binding.strategy??null,runtime_identity:runtimeIdentity,
     status:end?.data.status??'incomplete',comparable:issues.length===0,issues:[...new Set(issues)],
     first_trial_ms:start&&trial?trial.at-start.at:null,delivery_ms:start&&end?.data.status==='delivered'?end.at-start.at:null,
     elapsed_ms:start&&end?end.at-start.at:null,product_repair_ms:productRepair,harness_repair_ms:harnessRepair,unclassified_repair_ms:unknownRepair,
@@ -208,8 +218,10 @@ export function evaluationReport(directories:string[]){
     const independent=matches.length===1&&singles.length===1?matches[0]:undefined
     const isolated=Boolean(independent&&independent.binding.project_id!==single.binding.project_id&&independent.binding.run_id!==single.binding.run_id)
     const sameImplementation=Boolean(independent&&sha(single.summary.implementation_models)===sha(independent.summary.implementation_models)&&sha(single.summary.implementation_hosts)===sha(independent.summary.implementation_hosts))
+    const sameRuntime=Boolean(independent&&single.summary.runtime_identity.parent_profile_sha256&&single.summary.runtime_identity.parent_profile_sha256===independent.summary.runtime_identity.parent_profile_sha256
+      &&sameEvaluationStrategyExceptB(single.binding.strategy,independent.binding.strategy))
     return{task_id:single.binding.task_id,single:single.binding.run_id,independent:independent?.binding.run_id??null,
-      comparable:Boolean(independent&&isolated&&sameImplementation&&single.summary.comparable&&independent.summary.comparable),reason:!independent?'missing or ambiguous fixed-target/budget/design peer':!isolated?'paired runs must use separate projects and run IDs':!sameImplementation?'implementation model/channel changed':!single.summary.comparable||!independent.summary.comparable?'run evidence incomplete or invalid':null}
+      comparison_axis:'independent_design_B_only',comparable:Boolean(independent&&isolated&&sameImplementation&&sameRuntime&&single.summary.comparable&&independent.summary.comparable),reason:!independent?'missing or ambiguous fixed-target/budget/design peer':!isolated?'paired runs must use separate projects and run IDs':!sameImplementation?'implementation model/channel changed':!sameRuntime?'runtime, context, tools, skills or non-B strategy changed/unknown':!single.summary.comparable||!independent.summary.comparable?'run evidence incomplete or invalid':null}
   })
   return{version:1,runs:runs.map(run=>run.summary),pairs,decision:'真实付费对照尚未执行时，不能得出引入第二模型的收益结论；不计算模型可靠性成功率。'}
 }

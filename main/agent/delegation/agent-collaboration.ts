@@ -344,6 +344,7 @@ async function runChildLoop(opts: {
     executionScope: parentCtx.executionScope,
     runtime: parentCtx.runtime,
     runtimeScope: parentCtx.runtimeScope,
+    onRuntimeObservation: parentCtx.onRuntimeObservation,
     permissionMode: parentCtx.permissionMode,
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,

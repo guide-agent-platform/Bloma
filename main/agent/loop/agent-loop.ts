@@ -246,6 +246,8 @@ export interface AgentLoopInput {
   onTurn?: (info: AgentLoopTurnInfo) => void
   /** W1-E1 压缩观测回调（埋点 agent_loop_compact：压缩发生或首次跳过；不影响行为） */
   onCompaction?: (info: AgentLoopCompactionInfo) => void
+  /** Host observation only; does not grant tools or alter execution policy. */
+  onRuntimeObservation?: (info: import('./runtime-observation').RuntimeObservation) => void
   /** W2-E3 检查点回调（事件驱动：steer/验证工具/压缩/终态时触发；编排层接持久化，loop 内零 IO） */
   onCheckpoint?: (snapshot: LoopCheckpointSnapshot) => void
   /** B3（P0-B）：技术合同清单（plan 腿 filesToTouch 路径，编排器透传；仅开关 on 时参与

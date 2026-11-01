@@ -10,6 +10,9 @@ import { syncDocuments } from '../../../main/project/document-sync'
 import { createEvaluationProtocol, bindEvaluationRun, stageEvaluationRun, activatePendingEvaluation, recordEvaluationEvent, summarizeEvaluation, evaluationReport, type EvaluationBinding, type EvaluationEvent, type EvaluationTask } from '../../../main/software/harness-evaluation'
 import { configureIndependentPolicy } from '../../../main/software/independent-policy'
 import { saveSoftwareRunState, recordSoftwareRepair } from '../../../main/software/run-state'
+import { observePiRuntime } from '../../../main/agent/loop/runtime-observation'
+import type { AgentLoopInput } from '../../../main/agent/loop/agent-loop'
+import { currentEvaluationStrategy } from '../../../main/software/evaluation-identity'
 
 let home:string,old:string|undefined,project:ReturnType<typeof createProject>
 const task:EvaluationTask={id:'five',goal:'输出5',delivery:'command',requirements:[{description:'输出5',expected:'显示5'}],constraints:['离线'],out_of_scope:['云同步']}
@@ -50,15 +53,16 @@ function evidence(binding:EvaluationBinding,directory=home){
 }
 function trace(binding:EvaluationBinding,success=true,directory=home):EvaluationEvent[]{
   const proof=evidence(binding,directory)
+  const observation=observePiRuntime({sessionId:'fixture-session',requestId:binding.run_id,system:'fixture',tools:[],env:{ANTHROPIC_MODEL:'fixture-a',ANTHROPIC_BASE_URL:'https://offline.invalid/v1',ANTHROPIC_PROVIDER_TYPE:'fixture'},permissionMode:'allow-all',maxTokens:1024,maxTurns:5} as unknown as AgentLoopInput,{names:[],content:''},'')
   const data:Array<[number,string,Record<string,unknown>]>=[
-    [1000,'operation_started',{}],[1100,'run_state',{status:'running'}],[1500,'trial_ready',{}],
+    [1000,'operation_started',{}],[1100,'run_state',{status:'running'}],[1200,'runtime_identity',{observation}],[1500,'trial_ready',{}],
     [2000,'verification_result',{status:'failed',category:'product_assertion'}],[2100,'repair_started',{category:'product_assertion'}],
     [2600,'run_state',{status:'verifying'}],[2800,'verification_result',{status:'unverified',category:'test_adapter'}],
     [2900,'repair_started',{category:'test_adapter'}],[3200,'run_state',{status:'verifying'}],
     [4000,success?'delivery_final':'run_state',{status:success?'delivered':'cancelled'}],
     [4100,'accounting_snapshot',proof.accounting],[4200,'defect_audit',proof.audit]
   ]
-  return data.map(([at,kind,data],index)=>({version:1,seq:index+1,event_id:`event-${index}`,host_id:'owned-host',at,kind,data:{...data,scope_current:binding.scope,variant_current:binding.variant,independent_policy_digest_current:binding.independent_policy_digest,design_current:binding.design_hash}}))
+  return data.map(([at,kind,data],index)=>({version:1,seq:index+1,event_id:`event-${index}`,host_id:'owned-host',at,kind,data:{...data,strategy_current:binding.strategy,scope_current:binding.scope,variant_current:binding.variant,independent_policy_digest_current:binding.independent_policy_digest,design_current:binding.design_hash}}))
 }
 it('seals fixed goals/budgets and rejects changed protocols, unknown routes, repeated binding and paid studies without fresh authorization',()=>{
   const protocol=createEvaluationProtocol([task]);const changed=structuredClone(protocol);changed.tasks[0].requirements[0].expected='99'
@@ -125,10 +129,38 @@ it('separates actual B requests from the total and rejects a disguised single-mo
   expect(summarizeEvaluation(binding,events).issues).toContain('acceptance designer model is not distinct')
 })
 it('retains failed offline peers and rejects unmatched task/budget/design pairings; exports reproducible CLI report inputs',()=>{
-  const single=bind(),other:EvaluationBinding={...single,project_id:'offline-peer',run_id:'independent-1',variant:'independent'}
+  const single=bind(),other:EvaluationBinding={...single,project_id:'offline-peer',run_id:'independent-1',variant:'independent',strategy:currentEvaluationStrategy(true)}
   const directory=resolve('run-artifacts/harness-evaluation-offline-20261027'),left=join(directory,'single'),right=join(directory,'independent')
   for(const [binding,path,passed]of [[single,left,false],[other,right,true]] as const){mkdirSync(path,{recursive:true});writeFileSync(join(path,'binding.json'),JSON.stringify(binding));writeFileSync(join(path,'events.jsonl'),trace(binding,passed,path).map(event=>JSON.stringify(event)).join('\n'))}
   const report=evaluationReport([left,right]);expect(report.runs).toHaveLength(2);expect(report.runs[0].status).toBe('cancelled');expect(report.pairs[0].comparable).toBe(true)
   other.design_hash='changed';writeFileSync(join(right,'binding.json'),JSON.stringify(other));expect(evaluationReport([left,right]).pairs[0].comparable).toBe(false)
   other.design_hash=single.design_hash;writeFileSync(join(right,'binding.json'),JSON.stringify(other))
+})
+
+it('does not label B-off as a solo agent and rejects missing, changed or legacy runtime identity',()=>{
+  const binding=bind(),events=trace(binding)
+  const summary=summarizeEvaluation(binding,events)
+  expect(summary.variant_meaning).toContain('C/V and workers remain')
+  expect(summary.strategy).toMatchObject({independent_design:'disabled',code_review:'candidate-risk-v1',visual_review:'candidate-risk-v1'})
+  expect(summary.runtime_identity.actual_roles).toEqual(['orchestrator'])
+  const missing=events.filter(e=>e.kind!=='runtime_identity').map((e,i)=>({...e,seq:i+1}))
+  expect(summarizeEvaluation(binding,missing).issues).toContain('parent runtime identity missing')
+  expect(summarizeEvaluation({...binding,version:1,strategy:undefined},events).issues).toContain('legacy strategy identity missing')
+  const original=events.find(e=>e.kind==='runtime_identity')!
+  const changed=structuredClone(original);changed.event_id='changed';changed.seq=events.length+1;changed.at=4300
+  ;(changed.data.observation as ReturnType<typeof observePiRuntime>).settings.contextWindow=64000
+  expect(summarizeEvaluation(binding,[...events,changed]).issues).toContain('parent runtime identity changed')
+  original.data.observation={}
+  expect(summarizeEvaluation(binding,events).issues).toContain('runtime identity invalid or unknown')
+})
+
+it('refuses a B comparison when tools or skill content changed despite identical model/host labels',()=>{
+  const left=bind(),right:EvaluationBinding={...left,project_id:'peer',run_id:'peer-run',variant:'independent',strategy:currentEvaluationStrategy(true)}
+  const folders=[join(home,'left'),join(home,'right')]
+  const traces=[trace(left,true,folders[0]),trace(right,true,folders[1])]
+  const save=()=>[left,right].forEach((binding,i)=>{writeFileSync(join(folders[i],'binding.json'),JSON.stringify(binding));writeFileSync(join(folders[i],'events.jsonl'),traces[i].map(e=>JSON.stringify(e)).join('\n'))})
+  save();expect(evaluationReport(folders).pairs[0]).toMatchObject({comparable:true,comparison_axis:'independent_design_B_only'})
+  const observation=traces[1].find(e=>e.kind==='runtime_identity')!.data.observation as ReturnType<typeof observePiRuntime>
+  observation.skills.content_sha256=hash('changed-skill');save()
+  expect(evaluationReport(folders).pairs[0]).toMatchObject({comparable:false,reason:'runtime, context, tools, skills or non-B strategy changed/unknown'})
 })

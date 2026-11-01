@@ -8,6 +8,7 @@ import { readPrdBackplane } from '../project/prd-store'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { activeSoftwareRelease, runtimeInventory } from './release-store'
 import { readQualityLedger, saveQualityLedger, sameIdentity, qualityHash, qualityIdentity, type Identity, type ReviewKind } from './quality-ledger'
+import { recordEvaluationEvent } from './harness-evaluation'
 
 export interface CollaborationSelection { version: 1; id: string; identity: Identity; baseline?: string
   risk: 'full' | 'visual_only' | 'unchanged'; required: ReviewKind[]; reasons: string[]; changed_paths: string[]; changed_count: number }
@@ -87,6 +88,7 @@ export async function selectQualityCollaboration(projectId: string, current: Ide
   const facts = { version: 1 as const, identity: current, baseline, risk, required, reasons, changed_paths: changed.slice(0,64), changed_count: changed.length }
   const selection: CollaborationSelection = { ...facts, id: qualityHash(facts) }
   const latest = readQualityLedger(projectId)
-  if (latest.collaboration?.at(-1)?.id !== selection.id) { (latest.collaboration ??= []).push(selection); saveQualityLedger(projectId, latest) }
+  if (latest.collaboration?.at(-1)?.id !== selection.id) { (latest.collaboration ??= []).push(selection); saveQualityLedger(projectId, latest)
+    recordEvaluationEvent(projectId, 'collaboration_selected', { selection }) }
   return selection
 }

@@ -20,6 +20,7 @@ import { estimateTokenCount } from './usage-guard'
 import { auditBlocks, importLegacyTurns, piImage, toTransportTurns } from './pi-messages'
 import { createPiTransport } from './pi-transport'
 import { openPiSession, recoverInterruptedTools } from './pi-session-store'
+import { observePiRuntime, PI_CONTEXT_POLICY, PI_RETRY_POLICY } from './runtime-observation'
 
 /** Proma bf3e98c / Pi 0.85.1: the SDK owns model/tool turns, retry,
  * persistence, queue draining and compaction. Bloma owns permissions, budgets,
@@ -78,8 +79,8 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     input.signal.throwIfAborted()
     const { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager } = await import('@earendil-works/pi-coding-agent')
     const agentDir = join(getPromaHome(), 'bloma-pi-runtime')
-    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens: 25600, keepRecentTokens: 20000 },
-      retry: { enabled: true, maxRetries: 2, baseDelayMs: 1000 } })
+    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens: PI_CONTEXT_POLICY.reserveTokens, keepRecentTokens: PI_CONTEXT_POLICY.keepRecentTokens },
+      retry: PI_RETRY_POLICY })
     const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
       noContextFiles: true, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
       appendSystemPrompt: [], agentsFilesOverride: () => ({ agentsFiles: [] }),
@@ -90,7 +91,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: null, refreshOnCreate: false })
     modelRuntime.registerProvider('bloma-transport', { api: 'openai-completions', baseUrl: 'http://127.0.0.1', apiKey: 'bloma-internal-bridge',
       models: [{ id: input.env.ANTHROPIC_MODEL || 'bloma-channel', name: 'Bloma channel', reasoning: true,
-        input: ['text', 'image'], contextWindow: 128000, maxTokens: input.maxTokens,
+        input: ['text', 'image'], contextWindow: PI_CONTEXT_POLICY.contextWindow, maxTokens: input.maxTokens,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] })
     const model = modelRuntime.getModel('bloma-transport', input.env.ANTHROPIC_MODEL || 'bloma-channel')!
     if (!opened.manager.buildSessionContext().messages.length) {
@@ -285,6 +286,8 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     const [prepared, recall] = await Promise.all([prepareTaskWithSkills(input.task, cwd),
       prepareRecallBlock(input.task, input.delegationDepth ?? 0, `${input.sessionId}.jsonl`, { projectId: input.projectId })])
     const learnings = (input.delegationDepth ?? 0) === 0 ? renderLearningsSection(input.projectId) : ''
+    input.onRuntimeObservation?.(observePiRuntime(input, { names: prepared.activatedSkills,
+      content: prepared.activatedSkills.length ? prepared.content.slice(0, prepared.content.length - input.task.length) : '' }, learnings + recall))
     const task = [learnings ? `<untrusted-memory source="learnings" trust="advisory">\n${learnings}\n</untrusted-memory>` : '', recall, prepared.content, recoveryContext()].filter(Boolean).join('\n')
     input.signal.throwIfAborted()
     await activeSession.prompt(task, { source: 'rpc', expandPromptTemplates: false, images: input.images?.map(piImage) })

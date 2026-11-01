@@ -39,6 +39,7 @@ export interface DelegationParentContext {
   childExtraTools?: AgentLoopTool[]
   /** Optional host registration before the child can execute tools. */
   onChildCreated?: (child: { delegationId: string; childSessionId: string }) => void
+  onRuntimeObservation?: (info: import('../loop/runtime-observation').RuntimeObservation) => void
 }
 export function resolveDelegationTurns(context: Pick<DelegationParentContext, 'maxTurns' | 'delegationMaxTurns' | 'delegationTurnLimits' | 'delegationTurnCaps'>, role: DelegationRunRole): number {
   const budget = context.delegationTurnLimits?.[role] ?? context.delegationMaxTurns

@@ -73,7 +73,7 @@
 | --- | --- | --- |
 | `package.json` 与已安装 `node_modules/@earendil-works/pi-coding-agent/package.json` | 三个Pi包锁定0.85.1，已安装版本相同 | 有具体上游版本差距；版本号本身不等于落后程度或升级收益 |
 | `main/agent/loop/pi-runtime.ts:81` | 自动压缩已开，reserve=25600、keepRecent=20000；合成模型contextWindow=128000 | 已有长任务能力；固定窗口可能不匹配真实渠道，也可能造成无益提前压缩，需要模型元数据与边界实测 |
-| `main/agent/loop/pi-runtime.ts:84`、`main/agent/loop/agent-loop.ts:754` | Pi禁用context files/extensions/skills等；Pi分支在通用skill hook之前返回 | 不能说现役制作链已继承Pi标准技能，也不能把旧 `/skill:` loader存在视为当前接线。先核对信任/预算边界，再做受控接入 |
+| `main/agent/loop/pi-runtime.ts`、`main/agent/loop/agent-loop.ts` | Pi原生context files/extensions/skills等关闭；但Pi适配器自己调用 `prepareTaskWithSkills`、召回及经验摘要 | 后续实施审计纠正：显式 `/skill:` 已接入现役Pi，不能判为完全未接线。原生自动发现与Bloma显式技能应分别记录，避免重复建设；见[实施审计](frontier-evaluation-pi-audit-20261101.md) |
 | `main/software/context-catalog.ts`、`main/desktop/production-context.ts` | 已有目录与按需详细资料 | 渐进披露不是缺失，应整合/扩展既有能力，避免新增另一套平行目录 |
 | `main/agent/loop/pi-runtime.ts:136` | 工具执行固定sequential；Pi内置工具关闭，调用Bloma自定义工具 | 存在探索只读并行的空间，但写操作、命令、取消和共享ctx状态不能直接并行化；上游codemode能力不会自动获得 |
 | `main/agent/loop/pi-transport.ts` | 传输、请求准入和usage走Bloma SDKQuery桥 | 上游provider直接HTTP修复未必生效；升级须测试桥接语义、thinking/images/usage和账本，而非只跑CLI |

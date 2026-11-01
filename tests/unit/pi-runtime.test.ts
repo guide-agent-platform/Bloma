@@ -55,10 +55,15 @@ describe('real upstream Pi AgentSession integration', () => {
     expect(result.toolCalls.filter(c => c.name === 'verify_app').every(c => c.failureKey?.startsWith('GUI_EXISTING_EXPECTATIONS_CHANGED:'))).toBe(true)
   }, 60000)
   it('executes tools through Pi, pairs transport results, persists native history and reports real usage', async () => {
+    const observed=vi.fn()
     const write = vi.fn(async () => ({ output: 'written', detail: { path: 'main.py' } }))
     const check = vi.fn(async () => ({ output: 'verified' }))
     const { query, received } = scripted([[call('w', 'write_file'), call('v', 'run_project_script')], [text('已修改并验证')]])
-    const result = await runAgentLoop(input(query, { tools: [tool('write_file', write), tool('run_project_script', check)] }))
+    const result = await runAgentLoop(input(query, { tools: [tool('write_file', write), tool('run_project_script', check)],onRuntimeObservation:observed,
+      env:{ANTHROPIC_AUTH_TOKEN:'secret-not-in-identity',ANTHROPIC_MODEL:'fixture',ANTHROPIC_BASE_URL:'https://user:password@fixture.invalid/v1?key=private',ANTHROPIC_PROVIDER_TYPE:'fixture'} }))
+    expect(observed).toHaveBeenCalledTimes(1)
+    expect(observed.mock.calls[0][0]).toMatchObject({runtime:{engine:'pi',packages:{'pi-coding-agent':'0.85.1'}},settings:{contextWindow:128000,tool_execution:'sequential'},route:{model:'fixture',endpoint_origin:'https://fixture.invalid'},skills:{mode:'explicit-bloma',names:[]}})
+    expect(JSON.stringify(observed.mock.calls)).not.toMatch(/secret-not-in-identity|password|key=private/)
     expect(result.status).toBe('completed')
     expect(write).toHaveBeenCalledTimes(1); expect(check).toHaveBeenCalledTimes(1)
     expect(result.files_changed).toEqual(['main.py'])
