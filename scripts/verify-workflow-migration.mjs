@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 const historicalVersion=process.env.BLOMA_MIGRATION_FIXTURE_VERSION??'lean-v1'
 if(!['lean-v1','unmarked'].includes(historicalVersion))throw Error('Invalid historical fixture version')
 const retirementText=historicalVersion==='lean-v1'?'lean-v1 制作流程已退役':'旧版生成流程已退役'
-const root=resolve('.'),home=mkdtempSync(join(tmpdir(),'blmigrate-')),folder=join(root,'run-artifacts/workflow-migration-20261027')
+const root=resolve('.'),home=mkdtempSync(join(tmpdir(),'blmigrate-')),folder=resolve(process.env.BLOMA_VALIDATION_OUTPUT??join(root,'run-artifacts/workflow-migration-20261027'))
 mkdirSync(folder,{recursive:true})
 const helper=join(folder,'fixture/main/migration-fixture.mjs'),env={...process.env,PROMA_HOME:home,BLOMA_DESKTOP_DISPATCH:'1',BLOMA_DISPATCH_EXPERIMENT:'1',BLOMA_MIGRATION_FIXTURE_VERSION:historicalVersion}
 delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL

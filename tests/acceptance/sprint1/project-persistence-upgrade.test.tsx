@@ -7,7 +7,7 @@ import { createStore, Provider } from 'jotai'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../../renderer/components/App'
-import { createProject, updateProject } from '../../../main/project/project-service'
+import { createProject, updateProject, findProject } from '../../../main/project/project-service'
 import { IPC_CHANNELS, type ApiResult, type ElectronAPI, type Project } from '../../../shared/types'
 import { createIpcHarness } from '../support/ipc-harness'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
@@ -64,6 +64,11 @@ describe('Sprint 1 project persistence and upgrade acceptance', () => {
       session_id: 'role-c-upgrade-session',
     }) as ApiResult<Project>
 
+    if(workflow==='legacy'){
+      expect(upgraded.ok).toBe(false)
+      expect(findProject(created.data.project_id)).toMatchObject({mode:'quick',current_stage:'completed'})
+      return
+    }
     expect(upgraded.ok).toBe(true)
     if (!upgraded.ok) throw new Error(upgraded.error.message)
     const snapshotDir = join(

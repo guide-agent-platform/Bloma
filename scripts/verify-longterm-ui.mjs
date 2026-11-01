@@ -6,7 +6,7 @@ import { join, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
-const root=resolve('.'),folder=join(root,'run-artifacts/longterm-ui-20261027'),home=mkdtempSync(join(tmpdir(),'blmilestone-'))
+const root=resolve('.'),folder=resolve(process.env.BLOMA_VALIDATION_OUTPUT??join(root,'run-artifacts/longterm-ui-20261027')),home=mkdtempSync(join(tmpdir(),'blmilestone-'))
 mkdirSync(folder,{recursive:true})
 const helper=join(folder,'fixture/main/longterm-ui-fixture.mjs'),env={...process.env,PROMA_HOME:home,BLOMA_DESKTOP_DISPATCH:'0',BLOMA_DISPATCH_EXPERIMENT:'0'}
 delete env.ELECTRON_RUN_AS_NODE;delete env.VITE_DEV_SERVER_URL

@@ -4,7 +4,7 @@ import os from 'node:os'
 import assert from 'node:assert/strict'
 import {createRequire} from 'node:module'
 import {_electron as electron} from 'playwright'
-const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'..'),out=path.join(root,'run-artifacts/flow-routing-ui-20261029'),home=fs.mkdtempSync(path.join(os.tmpdir(),'bloma-flow-routing-'))
+const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.env.BLOMA_VALIDATION_OUTPUT??path.join(root,'run-artifacts/flow-routing-ui-20261029')),home=fs.mkdtempSync(path.join(os.tmpdir(),'bloma-flow-routing-'))
 fs.mkdirSync(out,{recursive:true});let app,page
 const report={scope:'actual Bloma Electron settings and IPC in isolated home; invalid local fixture keys; no provider requests',cases:[],errors:[]},pass=name=>report.cases.push({name,status:'passed'})
 async function start(){const env={...process.env,PROMA_HOME:home};delete env.ELECTRON_RUN_AS_NODE;app=await electron.launch({executablePath:require('electron'),args:[`--user-data-dir=${path.join(home,'profile')}`,'.'],cwd:root,env});page=await app.firstWindow();page.on('pageerror',error=>report.errors.push(error.stack));await page.waitForLoadState('domcontentloaded')}

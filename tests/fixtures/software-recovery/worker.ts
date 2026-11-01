@@ -10,6 +10,7 @@ import { leanBudget } from '../../../main/desktop/lean-budget'
 import { readSoftwareRunState } from '../../../main/software/run-state'
 import { activeSoftwareRelease } from '../../../main/software/release-store'
 import type { SDKQuery } from '../../../main/orchestration/stages/orchestration-contracts'
+import { withEmptyQualityReview } from '../quality-review-query'
 
 export async function main() {
   const home = process.env.SOFTWARE_CRASH_HOME!, phase = process.env.SOFTWARE_CRASH_PHASE!
@@ -46,7 +47,7 @@ export async function main() {
       : [{ type: 'text', text: '交由宿主按当前文件实际验证。' }] } }
     yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
   }
-  await enterDesktopLine({ projectId: project.project_id, sessionId, requestId: phase, content: phase === 'before' ? '实现输出5' : '继续原任务', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, query, {},
+  await enterDesktopLine({ projectId: project.project_id, sessionId, requestId: phase, content: phase === 'before' ? '实现输出5' : '继续原任务', maxTokens: 4096, signal: AbortSignal.timeout(90000) }, withEmptyQualityReview(query), {},
     { publish: () => {}, persistAssistant: () => {}, persistSystem: () => {}, complete: () => {} })
   const release = await activeSoftwareRelease(project.project_id)
   writeFileSync(join(home, 'resumed.json'), JSON.stringify({ pid: process.pid, project: findProject(project.project_id), historyRestored, calls,

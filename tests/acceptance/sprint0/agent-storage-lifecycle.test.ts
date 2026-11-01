@@ -81,7 +81,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
       request_id: 'role-c-project',
       mode: 'quick',
       initial_message: '阶段验收项目',
-    })
+    }, {workflowVersion:'software-v1'})
 
     expect(project.root_path.startsWith(environment.home)).toBe(true)
     expect(listFilesRecursively(environment.home).map((path) => basename(path))).toContain('projects.json')
@@ -116,7 +116,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
   it('[S0-STORE-006] runAgent 后会话索引与消息读取可还原对话历史', async () => {
     environment = useTemporaryPromaHome('bloma-role-c-history-')
     setSDKQueryForTests(successfulQuery)
-    const project = createProject({ request_id: 'role-c-history-project', mode: 'quick' })
+    const project = createProject({ request_id: 'role-c-history-project', mode: 'quick' }, {workflowVersion:'software-v1'})
 
     await runAgent({
       request_id: 'role-c-history-req',
@@ -146,7 +146,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
 
   it('[S0-STORE-005] Sprint 0 运行产物不得创建 SQLite 或数据库连接配置', async () => {
     environment = useTemporaryPromaHome('bloma-role-c-no-db-')
-    createProject({ request_id: 'role-c-no-db-project', mode: 'quick' })
+    createProject({ request_id: 'role-c-no-db-project', mode: 'quick' }, {workflowVersion:'software-v1'})
     setSDKQueryForTests(successfulQuery)
     await runAgent(agentInput('role-c-no-db-session'))
 
@@ -251,7 +251,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
 })
 
 function agentInput(sessionId: string) {
-  const project = createProject({ request_id: `project-${sessionId}`, mode: 'quick' })
+  const project = createProject({ request_id: `project-${sessionId}`, mode: 'quick' }, {workflowVersion:'software-v1'})
   return {
     request_id: `request-${sessionId}`,
     session_id: sessionId,

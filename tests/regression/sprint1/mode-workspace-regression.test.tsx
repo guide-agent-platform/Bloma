@@ -70,7 +70,7 @@ describe('Sprint 1 mode and workspace regression', () => {
     expect(screen.getByRole('status').textContent).not.toMatch(/安全|放心|不会影响/)
 
     rerender(<WaitingFeedback elapsedSeconds={11} actionLabel="生成草图" />)
-    expect(screen.getByRole('status').textContent).toContain('安全环境')
+    expect(screen.getByRole('status').textContent).toContain('可以查看最近进展')
 
     rerender(
       <WaitingFeedback
@@ -80,7 +80,7 @@ describe('Sprint 1 mode and workspace regression', () => {
         onViewProgress={vi.fn()}
       />,
     )
-    expect(screen.getByRole('status').textContent).toContain('比预期更长')
+    expect(screen.getByRole('status').textContent).toContain('等待时间较长')
     expect(screen.getByRole('button', { name: '继续等待' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '查看进度' })).toBeTruthy()
   })

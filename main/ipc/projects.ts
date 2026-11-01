@@ -263,6 +263,7 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_FINALIZE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectFinalizeInput>(payload, ['project_id', 'session_id'])
+      if(hasRunForProject(input.project_id))throw Error('AGENT_PROJECT_BUSY: 当前任务结束后才能标记完成')
       const retirement=workflowRetirementReason(findProject(input.project_id));if(retirement)throw Error(retirement)
       if(isLongtermSoftware(input.project_id)){
         const state=readLongtermState(input.project_id),current=state?.milestones.find(item=>item.id===state.current_id)

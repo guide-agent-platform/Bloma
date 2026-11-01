@@ -26,6 +26,8 @@
     "test:acceptance:sprint2": "vitest run tests/acceptance/sprint2",
     "test:acceptance:sprint3": "vitest run tests/acceptance/sprint3",
     "test:electron-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-startup-smoke.ps1",
+    "test:platform-flows": "npm run build && node scripts/verify-platform-flows.mjs",
+    "test:fixtures:offline": "node scripts/prepare-offline-acceptance-fixtures.mjs",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:regression:sprint0 && npm run test:regression:sprint1 && npm run test:acceptance:sprint0 && npm run test:acceptance:sprint1 && npm run test:acceptance:sprint2 && npm run test:acceptance:sprint3",
     "lint": "tsc --noEmit",
     "docs:check": "node scripts/docs-check.mjs",

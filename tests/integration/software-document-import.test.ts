@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
+import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { createProject, updateProject } from '../../main/project/project-service'
 import { parseLeanBrief } from '../../main/guide/lean-brief'
@@ -14,8 +15,8 @@ import { runGuiAcceptance } from '../../main/desktop/gui-acceptance'
 
 // Optional real-parser acceptance. Point to an existing dependency directory;
 // never silently download packages or pretend a byte echo is PDF/Word parsing.
-const deps = process.env.SOFTWARE_DOC_IMPORT_TEST_DEPS
-const ready = !!deps && existsSync(join(deps, 'pdfjs-dist/legacy/build/pdf.js')) && existsSync(join(deps, 'mammoth/package.json'))
+const deps = process.env.SOFTWARE_DOC_IMPORT_TEST_DEPS ?? resolve('node_modules')
+const ready = existsSync(join(deps, 'pdfjs-dist/legacy/build/pdf.mjs')) && existsSync(join(deps, 'mammoth/package.json'))
 it.skipIf(!ready)('actual browser upload parses frozen PDF and DOCX, exports the text and handles a genuinely invalid PDF', async () => {
   const previous = process.env.PROMA_HOME, home = mkdtempSync(join(tmpdir(), 'bloma-real-doc-')); process.env.PROMA_HOME = home
   try {
@@ -34,7 +35,7 @@ it.skipIf(!ready)('actual browser upload parses frozen PDF and DOCX, exports the
     if (!address || typeof address === 'string') throw Error('port'); await new Promise<void>(done => probe.close(() => done()))
     writeFileSync(join(root, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Documents</title><input id="file" type="file"><button id="export">Export text</button><p id="status"></p><pre id="text"></pre><script>
 document.querySelector('#file').onchange=async e=>{const file=e.target.files[0];document.querySelector('#status').textContent='读取中';try{const response=await fetch('/import?name='+encodeURIComponent(file.name),{method:'POST',body:await file.arrayBuffer()});const result=await response.json();if(!response.ok)throw Error(result.error);document.querySelector('#text').textContent=result.text;document.querySelector('#status').textContent='已读取'}catch(error){document.querySelector('#status').textContent='无法读取文档: '+error.message}};document.querySelector('#export').onclick=()=>{const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([document.querySelector('#text').textContent]));link.download='text.txt';link.click()};</script>`)
-    writeFileSync(join(root, 'server.cjs'), `const fs=require('fs'),pdf=require(${JSON.stringify(join(deps!, 'pdfjs-dist/legacy/build/pdf.js'))}),mammoth=require(${JSON.stringify(join(deps!, 'mammoth'))});require('http').createServer((request,response)=>{if(request.url.startsWith('/import')){const parts=[];request.on('data',chunk=>parts.push(chunk));request.on('end',async()=>{try{const bytes=Buffer.concat(parts),name=new URL(request.url,'http://127.0.0.1').searchParams.get('name');let text;if(name.endsWith('.pdf')){const document=await pdf.getDocument({data:new Uint8Array(bytes),isEvalSupported:false}).promise;const page=await document.getPage(1);text=(await page.getTextContent()).items.map(item=>item.str).join(' ');await document.destroy()}else{text=(await mammoth.extractRawText({buffer:bytes})).value}response.setHeader('Content-Type','application/json');response.end(JSON.stringify({text}))}catch(error){response.writeHead(422,{'Content-Type':'application/json'});response.end(JSON.stringify({error:error.message}))}})}else{response.setHeader('Content-Type','text/html');response.end(fs.readFileSync('index.html'))}}).listen(${address.port},'127.0.0.1')`)
+    writeFileSync(join(root, 'server.cjs'), `const fs=require('fs'),pdf=import(${JSON.stringify(pathToFileURL(join(deps, 'pdfjs-dist/legacy/build/pdf.mjs')).href)}),mammoth=require(${JSON.stringify(join(deps!, 'mammoth'))});require('http').createServer((request,response)=>{if(request.url.startsWith('/import')){const parts=[];request.on('data',chunk=>parts.push(chunk));request.on('end',async()=>{try{const bytes=Buffer.concat(parts),name=new URL(request.url,'http://127.0.0.1').searchParams.get('name');let text;if(name.endsWith('.pdf')){const loading=(await pdf).getDocument({data:new Uint8Array(bytes),isEvalSupported:false});try{const document=await loading.promise;const page=await document.getPage(1);text=(await page.getTextContent()).items.map(item=>item.str).join(' ')}finally{await loading.destroy()}}else{text=(await mammoth.extractRawText({buffer:bytes})).value}response.setHeader('Content-Type','application/json');response.end(JSON.stringify({text}))}catch(error){response.writeHead(422,{'Content-Type':'application/json'});response.end(JSON.stringify({error:error.message}))}})}else{response.setHeader('Content-Type','text/html');response.end(fs.readFileSync('index.html'))}}).listen(${address.port},'127.0.0.1')`)
     writeFileSync(join(root, 'LAUNCH.json'), JSON.stringify({ schema_version: 2, ui: 'browser', url: `http://127.0.0.1:${address.port}`, command: ['node', 'server.cjs'] }))
     const input = { fixtures: ['sample.pdf', 'sample.docx', 'broken.pdf'].map(file => ({ path: `input/${file}`, source: `fixtures/${file}` })),
       steps: [{ id: 'pdf', kind: 'upload', selector: '#file', path: 'input/sample.pdf' }, { id: 'pdf-text', kind: 'expect', selector: '#text', contains: 'Frozen PDF contract text' },

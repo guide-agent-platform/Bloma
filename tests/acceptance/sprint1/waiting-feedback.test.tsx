@@ -65,7 +65,7 @@ describe('Sprint 1 waiting feedback acceptance', () => {
         actionLabel="生成验证草图"
       />,
     )
-    expect(status.textContent).toMatch(/安全|放心|不会影响/)
+    expect(status.textContent).toContain('可以查看最近进展')
   })
 
   it('[S1-UI-006] 超过 120 秒时应提供继续等待和查看进度两个操作', () => {
