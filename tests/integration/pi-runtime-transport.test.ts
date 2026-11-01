@@ -38,7 +38,7 @@ it.each(['anthropic-compatible','zhipu'])('actual image bytes traverse attachmen
   try{
     const budget=createProductionBudget(project.project_id,'vision-scope','desktop-implement'),tool=buildSoftwareImageTool(project.project_id);let executions=0
     const original=tool.execute;tool.execute=async(...args)=>{executions++;return original(...args)}
-    const common={runtime:'pi' as const,runtimeScope:'desktop-implement' as const,system:'Use the actual supplied image tool',projectId:project.project_id,sessionId:'vision-wire',requestId:'vision-run',query:budget.wrap(anthropicMessagesQueryViaProviders),env:{PATH:process.env.PATH??process.env.Path??'',ANTHROPIC_AUTH_TOKEN:'local-vision-key',ANTHROPIC_MODEL:'local-vision-model',ANTHROPIC_BASE_URL:`http://127.0.0.1:${address.port}`,ANTHROPIC_PROVIDER_TYPE:providerType},providerType,maxTokens:1000,maxTurns:4,permissionMode:'allow-all' as const,signal:AbortSignal.timeout(30000),publish:()=>{},tools:[tool]}
+    const common={runtimeScope:'desktop-implement' as const,system:'Use the actual supplied image tool',projectId:project.project_id,sessionId:'vision-wire',requestId:'vision-run',query:budget.wrap(anthropicMessagesQueryViaProviders),env:{PATH:process.env.PATH??process.env.Path??'',ANTHROPIC_AUTH_TOKEN:'local-vision-key',ANTHROPIC_MODEL:'local-vision-model',ANTHROPIC_BASE_URL:`http://127.0.0.1:${address.port}`,ANTHROPIC_PROVIDER_TYPE:providerType},providerType,maxTokens:1000,maxTurns:4,permissionMode:'allow-all' as const,signal:AbortSignal.timeout(30000),publish:()=>{},tools:[tool]}
     expect((await runAgentLoop({...common,task:'compare the actual images',images:[initial]})).status).toBe('completed')
     expect((await runAgentLoop({...common,task:'continue from the prior image references'})).status).toBe('completed')
     expect(executions).toBe(1);expect(bodies).toHaveLength(3)
@@ -79,7 +79,7 @@ it.each(['anthropic-compatible', 'zhipu'])('real Pi â†’ guarded local HTTP/SSE â
   if (!address || typeof address === 'string') throw new Error('LOCAL_SERVER_ADDRESS')
   try {
     const budget = createProductionBudget('wire-project', 'scope', 'desktop-implement')
-    const result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'desktop-implement', system: 'write using the supplied tool', task: 'save',
+    const result = await runAgentLoop({ runtimeScope: 'desktop-implement', system: 'write using the supplied tool', task: 'save',
       projectId: 'wire-project', sessionId: 'wire-session', requestId: 'wire-run', query: budget.wrap(anthropicMessagesQueryViaProviders),
       env: { PATH: process.env.PATH ?? process.env.Path ?? '', ANTHROPIC_AUTH_TOKEN: 'local-test-credential', ANTHROPIC_MODEL: 'local-test-model',
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`, ANTHROPIC_PROVIDER_TYPE: providerType }, providerType,

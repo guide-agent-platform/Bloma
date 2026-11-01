@@ -27,7 +27,7 @@ it('keeps the financial reservation distinct and unchanged while constraining ef
 })
 it('a real Pi loop on the published 1M model does not compact at 300k or require any provider call',async()=>{
   let calls=0;const compact=vi.fn(),observed=vi.fn()
-  const result=await runAgentLoop({runtime:'pi',system:'fixture',task:'continue',projectId:'context-million',sessionId:'context-million',requestId:'r',
+  const result=await runAgentLoop({system:'fixture',task:'continue',projectId:'context-million',sessionId:'context-million',requestId:'r',
     query:async function*(){calls++;yield{type:'assistant',message:{role:'assistant',content:[{type:'text',text:'done'}]}};yield{type:'result',stop_reason:'end_turn',usage:{input_tokens:300000,output_tokens:5}}},
     env:{ANTHROPIC_BASE_URL:'https://api.deepseek.com/anthropic',ANTHROPIC_MODEL:'deepseek-flash'},tools:[],maxTokens:4096,maxTurns:3,permissionMode:'allow-all',signal:AbortSignal.timeout(15000),publish:()=>{},onCompaction:compact,onRuntimeObservation:observed})
   expect(result.status).toBe('completed');expect(calls).toBe(1);expect(compact).not.toHaveBeenCalled();expect(observed.mock.calls[0][0].settings.contextWindow).toBe(1000000)

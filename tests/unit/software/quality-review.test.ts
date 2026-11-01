@@ -37,7 +37,7 @@ afterEach(async () => {
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
 function register(query: SDKQuery) {
-  registerParentLoopContext(parent, { query, env: {}, maxTokens: 2048, maxTurns: 4, delegationMaxTurns: 4, runtime: 'pi', permissionMode: 'allow-all',
+  registerParentLoopContext(parent, { query, env: {}, maxTokens: 2048, maxTurns: 4, delegationMaxTurns: 4, permissionMode: 'allow-all',
     system: 'A_SUCCESS_STORY_MUST_NOT_LEAK', temperature: .1, editFormat: 'diff', maxConcurrentDelegations: 2, allowChannelOverrides: false,
     prepareDelegation: quality.prepare, childSystemBuilder: (_role, child) => quality.system(child)!,
     childToolsBuilder: (id, role) => quality.reviewTools(buildSoftwareAgentTools(id, role, policy)), publish: () => {} })

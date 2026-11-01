@@ -93,7 +93,7 @@ function register(override?: SDKQuery) {
   }
   const env = { PATH: process.env.PATH!, ANTHROPIC_AUTH_TOKEN: 'local-fixture-never-provider', ANTHROPIC_MODEL: 'fixture-vision', ANTHROPIC_BASE_URL: `http://127.0.0.1:${(model.address() as { port: number }).port}` }
   registerParentLoopContext(parent, { query: quality.wrapQuery(route), env,
-    maxTokens: 4096, maxTurns: 5, delegationMaxTurns: 5, permissionMode: 'allow-all', runtime: 'pi', temperature: .1, system: 'A_SUCCESS_STORY', editFormat: 'diff',
+    maxTokens: 4096, maxTurns: 5, delegationMaxTurns: 5, permissionMode: 'allow-all', temperature: .1, system: 'A_SUCCESS_STORY', editFormat: 'diff',
     maxConcurrentDelegations: 2, allowChannelOverrides: false, prepareDelegation: quality.prepare, childSystemBuilder: (_role, child) => quality.system(child)!, childMaterialsBuilder: () => undefined,
     childToolsBuilder: (id, role, _format, child) => quality.reviewTools(buildSoftwareAgentTools(id, role, policy), child), publish: () => {} })
   return { route, env }

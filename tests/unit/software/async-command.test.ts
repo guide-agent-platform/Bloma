@@ -97,7 +97,7 @@ it('lets a real Pi session continue reading one async command without replaying 
     yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'c' + (++calls), name, input }] } }
     yield { type: 'result', stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } }
   }
-  const result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'async-command-test', projectId: project.project_id, sessionId: 's', requestId: 'r',
+  const result = await runAgentLoop({ runtimeScope: 'async-command-test', projectId: project.project_id, sessionId: 's', requestId: 'r',
     system: 'run fixture once and read it', task: 'finish command', query, env: {}, tools: buildSoftwareExecutionTools(project.project_id), maxTokens: 1000, maxTurns: 10,
     permissionMode: 'allow-all', workMode: 'implementation', signal: ctx.signal, publish: () => {}, beforeComplete: guardDispatcherCompletion })
   expect(result.status).toBe('completed'); expect(result.toolCalls.filter(call => call.name === 'run_command')).toHaveLength(1)

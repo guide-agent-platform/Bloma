@@ -107,7 +107,7 @@ describe('runAgentLoop 图片贯通（clipboard-paste）', () => {
     const { query, received } = scriptedQueryWithCapture([[textMessage('好的')]])
     await runAgentLoop(baseInput({ query }))
     const firstUser = received[0].find((t) => t.role === 'user')
-    expect(firstUser?.content).toContain('看看这张图')
+    expect(firstUser?.content).toEqual([{type:'text',text:'看看这张图'}])
   })
 
   it('[S4-AGENT-093] fuzz：images 含畸形项（缺 imageId/非法类型/非对象）被安全忽略不崩 loop', async () => {
@@ -124,9 +124,9 @@ describe('runAgentLoop 图片贯通（clipboard-paste）', () => {
       }),
     )
     expect(result.status).toBe('completed')
-    // 畸形项全部被滤除：合法 image 块为 0 → task 退化为纯 string 轮（与无图现状一致）
+    // Pi uses typed content blocks, including text-only prompts.
     const firstUser = received[0].find((t) => t.role === 'user')
-    expect(typeof firstUser?.content).toBe('string')
+    expect(firstUser?.content).toEqual([{type:'text',text:'看看这张图'}])
   })
 })
 

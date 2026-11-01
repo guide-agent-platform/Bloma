@@ -342,7 +342,7 @@ async function runChildLoop(opts: {
     maxTurns,
     ...(role === 'implement' && parentCtx.executionScope ? { workMode: 'implementation' as const } : {}),
     executionScope: parentCtx.executionScope,
-    runtime: parentCtx.runtime,
+
     runtimeScope: parentCtx.runtimeScope,
     onRuntimeObservation: parentCtx.onRuntimeObservation,
     permissionMode: parentCtx.permissionMode,

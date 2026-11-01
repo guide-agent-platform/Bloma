@@ -4,13 +4,14 @@ import { expect, it } from 'vitest'
 import { observeGuiStep } from '../../../main/software/gui-observer'
 import { parseGuiSuite } from '../../../main/desktop/gui-acceptance'
 import { guiStepsSchema, SOFTWARE_GUI_ACTION_KINDS } from '../../../main/desktop/gui-tool-contract'
-import { validateToolInput } from '../../../main/agent/loop/tool-input-validation'
+import { validateToolArguments, type TSchema } from '@earendil-works/pi-ai'
 
 it('validates one exact select value or label before running a check', () => {
   const suite = (step: unknown) => ({ version: 1, scope_hash: 'a'.repeat(64), covers: ['F-001'], steps: [step] })
   const select = { id: 'choose', kind: 'select', selector: '#status', label: '进行中' }
   expect(parseGuiSuite(suite(select), { allowActionsOnly: true }).steps).toEqual([select])
-  expect(validateToolInput('inspect_app', { steps: [select] }, { type: 'object', properties: { steps: guiStepsSchema(32, SOFTWARE_GUI_ACTION_KINDS) } })).toBeUndefined()
+  expect(validateToolArguments({name:'inspect_app',description:'inspect',parameters:{ type: 'object', properties: { steps: guiStepsSchema(32, SOFTWARE_GUI_ACTION_KINDS) } } as unknown as TSchema},
+    {type:'toolCall',id:'select',name:'inspect_app',arguments:{steps:[select]}})).toEqual({steps:[select]})
   for (const patch of [{ label: undefined }, { value: 'doing' }, { label: 1 }, { label: 'x'.repeat(4097) }]) {
     expect(() => parseGuiSuite(suite({ ...select, ...patch }), { allowActionsOnly: true })).toThrow('GUI_SELECT_INVALID')
   }

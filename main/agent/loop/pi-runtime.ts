@@ -147,10 +147,14 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     const expectedTools = input.tools.map(tool => tool.name).sort()
     if (JSON.stringify(activeSession.getActiveToolNames().sort()) !== JSON.stringify(expectedTools)) throw new Error('PI_TOOL_ALLOWLIST_MISMATCH')
     activeSession.agent.toolExecution = 'sequential'
-    activeSession.agent.beforeToolCall = async () => input.shouldPause?.()
-      ? { block: true, reason: '任务范围等待用户确认，后续工具未执行。', terminate: true }
-      : status === 'budget_exhausted' || input.signal.aborted
-      ? { block: true, reason: '宿主预算已耗尽或运行已取消，后续工具未执行。', terminate: true } : undefined
+    activeSession.agent.beforeToolCall = async ({toolCall,args}) => {
+      if(input.shouldPause?.())return {block:true,reason:'任务范围等待用户确认，后续工具未执行。',terminate:true}
+      if(status==='budget_exhausted'||input.signal.aborted)return {block:true,reason:'宿主预算已耗尽或运行已取消，后续工具未执行。',terminate:true}
+      // Pi owns schema validation. Host tools require the caller's exact types:
+      // never turn path:42 into a write to "42", or silently drop null fields.
+      if(JSON.stringify(args)!==JSON.stringify(toolCall.arguments))return {block:true,reason:'TOOL_ARGUMENT_COERCION_REJECTED: 参数类型不符合声明，请按工具schema修正；本次未执行、不消耗工具预算。'}
+      return undefined
+    }
     activeSession.agent.afterToolCall = async ({ toolCall, isError }) => ({ isError: outcomes.get(toolCall.id)?.isError ?? isError })
     activeSession.agent.streamFunction = createPiTransport(input, {
       isCompacting: () => compacting,
@@ -282,9 +286,11 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         }
         input.publish('tool_call_completed', { tool: event.toolName, tool_call_id: event.toolCallId, turn: turns,
           status: details?.budgetExhausted ? 'budget' : event.isError ? 'error' : 'ok', is_error: event.isError,
+          ...(event.durationMs!==undefined?{duration_ms:event.durationMs}:{}),
           feedback: details?.feedback, output_summary: result.content.filter(b => b.type === 'text').map(b => b.text).join('\n').slice(0, 500),
-          detail: Object.fromEntries(Object.entries((result.details ?? {}) as Record<string, unknown>)
-            .filter(([key]) => ['delegation_id', 'child_session_id', 'role', 'goal', 'status', 'pending_question', 'error'].includes(key))) })
+          ...(() => {const detail=Object.fromEntries(Object.entries((result.details ?? {}) as Record<string, unknown>)
+            .filter(([key,value]) => value!==undefined&&['delegation_id', 'child_session_id', 'role', 'goal', 'status', 'pending_question', 'error'].includes(key)))
+            return Object.keys(detail).length?{detail}:{} })() })
         if (event.toolName === 'run_gwt_tests') checkpoint('gwt')
         if (event.toolName === 'run_api_contract_tests') checkpoint('api')
         if (event.toolName === 'run_security_scan') checkpoint('security')
@@ -361,7 +367,10 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     est_context_tokens: estContextTokens, turns_with_usage: turnsWithUsage })
   return { status, turns, finalText, toolCalls, files_changed: ctx.state.successful_file_changes, tool_feedback: toolFeedback,
     validation: validation(), turnsUsage, ...(termination ? { termination_detail: termination } : {}),
-    ...(status === 'cancelled' ? { cancel_detail: { phase: 'model_stream' as const, reason: String(input.signal.reason ?? '') } } : {}),
+    ...(status === 'cancelled' ? { cancel_detail: { phase: 'model_stream' as const, ...(() => {
+      const reason=input.signal.reason instanceof Error?input.signal.reason.message:String(input.signal.reason??'')
+      return {source:reason.match(/^AGENT_CANCELLED:\s*(.+)$/)?.[1]??'unattributed',reason:reason.slice(0,200)}
+    })() } } : {}),
     usage: { inputTokens, outputTokens, estContextTokens, turnsWithUsage, handoffCalls: auxiliaryCalls, graceCalls: 0,
       estTotalTokens: inputTokens + outputTokens } }
 }

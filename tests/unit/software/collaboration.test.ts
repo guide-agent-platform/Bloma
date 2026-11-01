@@ -60,7 +60,7 @@ it('two actual child loops consume the shared request budget; the parent gets no
   const budget = createProductionBudget(project.project_id, 'shared-operation', 'desktop-implement', { requests: 2, output: 4096, perResponse: 1024, phaseRequests: 2 })
   const query = budget.wrap(async function* () { yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '已检查，供主负责人集成' }] } }; yield { type: 'result', subtype: 'success', usage: { output_tokens: 10 } } })
   registerParentLoopContext(parent, { query, env: {}, maxTokens: 512, maxTurns: 2, delegationMaxTurns: 2,
-    permissionMode: 'allow-all', temperature: .1, system: 'main', editFormat: 'diff', runtime: 'pi', maxConcurrentDelegations: 2, allowChannelOverrides: false,
+    permissionMode: 'allow-all', temperature: .1, system: 'main', editFormat: 'diff', maxConcurrentDelegations: 2, allowChannelOverrides: false,
     prepareDelegation: policy.prepare, publish: () => undefined, childToolsBuilder: (id, role) => buildSoftwareAgentTools(id, role, policy) })
   const a = startDelegation(context(), { task: 'read one', role: 'review' }), b = startDelegation(context(), { task: 'read two', role: 'review' })
   await Promise.all([a, b].map(value => findDelegation(parent, value.delegation_id)!.completion))
@@ -70,7 +70,7 @@ it('two actual child loops consume the shared request budget; the parent gets no
 }, 60000)
 it('generic delegation honors two children, rejects model overrides and reacquires scopes on continuation', async () => {
   registerParentLoopContext(parent, { query: async function* () { await new Promise(() => undefined) }, env: {}, maxTokens: 128, maxTurns: 2, delegationMaxTurns: 2,
-    permissionMode: 'allow-all', temperature: .1, system: 'main', editFormat: 'diff', runtime: 'pi', maxConcurrentDelegations: 2, allowChannelOverrides: false,
+    permissionMode: 'allow-all', temperature: .1, system: 'main', editFormat: 'diff', maxConcurrentDelegations: 2, allowChannelOverrides: false,
     prepareDelegation: policy.prepare, publish: () => undefined, childToolsBuilder: (id, role) => buildSoftwareAgentTools(id, role, policy) })
   const first = startDelegation(context(), { task: 'one', role: 'implement', writePaths: ['a.txt'] })
   startDelegation(context(), { task: 'two', role: 'review' })

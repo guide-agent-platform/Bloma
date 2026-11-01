@@ -32,7 +32,7 @@ function scripted(scripts: SDKMessage[][]) {
   return { query, received }
 }
 function input(query: SDKQuery, extra: Partial<AgentLoopInput> = {}): AgentLoopInput {
-  return { runtime: 'pi', runtimeScope: 'desktop-implement', projectId: 'test-project', sessionId: 'test-session', requestId: 'r1',
+  return { runtimeScope: 'desktop-implement', projectId: 'test-project', sessionId: 'test-session', requestId: 'r1',
     system: 'test controlled system', task: '完成一个最小修改并验证', tools: [], query, env: {}, maxTokens: 1000, maxTurns: 5,
     permissionMode: 'allow-all', signal: new AbortController().signal, publish: vi.fn(), ...extra }
 }
@@ -48,10 +48,10 @@ describe('real upstream Pi AgentSession integration', () => {
     await expect(runAgentLoop(input(query,{beforeComplete}))).rejects.toThrow('REQUEST_BUDGET_EXHAUSTED')
     expect(beforeComplete).not.toHaveBeenCalled()
   })
-  it.each(['pi', undefined] as const)('stops repeated host failures despite intervening successful commands (runtime=%s)', async runtime => {
+  it('stops repeated host failures despite intervening successful commands', async () => {
     const scripts: SDKMessage[][] = Array.from({ length: 8 }, (_, i) => [call('print-' + i, 'run_command'), call('failed-' + i, 'verify_app')])
     const source = scripted([...scripts, [text('must not reach completion')]])
-    const result = await runAgentLoop(input(source.query, { runtime, maxTurns: 30, workMode: 'implementation', tools: [
+    const result = await runAgentLoop(input(source.query, { maxTurns: 30, workMode: 'implementation', tools: [
       tool('run_command', async () => ({ output: '{"exit_code":0}' })),
       tool('verify_app', async () => ({ output: '{"failure":{"code":"GUI_EXISTING_EXPECTATIONS_CHANGED"}}', isError: true })),
     ] }))

@@ -10,7 +10,7 @@ afterEach(()=>{if(previous===undefined)delete process.env.PROMA_HOME;else proces
 function seed(name='formatter',manual=false){const dir=join(home,'skills',name);mkdirSync(dir,{recursive:true});writeFileSync(join(dir,'SKILL.md'),`---\nname: ${name}\ndescription: Format requested reports with the local procedure\n${manual?'disable-model-invocation: true\n':''}---\nPRIVATE_SKILL_BODY use the report procedure.\n`);return dir}
 it('advertises only metadata and lets the actual Pi agent choose a skill without a user slash command',async()=>{
   seed();let calls=0;const observations=vi.fn()
-  const result=await runAgentLoop({runtime:'pi',system:'host',task:'整理这份报告',projectId:'skill-project',sessionId:'skill-session',requestId:'r',env:{},tools:[],maxTokens:1000,maxTurns:5,permissionMode:'allow-all',signal:AbortSignal.timeout(15000),publish:()=>{},onRuntimeObservation:observations,
+  const result=await runAgentLoop({system:'host',task:'整理这份报告',projectId:'skill-project',sessionId:'skill-session',requestId:'r',env:{},tools:[],maxTokens:1000,maxTurns:5,permissionMode:'allow-all',signal:AbortSignal.timeout(15000),publish:()=>{},onRuntimeObservation:observations,
     query:async function*(_prompt,options){calls++;const wire=JSON.stringify(options.messages)
       if(calls===1){expect(wire).toContain('formatter');expect(wire).not.toContain('PRIVATE_SKILL_BODY');expect(options.tools?.some(t=>t.name==='read_skill')).toBe(true)
         yield{type:'assistant',message:{role:'assistant',content:[{type:'tool_use',id:'load',name:'read_skill',input:{name:'formatter'}}]}}

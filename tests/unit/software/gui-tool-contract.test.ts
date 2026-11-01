@@ -12,7 +12,7 @@ import { parseGuiSuite, guiSuitePath } from '../../../main/desktop/gui-acceptanc
 import { buildProductionContextTool } from '../../../main/desktop/production-context'
 import { createToolState, runAgentLoop, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/stages/orchestration-contracts'
-import { validateToolInput } from '../../../main/agent/loop/tool-input-validation'
+import { validateToolArguments, type TSchema } from '@earendil-works/pi-ai'
 import { guiStepsSchema } from '../../../main/desktop/gui-tool-contract'
 import { guiVerificationReadiness } from '../../../main/software/verification-readiness'
 const fixture = JSON.parse(readFileSync(resolve('tests/fixtures/gui-tool-contract/calculator-failed-inputs.json'), 'utf8'))
@@ -36,7 +36,8 @@ it('replays actual failed calculator calls with actionable field paths before an
   const tool = buildLeanGuiTool(project.project_id)
   for (const sample of fixture.samples) {
     const schema = sample.tool === 'register_gui_check' ? tool.input_schema : { type: 'object', properties: { steps: guiStepsSchema(32) } }
-    expect(validateToolInput(sample.tool, sample.input, schema)).toMatch(/steps\[0\]\.kind|steps\[0\]\.id/)
+    expect(()=>validateToolArguments({name:sample.tool,description:'GUI',parameters:schema as unknown as TSchema},
+      {type:'toolCall',id:'sample',name:sample.tool,arguments:sample.input})).toThrow(/steps.0.kind|steps.0.id/)
     if (sample.tool === 'register_gui_check') {
       const result = await tool.execute(sample.input, ctx)
       expect(result.isError).toBe(true); expect(result.feedback).toMatchObject({ execution: 'not_run', category: 'invalid_input', recovery: 'correct_input' })
@@ -54,7 +55,8 @@ it('corrected real-history input registers without copying expectations; source 
   expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_missing', next_tool: 'verify_app', verification: 'not_run' })
   const tool = buildLeanGuiTool(project.project_id), corrected = repairRecordedSteps()
   expect(tool.input_schema.required).not.toContain('expectations')
-  expect(validateToolInput(tool.name, corrected, tool.input_schema)).toBeUndefined()
+  expect(validateToolArguments({name:tool.name,description:tool.description,parameters:tool.input_schema as unknown as TSchema},
+    {type:'toolCall',id:'corrected',name:tool.name,arguments:corrected})).toEqual(corrected)
   expect((await tool.execute(corrected, ctx)).isError).not.toBe(true)
   const saved = JSON.parse(readFileSync(guiSuitePath(project.project_id), 'utf8'))
   expect(guiVerificationReadiness(project.project_id)).toMatchObject({ state: 'rules_registered', next_tool: 'verify_app', verification: 'not_run' })
@@ -106,7 +108,7 @@ it('real Pi receives the public contract, reports the actual historical bad call
       : [{ type: 'text' as const, text: '已登记，业务通过仍由宿主操作判定。' }]
     yield { type: 'assistant', message: { role: 'assistant', content } }; yield { type: 'result', subtype: 'success', usage: { output_tokens: 10 } }
   }
-  const result = await runAgentLoop({ runtime: 'pi', runtimeScope: 'gui-contract-regression', projectId: project.project_id, sessionId: 's', requestId: 'r',
+  const result = await runAgentLoop({ runtimeScope: 'gui-contract-regression', projectId: project.project_id, sessionId: 's', requestId: 'r',
     tools: [tool], system: '按公开工具契约登记已确认计算器场景。', task: '登记GUI', env: {}, query, maxTokens: 1024, maxTurns: 5,
     permissionMode: 'allow-all', signal: AbortSignal.timeout(60000), publish: () => {} })
   expect(result.status).toBe('completed'); expect(requests).toHaveLength(3)
