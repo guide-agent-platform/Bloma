@@ -267,6 +267,9 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if(isLongtermSoftware(input.project_id)){
         const state=readLongtermState(input.project_id),current=state?.milestones.find(item=>item.id===state.current_id)
         if(current?.status!=='delivered'||findProject(input.project_id).status==='archived')throw Error('LONGTERM_MILESTONE_CONFIRMATION_REQUIRED')
+      }else{
+        const project=findProject(input.project_id)
+        if(project.workflow_version==='software-v1'&&(project.current_stage!=='completed'||project.status==='archived'))throw Error('PROJECT_NOT_DELIVERED')
       }
       // U6：满意度埋点 + 项目收口。product_finalized 走研究安全级，不含具体对话内容。
       trackAnalytics({

@@ -132,6 +132,7 @@ export type ApiResult<T> =
 
 export type ErrorCode =
   | 'VALIDATION_ERROR'
+  | 'PROJECT_NOT_DELIVERED'
   | 'IPC_CHANNEL_NOT_FOUND'
   | 'AGENT_SESSION_BUSY'
   | 'AGENT_PROJECT_BUSY'

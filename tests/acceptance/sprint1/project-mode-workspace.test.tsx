@@ -56,7 +56,8 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     expect(screen.getByText('快速型')).toBeTruthy()
     expect(screen.getByTestId('chat-panel')).toBeTruthy()
     expect(screen.getByRole('button', { name: '版本' })).toBeTruthy()
-    expect(screen.getByText('这里将展示你的软件预览')).toBeTruthy()
+    expect(screen.getByTestId('workspace-theatre')).toBeTruthy()
+    expect(screen.queryByTestId('preview-panel')).toBeNull()
   })
 
   it('[S1-PROJECT-007] 选择精细打磨应创建 longterm 项目并显示文档入口', async () => {
@@ -123,7 +124,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     expect(screen.getByRole('button', { name: '长期型' })).toBeTruthy()
     expect(screen.getByRole('textbox', { name: '你的软件想法' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '长期型' }))
-    expect(screen.getByText(/关键节点一起确认/)).toBeTruthy()
+    expect(screen.getByText(/每阶段核对当前版本/)).toBeTruthy()
     expect(screen.queryByText(/React|Vue|数据库|技术栈|API/)).toBeNull()
   })
 
@@ -272,7 +273,8 @@ function project(mode: Project['mode']): Project {
     workspace_slug: 'default-software-builder',
     name: mode === 'quick' ? '快速验收项目' : '长期验收项目',
     mode,
-    template_type: 'web_fullstack',
+    workflow_version: 'software-v1',
+    template_type: 'desktop_tool',
     status: 'active',
     current_stage: 'clarifying',
     root_path: `C:/role-c/${mode}`,

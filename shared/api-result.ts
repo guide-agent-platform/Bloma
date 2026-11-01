@@ -25,6 +25,8 @@ export function userVisibleMessage(code: ErrorCode): string {
   switch (code) {
     case 'VALIDATION_ERROR':
       return '这次操作缺少必要信息，请再试一次。'
+    case 'PROJECT_NOT_DELIVERED':
+      return '请先完成当前版本的制作和验证，再标记完成。'
     case 'AGENT_SESSION_BUSY':
       return '我还在处理上一条内容，请稍等一下。'
     case 'AGENT_PROJECT_BUSY':

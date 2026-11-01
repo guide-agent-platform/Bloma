@@ -36,6 +36,7 @@ export async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>)
     const message = error instanceof Error ? error.message : String(error)
     // 兜底前先把真实错误打到主进程终端，避免被 VALIDATION_ERROR 掩盖而无法排查
     console.error('[ipc] handler error:', message, error)
+    if(message.includes('PROJECT_NOT_DELIVERED'))return fail<T>(requestId,'PROJECT_NOT_DELIVERED',message)
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
     // 全链路审查 P1-1（2026-10-01）：项目锁冲突不得落 VALIDATION_ERROR 静默——与 SESSION_BUSY
     // 同级映射（retryable），渲染端可引导等待/停止而非石沉大海。

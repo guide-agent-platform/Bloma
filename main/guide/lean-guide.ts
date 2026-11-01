@@ -27,9 +27,16 @@ import { workflowRetirementReason } from '../desktop/workflow-retirement'
 export async function handleLeanGuide(input: AgentSendMessageInput, publish: (event: AgentEvent) => void, model?: GuideModelOptions): Promise<void> {
   const emit = (type: AgentEvent['type'], payload: Record<string, unknown>) => publish({ event_id: randomUUID(),
     project_id: input.project_id, session_id: input.session_id, type, payload, created_at: new Date().toISOString() })
+  // Guide replies are complete messages, unlike Pi's streamed deltas. Persist
+  // them once so clarification and pause/error notices survive reopening.
+  const say = (text: string) => {
+    if(model?.persistAssistant)model.persistAssistant(text)
+    else appendSessionMessage(input.session_id,{role:'assistant',origin:'agent',content:[{type:'text',text}],timestamp:Date.now()})
+    emit('message_delta',{text})
+  }
   const retirement=workflowRetirementReason(findProject(input.project_id))
   if(retirement){emit('message_delta',{text:retirement});emit('message_completed',{subtype:'incomplete'});return}
-  if (!model) { emit('message_delta', { text: '模型渠道不可用，需求已保留，尚未开工。' }); emit('message_completed', { subtype: 'incomplete' }); return }
+  if (!model) { say('模型渠道不可用，需求已保留，尚未开工。'); emit('message_completed', { subtype: 'incomplete' }); return }
   const project = findProject(input.project_id)
   const brief = readPrdBackplane(input.project_id)
   const saved = readGuideConfirmation('prd', input.project_id)
@@ -89,7 +96,7 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
   if (selected === 'lean_adjust' || selected === 'lean_pause') {
     if (!saved) throw new Error('LEAN_CONFIRMATION_MISSING')
     saveGuideConfirmation({ ...saved, state: selected === 'lean_adjust' ? 'adjust' : 'dismissed' })
-    emit('message_delta', { text: selected === 'lean_adjust' ? '直接说要改什么，原有目标会一起保留。' : '已保留任务单，尚未开工。' }); return
+    say(selected === 'lean_adjust' ? '直接说要改什么，原有目标会一起保留。' : '已保留任务单，尚未开工。'); return
   }
   if (brief.user_confirmed_at && brief.lean_brief?.ui !== 'none') {
     restoreUxConfirmation(input, publish, { query: model.query, env: model.env, signal: model.signal })
@@ -103,7 +110,7 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
     const adjustment = takeUxSketchCorrection(input) ?? takeUxAdjustFeedback(input)
     if (adjustment) { await runUxAdjustRound(input, adjustment); return }
   }
-  if (/^(?:停止|暂停|取消|先别做|不要开工)[。！!\s]*$/.test(input.content.trim())) { emit('message_delta', { text: '已停在当前任务，尚未继续制作。' }); return }
+  if (/^(?:停止|暂停|取消|先别做|不要开工)[。！!\s]*$/.test(input.content.trim())) { say('已停在当前任务，尚未继续制作。'); return }
   if (saved && /^(?:继续|查看任务单)$/.test(input.content.trim())) { publishScope(); return }
   const humanTexts = model.history.filter(turn => turn.role === 'user').map(turn => typeof turn.content === 'string' ? turn.content
     : turn.content.filter(block => block.type === 'text').map(block => block.text).join('\n'))
@@ -121,9 +128,9 @@ export async function handleLeanGuide(input: AgentSendMessageInput, publish: (ev
     env: model.env, signal, sessionId: input.session_id, maxTokens: Math.min(model.maxTokens, 8192), temperature: .1, attempts: 2,
     parse: text => parseLeanBrief(text, { projectId: input.project_id, sessionId: input.session_id, source, previous: brief, software }) }))
   model.signal.throwIfAborted()
-  if (!result) { emit('message_delta', { text: '任务整理未完成，原始需求已保留；可重试，不会自动开工。' }); emit('message_completed', { subtype: 'incomplete' }); return }
+  if (!result) { say('任务整理未完成，原始需求已保留；可重试，不会自动开工。'); emit('message_completed', { subtype: 'incomplete' }); return }
   if (result.action === 'clarify') {
-    emit('message_delta', { text: result.question })
+    say(result.question)
     if (result.options.length) emit('user_decision_required', { kind: 'clarification', title: result.question,
       questions: result.options.map((label, index) => ({ id: `lean_answer_${index}`, label })) })
     return

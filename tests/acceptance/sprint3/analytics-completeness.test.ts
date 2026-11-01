@@ -10,6 +10,7 @@ import type { ApiResult, Project } from '../../../shared/types'
 import { clearPendingRequests, getPendingRequests, resolvePermission } from '../../../main/agent/permissions/permission-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
 import { setSnapshotCaptureProviderForTests } from '../../../main/delivery/snapshots'
+import {updateProject} from '../../../main/project/project-service'
 
 /**
  * Sprint 3 · T8 埋点重核
@@ -74,11 +75,18 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
     })) as ApiResult<Project>
     expect(upgraded.ok).toBe(true)
 
-    const finalized = (await harness.invoke('project:finalize', {
+    const premature = (await harness.invoke('project:finalize', {
       request_id: 't8-finalize',
       project_id: projectId,
       session_id: 't8-session',
     })) as ApiResult<Project>
+    expect(premature.ok).toBe(false)
+    expect(readAnalytics().some(row=>row.event_type==='satisfaction_marked')).toBe(false)
+    const delivered=await harness.invoke('project:create',{request_id:'delivered',mode:'quick'}) as ApiResult<Project>
+    if(!delivered.ok)throw Error('create failed')
+    // Host delivery is exercised end to end elsewhere; this fixture tests the IPC event boundary.
+    updateProject(delivered.data.project_id,{status:'completed',current_stage:'completed'})
+    const finalized=await harness.invoke('project:finalize',{request_id:'t8-confirm-delivered',project_id:delivered.data.project_id,session_id:'t8-session'}) as ApiResult<Project>
     expect(finalized.ok).toBe(true)
 
     const events = readAnalytics().map((e) => e.event_type as string)
@@ -194,16 +202,16 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       satisfaction_marked: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
       project_finalized: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
       user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
-      scope_confirmed: ['tests/unit/guide-prd-confirm.test.ts'], // 确认动作留存断言
-      desktop_dispatch_run: ['tests/unit/desktop/dispatcher-loop.test.ts'], // 桌面线运行遥测
-      desktop_dispatch_run_started: ['tests/unit/desktop/dispatcher-loop.test.ts'],
-      conversation_submitted: ['tests/acceptance/sprint2/guide-clarification-fixes.test.ts'], // 原生向导实际落盘
     }
 
     const todoBlocked: Record<string, string> = {
+      conversation_submitted: '旧向导事件仅供历史读取；当前消息接收以composer持久回执和事件记录为准，不能用旧事件名声称现役覆盖。',
+      scope_confirmed: '当前确认状态和范围绑定由lean-guide/lean-scope与原生UI验证；此旧analytics事件尚缺直接落盘断言，不借已删除测试声称覆盖。',
+      desktop_dispatch_run: '旧分阶段调度器已退役；事件类型仅用于历史记录读取。',
+      desktop_dispatch_run_started: '旧分阶段调度器已退役；事件类型仅用于历史记录读取。',
       project_created: '写入方活跃（project-service createProject）；断言文件随 web 线拆除退役，待补。',
-      clarification_responded: '写入方活跃（guide 线 U5 J5）；待补断言。',
-      decision_selected: '写入方活跃（guide 线 P7-9b）；待补断言。',
+      clarification_responded: '旧向导写入方已退出；当前澄清选择通过任务单和消息记录核对。',
+      decision_selected: '旧向导写入方已退出；当前决定通过确认日志与消息记录核对。',
       test_completed: '旧事件类型供历史 bench/报告读取；当前桌面验证使用独立核心验证与实验事件，无新 Web 执行写入方。',
       desktop_drive_session_started: '探索会话有运行写入方，尚无独立的分析JSONL事件断言。',
       desktop_drive_step: '探索步骤有运行写入方，尚无独立的分析JSONL事件断言。',
