@@ -562,6 +562,10 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
                   >
                     移除
                   </button>
+                  <input type="number" aria-label={`${m.name} 上下文窗口`} title="留空按模型目录自动识别；代理渠道可填写实际支持的上限，如1000000"
+                    min={1024} max={16777216} step={1} placeholder="窗口：自动" value={m.context_window??''} disabled={saving}
+                    onChange={e=>{const value=e.target.value;setModelList(rows=>rows.map(row=>row.id===m.id?{...row,context_window:value===''?undefined:Number(value)}:row))}}
+                    style={{...inputStyle,width:130,flexShrink:0}} />
                 </div>
               ))}
             </div>

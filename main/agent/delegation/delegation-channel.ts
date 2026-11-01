@@ -94,7 +94,7 @@ export function resolveDelegationChannelOverride(args: {
     )
   }
 
-  const env = buildSdkEnv(apiKey, channel.base_url, model.name, channel.provider_type)
+  const env = buildSdkEnv(apiKey, channel.base_url, model.name, channel.provider_type, model)
   return {
     env,
     channelId: channel.id,

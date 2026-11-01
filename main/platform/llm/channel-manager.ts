@@ -23,6 +23,7 @@ import {
   normalizeBaseUrl,
 } from './channel-url-utils'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
+import { attachModelLimits, validModelLimit } from './model-context'
 import { ARK_CODING_PLAN_MODELS, ARK_CODING_PLAN_TEST_MODEL, PROVIDER_TEST_MODEL_PRESETS, QWEN_TOKEN_PLAN_PRESET_MODELS, XIAOMI_PRESET_MODELS, cloneModels, createPresetModelsResult, extractZhipuCodingTeamApiToken, parseZhipuTeamCredentials, resolveFirstTestModelId } from './channel-presets';
 
 /** SDK 子进程环境白名单：仅透传运行 SDK 所需的基础环境，避免宿主机 ANTHROPIC_/CLAUDE_ 历史配置污染 Agent 渠道。 */
@@ -70,6 +71,7 @@ export function buildSdkEnv(
   baseUrl: string,
   model: string,
   providerType?: ProviderType,
+  limits?: Pick<ChannelModel, 'context_window'|'max_output_tokens'>,
 ): Record<string, string> {
   const env: Record<string, string> = {}
   for (const key of SDK_ENV_ALLOWLIST) {
@@ -87,6 +89,7 @@ export function buildSdkEnv(
   // 传输层拿不到就无法按渠道夹紧 max_tokens（zhipu 131072 硬校验，e99e6319 二次事故
   // 实锤：夹紧锁在不存在的信号上）。仅作传输层派生用途，不进请求头/子进程白名单。
   if (providerType) env.ANTHROPIC_PROVIDER_TYPE = providerType
+  attachModelLimits(env, limits)
   return env
 }
 
@@ -197,7 +200,12 @@ export function listEnabledRawChannels(): Channel[] {
   return loadChannels().channels.filter((channel) => isOursChannel(channel) && channel.enabled)
 }
 
+function validateModelLimits(models?: ChannelModel[]): void {
+  for(const model of models??[])for(const field of ['context_window','max_output_tokens'] as const)
+    if(model[field]!==undefined&&!validModelLimit(model[field]))throw Error('VALIDATION_ERROR: 模型窗口和输出上限须为1024到16777216之间的整数')
+}
 export function createChannel(input: ChannelCreateInput): Channel {
+  validateModelLimits(input.models)
   const config = loadChannels()
   const channel: Channel = {
     id: randomUUID(),
@@ -218,6 +226,7 @@ export function createChannel(input: ChannelCreateInput): Channel {
  * 更新渠道。api_key 为空字符串表示不更新密钥（编辑表单留空时）。
  */
 export function updateChannel(channelId: string, input: ChannelUpdateInput): Channel | undefined {
+  validateModelLimits(input.models)
   const config = loadChannels()
   const index = config.channels.findIndex((c) => c.id === channelId && isOursChannel(c))
   if (index === -1) return undefined

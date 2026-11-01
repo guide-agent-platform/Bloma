@@ -251,6 +251,9 @@ export interface ChannelModel {
   /** 编辑格式能力位（Aider 结论：弱渠道用 diff 编辑不可靠）：
    *  diff = old_string/new_string 精确替换（默认）；whole = 整文件重写。 */
   edit_format?: 'diff' | 'whole'
+  /** Optional explicit capability override for this model on this channel. */
+  context_window?: number
+  max_output_tokens?: number
 }
 
 export interface SoftwareModelSettings {

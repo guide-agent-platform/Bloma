@@ -62,6 +62,16 @@ function accountedSpent(state: State, host: string, model: string, settledOnly =
   return total
 }
 
+/** A published capacity does not enlarge a task's already-authorized input reserve. */
+export function monetaryContextLimit(baseUrl:string|undefined,model:string|undefined,policyPath=process.env.BLOMA_MONETARY_POLICY):number|undefined {
+  if(!policyPath)return undefined
+  const policy=JSON.parse(readFileSync(policyPath,'utf8').replace(/^\uFEFF/,'')) as Policy
+  let host:string;try{host=new URL(baseUrl??'').host}catch{fail('MONETARY_MODEL_NOT_AUTHORIZED')}
+  const rate=policy.models?.find(row=>row.host===host&&row.model===model)
+  if(!rate)throw new MonetaryBudgetError('MONETARY_MODEL_NOT_AUTHORIZED')
+  if(!Number.isSafeInteger(rate.context_tokens)||rate.context_tokens<1024)fail('MONETARY_POLICY_INVALID')
+  return rate.context_tokens
+}
 export function readMonetaryBudget(policyPath: string) {
   const policy = JSON.parse(readFileSync(policyPath, 'utf8').replace(/^\uFEFF/, '')) as Policy
   const state = JSON.parse(readFileSync(`${policyPath}.state.json`, 'utf8')) as State

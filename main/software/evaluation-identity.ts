@@ -38,7 +38,8 @@ export function summarizeRuntimeObservations(events: Array<{ kind: string; data:
       if (value.version !== 1 || !value.session_id || !value.request_id || !value.role || value.runtime.engine !== 'pi'
         || !['pi-coding-agent','pi-agent-core','pi-ai'].every(name => /^\d+\.\d+\.\d+/.test(value.runtime.packages[name]))
         || !hex(value.runtime.adapter_sha256) || !hex(value.tools_sha256) || !hex(value.prompt_sha256) || !hex(value.memory_sha256)
-        || !hex(value.skills.content_sha256) || value.skills.mode !== 'explicit-bloma' || !Array.isArray(value.skills.names)
+        || !hex(value.skills.content_sha256) || !['explicit-bloma','agent-selected'].includes(value.skills.mode) || !Array.isArray(value.skills.names)
+        || value.skills.mode==='agent-selected'&&(!hex(value.skills.catalog_sha256)||!Array.isArray(value.skills.available))
         || value.skills.names.some(name=>typeof name!=='string') || !hex(value.route.endpoint_path_sha256)
         || Object.values(value.route).some(v => typeof v !== 'string' || !v || v === 'unknown')
         || !Number.isSafeInteger(value.settings.contextWindow) || value.settings.contextWindow <= 0

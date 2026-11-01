@@ -126,7 +126,7 @@ function tryBuildChannelEnv(channel: Channel, category: DocumentCategory, requir
   // 路由层过滤（废旧管道方案 D2）：调用方要求 tool use 时，显式标记为不支持的模型直接
   // 判不可用交由备用链接手；undefined（未标注）放行——能力未知者由调用方探测。
   if (requireTools === true && supportsTools === false) return { status: 'failed', reason: 'tools_unsupported' }
-  return { status: 'ok', env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type), model, supportsTools }
+  return { status: 'ok', env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type, channel.models.find(row=>row.name===model)), model, supportsTools }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +265,7 @@ export function pickBackupChannelEnv(
     const supportsTools = readSupportsTools(channel, model)
     // 与主渠道同一口径：显式 false 跳过，undefined（未标注）放行留给调用方探测
     if (requireTools === true && supportsTools === false) continue
-    return { channel, model, env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type), supportsTools }
+    return { channel, model, env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type, channel.models.find(row=>row.name===model)), supportsTools }
   }
   return undefined
 }

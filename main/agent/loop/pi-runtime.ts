@@ -20,14 +20,21 @@ import { estimateTokenCount } from './usage-guard'
 import { auditBlocks, importLegacyTurns, piImage, toTransportTurns } from './pi-messages'
 import { createPiTransport } from './pi-transport'
 import { openPiSession, recoverInterruptedTools } from './pi-session-store'
-import { observePiRuntime, PI_CONTEXT_POLICY, PI_RETRY_POLICY } from './runtime-observation'
+import { observePiRuntime, PI_RETRY_POLICY } from './runtime-observation'
+import { resolveModelContext } from '../../platform/llm/model-context'
+import { buildActiveSkills } from '../tools/active-skills'
 
 /** Proma bf3e98c adapted to Pi 1.4.0: the SDK owns model/tool turns, retry,
  * persistence, queue draining and compaction. Bloma owns permissions, budgets,
  * evidence and delivery gates. There is no fallback to the legacy executor. */
 export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResult> {
+  const contextPolicy = await resolveModelContext(input.env, input.maxTokens)
+  input = {...input,maxTokens:Math.min(input.maxTokens,contextPolicy.maxOutputTokens)}
   let cwd: string
   try { cwd = findProject(input.projectId).root_path || process.cwd() } catch { cwd = process.cwd() }
+  // C/V receive only their independently scoped materials, never maker skills.
+  const activeSkills=await buildActiveSkills(cwd,input.accountingRole==='review')
+  input={...input,system:[input.system,activeSkills.prompt].filter(Boolean).join('\n\n'),tools:[...input.tools,...activeSkills.tools.filter(tool=>!input.tools.some(existing=>existing.name===tool.name))]}
   const scope = input.runtimeScope === 'lean-build' ? 'lean-build' : `${input.runtimeScope ?? 'default'}:${input.executionScope ?? ''}`
   const opened = await openPiSession(input.projectId, input.sessionId, scope, cwd)
   let session: AgentSession | undefined
@@ -80,7 +87,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     const { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager } = await import('@earendil-works/pi-coding-agent')
     const { getCurrentSystemMessage } = await import('@earendil-works/pi-ai')
     const agentDir = join(getPromaHome(), 'bloma-pi-runtime')
-    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens: PI_CONTEXT_POLICY.reserveTokens, keepRecentTokens: PI_CONTEXT_POLICY.keepRecentTokens },
+    const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens: contextPolicy.reserveTokens, keepRecentTokens: contextPolicy.keepRecentTokens },
       retry: PI_RETRY_POLICY, images: { autoResize: false, blockImages: false } })
     const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
       noContextFiles: true, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
@@ -93,7 +100,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
     const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: null, refreshOnCreate: false })
     modelRuntime.registerProvider('bloma-transport', { api: 'openai-completions', baseUrl: 'http://127.0.0.1', apiKey: 'bloma-internal-bridge',
       models: [{ id: input.env.ANTHROPIC_MODEL || 'bloma-channel', name: 'Bloma channel', reasoning: true,
-        input: ['text', 'image'], contextWindow: PI_CONTEXT_POLICY.contextWindow, maxTokens: input.maxTokens,
+        input: ['text', 'image'], contextWindow: contextPolicy.contextWindow, maxTokens: input.maxTokens,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] })
     const model = modelRuntime.getModel('bloma-transport', input.env.ANTHROPIC_MODEL || 'bloma-channel')!
     if (!opened.manager.buildSessionContext().messages.length) {
@@ -304,7 +311,7 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
       prepareRecallBlock(input.task, input.delegationDepth ?? 0, `${input.sessionId}.jsonl`, { projectId: input.projectId })])
     const learnings = (input.delegationDepth ?? 0) === 0 ? renderLearningsSection(input.projectId) : ''
     input.onRuntimeObservation?.(observePiRuntime(input, { names: prepared.activatedSkills,
-      content: prepared.activatedSkills.length ? prepared.content.slice(0, prepared.content.length - input.task.length) : '' }, learnings + recall))
+      content: prepared.activatedSkills.length ? prepared.content.slice(0, prepared.content.length - input.task.length) : '',available:activeSkills.available,catalogHash:activeSkills.catalogHash }, learnings + recall, contextPolicy))
     const task = [learnings ? `<untrusted-memory source="learnings" trust="advisory">\n${learnings}\n</untrusted-memory>` : '', recall, prepared.content, recoveryContext()].filter(Boolean).join('\n')
     input.signal.throwIfAborted()
     await activeSession.prompt(task, { source: 'rpc', expandPromptTemplates: false, images: input.images?.map(piImage) })

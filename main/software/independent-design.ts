@@ -124,5 +124,5 @@ export function resolveIndependentRoute(policy:IndependentDesignPolicy){
   const channel=getChannelByIdRaw(policy.channel_id)
   if(!channel?.enabled||!channel.models.some(model=>model.name===policy.model&&model.enabled))throw Error('INDEPENDENT_CAPABILITY_MISSING')
   // No fallback metadata is attached. A different route is an explicit block.
-  return{channel_id:channel.id,model:policy.model,env:buildSdkEnv(decryptApiKey(channel.api_key),channel.base_url,policy.model,channel.provider_type)}
+  return{channel_id:channel.id,model:policy.model,env:buildSdkEnv(decryptApiKey(channel.api_key),channel.base_url,policy.model,channel.provider_type,channel.models.find(row=>row.name===policy.model))}
 }

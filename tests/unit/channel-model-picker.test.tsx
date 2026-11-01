@@ -88,6 +88,14 @@ function box(name: string): HTMLInputElement {
 }
 
 describe('渠道模型点选列表（勾选 / 过滤 / 全选清空 / 持久化 enabled）', () => {
+  it('persists an explicit million-token proxy window without testing the provider',async()=>{
+    mountWithChannels();await openCreateForm();await addModels('proxy-model');fillRequired()
+    fireEvent.change(screen.getByLabelText('proxy-model 上下文窗口'),{target:{value:'1000000'}})
+    fireEvent.click(screen.getByRole('button',{name:/保存/}))
+    await waitFor(()=>expect(api.create).toHaveBeenCalled())
+    expect(api.create.mock.calls[0][0].models[0]).toMatchObject({name:'proxy-model',context_window:1000000})
+    expect(api.testDirect).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     if (!(window as never as { crypto?: { randomUUID?: unknown } }).crypto?.randomUUID) {
       Object.defineProperty(window, 'crypto', { value: { randomUUID: () => 'u-' + Math.random() } })
