@@ -1,0 +1,388 @@
+{
+  "review_date": "2026-11-01",
+  "timezone": "Asia/Shanghai",
+  "window": {
+    "from": "2026-10-01",
+    "through": "2026-11-01"
+  },
+  "bloma_head": "a0d20e6f1954f3ef522b23eb81a8ba65ff257f34",
+  "scope": "bounded multi-source landscape scan, not exhaustive systematic literature review or product benchmark",
+  "counts": {
+    "open_source_projects": 10,
+    "products": 6,
+    "standards": 1,
+    "papers": 7,
+    "patch_spotchecks": 3
+  },
+  "sources": [
+    {
+      "id": "O1",
+      "category": "open_source",
+      "name": "Pi",
+      "source_url": "https://github.com/earendil-works/pi/releases/tag/v1.4.0",
+      "version": "v1.4.0",
+      "published_at_utc": "2026-10-21T22:49:48Z",
+      "published_date_shanghai": "2026-10-22",
+      "prerelease": false,
+      "read_depth": "release_and_selected_patch_tests",
+      "finding": "恢复/压缩、工具调用与结果配对、并行codemode等待；Bloma上游",
+      "limitation": "已核对发布及PR #11233；不代表0.85.1可直接升级或新功能会穿过Bloma适配层",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O2",
+      "category": "open_source",
+      "name": "OpenCode",
+      "source_url": "https://github.com/anomalyco/opencode/releases/tag/v2.2.5",
+      "version": "v2.2.5",
+      "published_at_utc": "2026-10-30T23:17:23Z",
+      "published_date_shanghai": "2026-10-31",
+      "prerelease": false,
+      "read_depth": "release_and_selected_patch_tests",
+      "finding": "比例压缩缓冲、编辑失败给近邻内容、模型切换保留推理语义",
+      "limitation": "已抽查PR #60689；错误提示不能绕过读取权限，未运行该项目",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O3",
+      "category": "open_source",
+      "name": "OpenHands",
+      "source_url": "https://github.com/OpenHands/software-agent-sdk/releases/tag/v1.58.2",
+      "version": "v1.58.2",
+      "published_at_utc": "2026-10-25T03:24:42Z",
+      "published_date_shanghai": "2026-10-25",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "MCP OAuth到ACP转发、终端关闭后结束等待、依赖修复",
+      "limitation": "发行说明证据；不能外推整个SDK的任务成功率",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O4",
+      "category": "open_source",
+      "name": "Browser Use",
+      "source_url": "https://github.com/browser-use/browser-use/releases/tag/0.13.13",
+      "version": "0.13.13",
+      "published_at_utc": "2026-10-15T23:50:45Z",
+      "published_date_shanghai": "2026-10-16",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "浏览器工具驱动、本机/云/借用会话、缩放坐标对齐",
+      "limitation": "浏览器范围，不是任意Windows原生应用控制；测试结果为维护者记录",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O5",
+      "category": "open_source",
+      "name": "Hermes",
+      "source_url": "https://github.com/NousResearch/hermes-agent/releases/tag/v0.22.5",
+      "version": "v0.22.5",
+      "published_at_utc": "2026-10-23T05:28:45Z",
+      "published_date_shanghai": "2026-10-23",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "可插拔委派后端、更新/桌面/连接器与Windows修复",
+      "limitation": "正文写10月22日，API发布10月23日；未采用宣传规模数字衡量质量",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O6",
+      "category": "open_source",
+      "name": "Dify",
+      "source_url": "https://github.com/langgenius/dify/releases/tag/1.18.0",
+      "version": "1.18.0",
+      "published_at_utc": "2026-10-23T06:33:50Z",
+      "published_date_shanghai": "2026-10-23",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "Agent输出路由、便携应用包、嵌套流程追踪/暂停恢复",
+      "limitation": "嵌套usage仍可能近似；协议升级有迁移要求；不适合直接移植其整套服务端",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O7",
+      "category": "open_source",
+      "name": "Goose",
+      "source_url": "https://github.com/aaif-goose/goose/releases/tag/v1.56.0",
+      "version": "v1.56.0",
+      "published_at_utc": "2026-10-23T15:49:34Z",
+      "published_date_shanghai": "2026-10-23",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "失败/取消子任务恢复、并发限制、Windows安装、JS运行时",
+      "limitation": "选取相关v1.56.0而非宣称它是最新；v1.57.0也在窗口",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O8",
+      "category": "open_source",
+      "name": "Deep Agents",
+      "source_url": "https://github.com/langchain-ai/deepagents/releases/tag/deepagents%3D%3D0.7.30",
+      "version": "deepagents==0.7.30",
+      "published_at_utc": "2026-10-22T02:27:00Z",
+      "published_date_shanghai": "2026-10-22",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "异步追问排队、通知父任务、webhook、取消状态、UTF-8输出限额",
+      "limitation": "SDK机制与生产收益分开；Python栈不是Bloma直接替代品",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O9",
+      "category": "open_source",
+      "name": "Qwen Code",
+      "source_url": "https://github.com/QwenLM/qwen-code/releases/tag/v0.26.4",
+      "version": "v0.26.4",
+      "published_at_utc": "2026-10-29T14:29:11Z",
+      "published_date_shanghai": "2026-10-29",
+      "prerelease": false,
+      "read_depth": "release_and_selected_patch_tests",
+      "finding": "独立worktree、按轮快照绑定验证报告、记录模型/CLI/Skill版本",
+      "limitation": "抽查#15746发现坏快照会降级警告且CLI测试跳过Windows，不能照抄其验收强度",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "O10",
+      "category": "open_source",
+      "name": "Kimi Code",
+      "source_url": "https://github.com/MoonshotAI/kimi-code/releases/tag/%40moonshot-ai/kimi-code%402.4.1",
+      "version": "@moonshot-ai/kimi-code@2.4.1",
+      "published_at_utc": "2026-10-30T09:50:16Z",
+      "published_date_shanghai": "2026-10-30",
+      "prerelease": false,
+      "read_depth": "release_notes",
+      "finding": "降低单次read输出上限，缩短工具/子任务提示和重复提醒",
+      "limitation": "旧kimi-cli已归档；SSH/Docker创建绑定见2.5 canary，不能列作2.4.1稳定功能",
+      "additional_url": "https://github.com/MoonshotAI/kimi-code/releases/tag/%40moonshot-ai/kimi-code%402.5.0-canary.20261030040529-bd0d4de",
+      "verification": "GitHub release API metadata; no execution"
+    },
+    {
+      "id": "P1",
+      "category": "product",
+      "name": "Anthropic applied guidance",
+      "published_date_source": "2026-10-22",
+      "source_url": "https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "渐进披露Skills/tools可能替代耦合专家子Agent，仍保留独立验证/并行/权限隔离",
+      "limitation": "企业案例，不是Bloma或软件生成的通用排名",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "P2",
+      "category": "product",
+      "name": "Cursor Agent SDK",
+      "published_date_source": "2026-10-20",
+      "source_url": "https://cursor.com/changelog/agent-sdk",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "Agent代码化、本地eval、事件回放、事件触发、托管或自部署",
+      "limitation": "已发布功能声明，不是复现后的效果",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "P3",
+      "category": "product",
+      "name": "Codex CLI 0.166.0",
+      "published_date_source": "2026-10-29",
+      "source_url": "https://learn.chatgpt.com/docs/changelog",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "会话queue resume、网络诊断、恢复/分叉权限和token记账修复",
+      "limitation": "当前页面滚动更新；只取10月29条目",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "P4",
+      "category": "product",
+      "name": "Devin memory",
+      "published_date_source": "2026-10-09",
+      "source_url": "https://docs.devin.ai/release-notes/overview",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "跨会话个人记忆及夜间整理，可查看和关闭",
+      "limitation": "官方页其他日期附近有冲突标记；只采用明确10月9条目，未验证实际效果",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "P5",
+      "category": "product",
+      "name": "Replit Cloud Agents",
+      "published_date_source": "2026-10-30",
+      "source_url": "https://docs.replit.com/updates/2026/10/30/changelog",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "非工程用户修改已有公司代码、隔离环境测试、带图/录像PR/MR、跨chat消息",
+      "limitation": "官方产品能力，未亲自试用或比较质量",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "P6",
+      "category": "product",
+      "name": "Lovable product AI integration",
+      "published_date_source": "2026-10-15",
+      "source_url": "https://lovable.dev/blog/ai-models-and-tools-in-lovable",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "把语音、视觉、研究和检索接入生成应用",
+      "limitation": "营销功能说明；具体账号、费用、数据部署另核对",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "S1",
+      "category": "standard",
+      "name": "Agent Skills / AAIF",
+      "published_date_source": "2026-10-22",
+      "source_url": "https://www.anthropic.com/news/donating-agent-skills-to-the-agentic-ai-foundation",
+      "read_depth": "official_article_or_dated_changelog",
+      "finding": "可移植技能标准及治理生态",
+      "limitation": "采用量为发布方统计，不作为收益证明",
+      "verification": "Opened official source"
+    },
+    {
+      "id": "R1",
+      "category": "paper",
+      "name": "SpecGuardBench",
+      "published_date_source": "2026-10-12",
+      "source_url": "https://arxiv.org/abs/2610.16870",
+      "read_depth": "full_text_selected_method_results_limitations_sections",
+      "finding": "291任务/13个Python仓库；检查是否忠于规格，包括合法替代实现与违规实现",
+      "limitation": "有限替代实现集、任务分布不均、有参考实现输入；不可把其比例套到实现前B",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "R2",
+      "category": "paper",
+      "name": "Doc2Harness",
+      "published_date_source": "2026-10-14",
+      "source_url": "https://arxiv.org/abs/2610.20344",
+      "read_depth": "full_text_selected_method_results_limitations_sections",
+      "finding": "将harness构建与冻结后的脚本模型驱动测试分离；观察请求/文件/退出码/输出并设正控",
+      "limitation": "单次构建协议，非持续修复上限；不是真实LLM下游成功率",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "R3",
+      "category": "paper",
+      "name": "HarnessSecurity-Bench",
+      "published_date_source": "2026-10-06",
+      "source_url": "https://arxiv.org/abs/2610.07639",
+      "read_depth": "abstract_and_version_history",
+      "finding": "安全机制与任务效用同时测；23任务、受控模型和设置比较",
+      "limitation": "v2为10月10；没有复现、不外推攻击成功率到Bloma",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "R4",
+      "category": "paper",
+      "name": "SWE-Duel",
+      "published_date_source": "2026-10-08",
+      "source_url": "https://arxiv.org/abs/2610.12569",
+      "read_depth": "full_text_selected_method_and_reproducibility_sections",
+      "finding": "作者构造可执行缺陷与密封测试；盲修复检查可解性，再让对手审阅修复",
+      "limitation": "合成缺陷/仓库任务，作者及任务筛选偏差；不等于真实桌面用户任务",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "R5",
+      "category": "paper",
+      "name": "SkillMem",
+      "published_date_source": "2026-10-27",
+      "source_url": "https://arxiv.org/abs/2610.37935",
+      "read_depth": "abstract_and_version_history",
+      "finding": "训练小型外部潜在技能记忆，在Qwen3 4B–14B与六个基准上评估",
+      "limitation": "需要内部表示/训练读取器，不可当普通闭源API的即插即用Skills",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "R6",
+      "category": "paper",
+      "name": "Who Approved This?",
+      "published_date_source": "2026-10-19",
+      "source_url": "https://arxiv.org/abs/2610.28683",
+      "read_depth": "abstract_and_version_history",
+      "finding": "12周单家fintech工程案例；账号审批身份不等于人作出决定",
+      "limitation": "单组织观察，不能推导所有团队比例；启发证据与权限分离",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "R7",
+      "category": "paper",
+      "name": "What Will Replace Pull Requests?",
+      "published_date_source": "2026-10-26",
+      "source_url": "https://arxiv.org/abs/2610.34933",
+      "read_depth": "abstract_and_version_history",
+      "finding": "50篇灰色文献/31组织或个人，讨论PR角色与新协作产物",
+      "limitation": "综述提出/采用分开，不能宣称PR已被行业替代",
+      "verification": "Author paper; preprint/under-review; not independently reproduced"
+    },
+    {
+      "id": "C1",
+      "category": "patch_spotcheck",
+      "source_url": "https://github.com/earendil-works/pi/pull/11233",
+      "files": [
+        "packages/coding-agent/src/core/agent-session.ts",
+        "packages/coding-agent/test/suite/regressions/11227-recovery-omits-tool-results.test.ts"
+      ],
+      "read_depth": "selected implementation and tests diffs",
+      "verification": "Read through GitHub connector; not executed"
+    },
+    {
+      "id": "C2",
+      "category": "patch_spotcheck",
+      "source_url": "https://github.com/anomalyco/opencode/pull/60689",
+      "files": [
+        "packages/core/src/permission.ts",
+        "packages/core/src/tool/plugin/edit.ts",
+        "packages/core/test/permission.test.ts",
+        "packages/core/test/plugin/fixture.ts",
+        "packages/core/test/plugin/permission-assert.test.ts",
+        "packages/core/test/tool-edit.test.ts"
+      ],
+      "read_depth": "selected implementation and tests diffs",
+      "verification": "Read through GitHub connector; not executed"
+    },
+    {
+      "id": "C3",
+      "category": "patch_spotcheck",
+      "source_url": "https://github.com/QwenLM/qwen-code/pull/15746",
+      "files": [
+        "docs/design/verify-pr-local-round.md",
+        "docs/design/verify-pr-local-round.zh-CN.md",
+        "scripts/tests/verify-pr-check.test.js",
+        "scripts/tests/verify-pr-prepare.test.js",
+        "scripts/verify-pr-check.mjs",
+        "scripts/verify-pr-prepare.mjs"
+      ],
+      "read_depth": "selected implementation and tests diffs",
+      "verification": "Read through GitHub connector; not executed"
+    }
+  ],
+  "excluded": [
+    {
+      "name": "MoonshotAI/kimi-cli",
+      "reason": "archived 2026-09-23; followed successor kimi-code instead",
+      "url": "https://github.com/MoonshotAI/kimi-cli/releases"
+    },
+    {
+      "name": "2025/early-2026 harness articles and 2609.32459",
+      "reason": "outside primary date window; not counted as October discoveries"
+    },
+    {
+      "name": "aggregator rankings/social posts",
+      "reason": "used only for discovery; no ranking or performance claim based on them"
+    },
+    {
+      "name": "irrelevant old arXiv query hits",
+      "reason": "date and subject failed inclusion; discarded"
+    }
+  ],
+  "search_families": [
+    "official changelog October 2026; directly open product release timelines",
+    "OpenHands/OpenCode/Pi/browser-use releases; then GitHub API release metadata",
+    "deepagents/goose/Hermes/Dify/Qwen/Kimi releases; stable vs preview separated",
+    "arxiv 2610 coding harness benchmark; specification validation; computer use; agent memory; multi-agent",
+    "citation follow-up to paper HTML methods, limitations and reproducibility",
+    "Bloma package version, live Pi adapter/skill hooks/tools/quality gates/evaluation binding"
+  ],
+  "limits": [
+    "Search-index coverage is imperfect; no claim to enumerate every October paper",
+    "10 open-source release snapshots; no full source audit or software installation",
+    "Three papers read beyond abstracts; four screened at abstract/version level",
+    "No paid model calls, competitor runs, performance benchmark, dependency upgrades or production changes"
+  ]
+}
