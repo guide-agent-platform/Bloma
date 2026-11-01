@@ -47,8 +47,8 @@ describe('ux-sketch-picks-panel：草图点选标记浮条与发送链', () => {
       current_stage: 'sketch_ready',
       root_path: 'C:/tmp/p1',
     } as never as Project)
-    sendMessage = vi.fn().mockResolvedValue(undefined)
-    ;(window as never as { electronAPI: unknown }).electronAPI = { agent: { sendMessage } }
+    sendMessage = vi.fn().mockResolvedValue({ok:true})
+    ;(window as never as { electronAPI: unknown }).electronAPI = { composer: { submit:sendMessage } }
   })
   afterEach(() => {
     delete (window as never as { electronAPI?: unknown }).electronAPI
@@ -64,7 +64,7 @@ describe('ux-sketch-picks-panel：草图点选标记浮条与发送链', () => {
     )
   const bar = () => document.querySelector('[data-ai-id="sketch-picks-bar"]')
   const sendBtn = () => document.querySelector('[data-ai-id="sketch-picks-send"]') as HTMLButtonElement | null
-  const postPick = () => window.postMessage({ label: 'bloma-sketch-pick', pick: PICK }, '*')
+  const postPick = () => window.dispatchEvent(new MessageEvent('message',{data:{label:'bloma-sketch-pick',pick:PICK},source:document.querySelector('iframe')!.contentWindow}))
 
   it('状态说明独立切换，返回主界面不改变确认对象', () => {
     const confirm = vi.fn()

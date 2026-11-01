@@ -111,7 +111,6 @@ const WHITELIST = new Set<string>([
   // ── 主题二：agent/loop 收口/上下文构建引用领域件（PR3 拆 programming-orchestrator 时一并评估归属）
   'R1|main/agent/loop -> main/coding/output-integrity',
   'R1|main/agent/loop -> main/coding/preview-browser',
-  'R1|main/agent/loop -> main/project/document-engine',
   'R1|main/agent/loop -> main/project/learnings-log',
   'R1|main/agent/loop -> main/project/project-service',
   // ── 主题三：agent/prompting 表达层引用 PRD/需求领域件（表达适配层的固有耦合，PR4 评估上提或下沉）

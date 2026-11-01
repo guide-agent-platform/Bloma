@@ -11,6 +11,7 @@ import {
   setChildToolsBuilder,
   startDelegation,
   stopDelegations,
+  settleParentDelegationRuns,
   unregisterParentLoopContext,
 } from '../../main/agent/delegation/agent-collaboration'
 import {
@@ -33,12 +34,13 @@ import {
  */
 
 /** 挂起工具：execute 永不 resolve（但响应 abort——withAbort 包装 reject），子 loop 停在工具执行性 running。 */
+let toolEntered=false
 function hangTool(): AgentLoopTool {
   return {
     name: 'hang_tool',
     description: '测试用挂起工具',
     input_schema: { type: 'object', properties: {} },
-    execute: () => new Promise<{ output: string }>(() => undefined),
+    execute: () => {toolEntered=true;return new Promise<{ output: string }>(() => undefined)},
   }
 }
 
@@ -78,8 +80,7 @@ function registerParent(query: SDKQuery): void {
 }
 
 async function settleChildLoops(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await settleParentDelegationRuns(parentSessionId)
 }
 
 describe('C4 委派观察哨（纯逻辑扫描）', () => {
@@ -189,11 +190,14 @@ describe('C4 委派观察哨（真实定时器集成）', () => {
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-watch-int-'))
+    toolEntered=false
     process.env.BLOMA_DELEGATION_WATCH = '1'
     parentSessionId = `session-watch-int-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder(() => [hangTool()])
     registerParent(toolUseQuery())
-    setDelegationWatchThresholdsForTests({ scanIntervalMs: 40, softMs: 150, hardMs: 400 })
+    // Pi initialization is not the hung tool being measured. Start scanning
+    // with production deadlines, then arm the short thresholds at tool entry.
+    setDelegationWatchThresholdsForTests({ scanIntervalMs: 40 })
     markLoopActive(parentSessionId)
   })
   afterEach(async () => {
@@ -214,6 +218,10 @@ describe('C4 委派观察哨（真实定时器集成）', () => {
     const record = findDelegation(parentSessionId, created.delegation_id)!
     expect(record.status).toBe('running')
 
+    await vi.waitFor(()=>expect(toolEntered).toBe(true),{timeout:10000,interval:10})
+    scanDelegationsForWatch(Date.now())
+    setDelegationWatchThresholdsForTests({scanIntervalMs:40,softMs:150,hardMs:400})
+
     // 软超时（~150ms + 扫描间隔 40ms）
     await new Promise((resolve) => setTimeout(resolve, 320))
     const entries = drainSteerQueue(parentSessionId)
@@ -230,6 +238,9 @@ describe('C4 委派观察哨（真实定时器集成）', () => {
     const { getAgentSessionPath } = await import('../../storage/config-paths')
     const created = startDelegation(parentContext(), { task: '长任务活动感知', role: 'research' })
     const record = findDelegation(parentSessionId, created.delegation_id)!
+    await vi.waitFor(()=>expect(toolEntered).toBe(true),{timeout:10000,interval:10})
+    scanDelegationsForWatch(Date.now())
+    setDelegationWatchThresholdsForTests({scanIntervalMs:40,softMs:150,hardMs:400})
     const childPath = getAgentSessionPath(created.child_session_id)
     mkdirSync(require('node:path').dirname(childPath), { recursive: true })
     writeFileSync(childPath, '', 'utf8')

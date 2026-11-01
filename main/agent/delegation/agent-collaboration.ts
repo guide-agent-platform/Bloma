@@ -158,6 +158,7 @@ export interface WaitForDelegationsArgs {
 
 const delegations = new Map<string, DelegationRecord>()
 const childInvocations = new Map<string, Set<Promise<void>>>()
+const latestChildInvocation = new WeakMap<DelegationRecord, Promise<void>>()
 const parentContexts = new Map<string, DelegationParentContext>()
 
 let childToolsBuilder: ChildToolsBuilder = () => {
@@ -376,10 +377,23 @@ function launchChildLoop(opts: Parameters<typeof runChildLoop>[0]): void {
   })
   const pending = childInvocations.get(opts.record.parentSessionId) ?? new Set<Promise<void>>()
   childInvocations.set(opts.record.parentSessionId, pending)
-  const invocation = runChildLoop(opts).then(
+  // Logical stop settles the public record immediately, but Pi still owns the
+  // native session until disposal. Serialize reuse of this child only; other
+  // children remain concurrent, and a superseded queued run never starts.
+  const previous = latestChildInvocation.get(opts.record)
+  const start = async () => {
+    ownedAbort.signal.throwIfAborted()
+    if(opts.record.abort!==ownedAbort)throw Error('AGENT_CANCELLED: superseded_invocation')
+    return runChildLoop(opts)
+  }
+  const invocation = (previous ? previous.then(start) : start()).then(
     result => { if (opts.record.abort === ownedAbort) settleChildLoop(opts.record, result) },
     error => { if (opts.record.abort === ownedAbort) settleChildLoopError(opts.record, error) },
-  ).finally(() => { pending.delete(invocation); if (!pending.size) childInvocations.delete(opts.record.parentSessionId) })
+  ).finally(() => {
+    pending.delete(invocation); if (!pending.size) childInvocations.delete(opts.record.parentSessionId)
+    if(latestChildInvocation.get(opts.record)===invocation)latestChildInvocation.delete(opts.record)
+  })
+  latestChildInvocation.set(opts.record,invocation)
   pending.add(invocation)
 }
 

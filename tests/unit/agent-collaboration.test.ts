@@ -27,6 +27,7 @@ import {
   stopDelegation,
   unregisterParentLoopContext,
   waitForDelegations,
+  settleParentDelegationRuns,
   type StartDelegationResult,
 } from '../../main/agent/delegation/agent-collaboration'
 
@@ -41,8 +42,7 @@ async function abortAndSettleChildLoops(): Promise<void> {
   for (const record of listDelegations(parentSessionId)) {
     if (record.status === 'running') record.abort.abort()
   }
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await settleParentDelegationRuns(parentSessionId)
 }
 
 /**
@@ -610,13 +610,15 @@ describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
   })
   it('a stopped invocation and its old abort timer cannot settle or cancel the replacement continuation', async () => {
     let releaseOld!: () => void, releaseNew!: () => void
+    let markOldEntered!:()=>void
+    const oldEntered=new Promise<void>(resolve=>{markOldEntered=resolve})
     const oldBarrier = new Promise<void>(r => { releaseOld = r })
     const newBarrier = new Promise<void>(r => { releaseNew = r })
     setChildToolsBuilder(() => [])
-    registerParent(async function* () { await oldBarrier; yield textMessage('old result'); yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' } })
+    registerParent(async function* () { markOldEntered();await oldBarrier; yield textMessage('old result'); yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' } })
     const child = startDelegation(parentContext(), { task: 'first' })
     const record = findDelegation(parentSessionId, child.delegation_id)!
-    await new Promise(r => setTimeout(r, 5))
+    await oldEntered
     stopDelegation(parentSessionId, child.delegation_id)
     registerParent(async function* () { await newBarrier; yield textMessage('new result'); yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' } })
     continueDelegation(parentContext(), child.delegation_id, 'replacement')
@@ -1069,7 +1071,8 @@ describe('web_research 委派化查询（闭环 PR5）', () => {
     registerParent(oneShotQuery(''))
     const outcome = await webResearch().execute({ question: '空结论调研' }, parentContext())
     expect(outcome.isError).toBe(true)
-    expect(outcome.output).toContain('没有产出结论')
+    // Pi rejects an empty provider completion before a child can claim success.
+    expect(outcome.output).toContain('status=failed')
     expect(outcome.output).toContain('web_fetch')
   })
 })

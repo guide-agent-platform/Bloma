@@ -25,6 +25,7 @@ import {
   startDelegation,
   unregisterParentLoopContext,
   waitForDelegations,
+  settleParentDelegationRuns,
 } from '../../main/agent/delegation/agent-collaboration'
 
 vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
@@ -237,8 +238,9 @@ describe('C1 startDelegation 集成', () => {
       publish: () => undefined,
     })
   })
-  afterEach(() => {
+  afterEach(async () => {
     disposeParentDelegationState(parentSessionId)
+    await settleParentDelegationRuns(parentSessionId)
     unregisterParentLoopContext(parentSessionId)
     if (originalPromaHome === undefined) delete process.env.PROMA_HOME
     else process.env.PROMA_HOME = originalPromaHome
@@ -257,6 +259,8 @@ describe('C1 startDelegation 集成', () => {
     expect(record?.channelOverride?.channelName).toBe('智谱')
     expect(record?.channelOverride?.env.ANTHROPIC_MODEL).toBe('GLM-5.3')
 
+    // Wait for real SDK initialization/dispatch before measuring the wait API.
+    await vi.waitFor(()=>expect(capturedEnv).toBeDefined(),{timeout:10000})
     const summaries = await waitForDelegations(parentContext(), {
       delegationIds: [created.delegation_id],
       timeout_ms: 3000,
@@ -274,6 +278,7 @@ describe('C1 startDelegation 集成', () => {
       task: '同渠道子任务',
       role: 'explore',
     })
+    await vi.waitFor(()=>expect(capturedEnv).toBeDefined(),{timeout:10000})
     await waitForDelegations(parentContext(), { delegationIds: [created.delegation_id], timeout_ms: 3000 })
     expect(capturedEnv?.ANTHROPIC_MODEL).toBe('parent-model')
     expect(getDelegationSummary(findDelegation(parentSessionId, created.delegation_id)!).channel).toBeUndefined()

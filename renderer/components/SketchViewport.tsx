@@ -9,7 +9,7 @@ export function sketchFitScale(width: number, height: number, natural = false, p
 }
 
 /** Preserve the design layout while fitting the whole document into the available canvas. */
-export const SketchViewport: React.FC<{ src?: string; html?: string; readOnly?: boolean; natural?: boolean; iframeRef?: React.Ref<HTMLIFrameElement>; onError?: () => void }> = ({ src, html, readOnly = false, natural = false, iframeRef, onError }) => {
+export const SketchViewport: React.FC<{ src?: string; html?: string; readOnly?: boolean; confirmed?: boolean; natural?: boolean; iframeRef?: React.Ref<HTMLIFrameElement>; onError?: () => void }> = ({ src, html, readOnly = false, confirmed = false, natural = false, iframeRef, onError }) => {
   const surface = React.useRef<HTMLDivElement>(null)
   const frame = React.useRef<HTMLIFrameElement | null>(null)
   const [size, setSize] = React.useState(DESIGN)
@@ -61,7 +61,7 @@ export const SketchViewport: React.FC<{ src?: string; html?: string; readOnly?: 
   const resetScroll = () => { if (surface.current) { surface.current.scrollTop = 0; surface.current.scrollLeft = 0 } }
   React.useLayoutEffect(() => { if (fit) resetScroll() }, [fit, scale])
   return <div className="sketch-viewport" data-ai-id="sketch-viewport" data-fit={fit}>
-    <div className="sketch-toolbar"><span>{natural ? '点选模式 · 原尺寸' : fluid ? '按当前窗口展示 · 可直接查看细节' : scale < .55 ? '完整画布缩略图 · 可切换适应窗口' : readOnly ? '已确认的界面 · 回看' : '草图独立视口'}</span><div>
+    <div className="sketch-toolbar"><span>{natural ? '点选模式 · 原尺寸' : fluid ? '按当前窗口展示 · 可直接查看细节' : scale < .55 ? '完整画布缩略图 · 可切换适应窗口' : confirmed ? '已确认的界面 · 回看' : readOnly ? '仅查看' : '草图独立视口'}</span><div>
       <button type="button" className="theatre-tool" disabled={natural} onClick={() => { setResponsive(true); setZoom(null); resetScroll() }} aria-pressed={fluid}>适应窗口</button>
       <button type="button" className="theatre-tool" disabled={natural} onClick={() => { setResponsive(false); setZoom(null); resetScroll() }} aria-pressed={fit} title="将完整草图缩放到画布内"><Scan size={13} />完整画布</button>
       <button type="button" className="theatre-tool" disabled={natural} onClick={() => { setResponsive(false); setZoom(1); resetScroll() }} aria-pressed={!fluid && (zoom === 1 || natural)}>原尺寸</button>
@@ -74,6 +74,6 @@ export const SketchViewport: React.FC<{ src?: string; html?: string; readOnly?: 
       frame.current = element
       if (typeof iframeRef === 'function') iframeRef(element)
       else if (iframeRef) (iframeRef as React.MutableRefObject<HTMLIFrameElement | null>).current = element
-    }} src={source} srcDoc={sourceHtml} title={readOnly ? '已确认的界面草图' : '软件预览'} sandbox={readOnly ? 'allow-scripts' : 'allow-scripts allow-forms allow-same-origin'} onError={onError} onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'bloma-viewport-measure', token }, '*')} style={{ width: dimensions.width, height: dimensions.height, transform: `scale(${scale})`, transformOrigin: 'top left' }} /></div></div>
+    }} src={source} srcDoc={sourceHtml} title={confirmed ? '已确认的界面草图' : '软件预览'} sandbox={readOnly ? 'allow-scripts' : 'allow-scripts allow-forms allow-same-origin'} onError={onError} onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'bloma-viewport-measure', token }, '*')} style={{ width: dimensions.width, height: dimensions.height, transform: `scale(${scale})`, transformOrigin: 'top left' }} /></div></div>
   </div>
 }
