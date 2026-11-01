@@ -33,9 +33,9 @@
     "seed:skills": "node scripts/seed-skills.cjs"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "electron": "^39.0.0",
     "jotai": "^2.12.5",
     "lucide-react": "1.55.0",

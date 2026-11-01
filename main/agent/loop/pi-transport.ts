@@ -1,7 +1,7 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import { withAbort, type AgentLoopInput } from './agent-loop'
 import type { SDKMessage } from '../../../shared/types'
-import { emptyAssistant, toTransportTurns } from './pi-messages'
+import { emptyAssistant, toTransportTurns, piToolArguments } from './pi-messages'
 
 async function* abortable(source: AsyncIterable<SDKMessage>, signal: AbortSignal) {
   const iterator = source[Symbol.asyncIterator]()
@@ -24,7 +24,7 @@ export function createPiTransport(input: AgentLoopInput, lifecycle: {
   onFailure(error: unknown): void
 }): StreamFn {
   return async (model, context, options) => {
-    const { createAssistantMessageEventStream } = await import('@earendil-works/pi-ai')
+    const { createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools } = await import('@earendil-works/pi-ai')
     const stream = createAssistantMessageEventStream()
     const message = emptyAssistant(model)
     void (async () => {
@@ -37,8 +37,8 @@ export function createPiTransport(input: AgentLoopInput, lifecycle: {
         let finished = false
         for await (const sdk of abortable(input.query('', {
           env: input.env, signal, sessionId: input.sessionId,
-          messages: toTransportTurns(context),
-          tools: context.tools?.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters as unknown as Record<string, unknown> })),
+          messages: toTransportTurns({ messages: context.messages, systemPrompt: getCurrentSystemPrompt(context.messages) }),
+          tools: getCurrentTools(context.messages).map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters as unknown as Record<string, unknown> })),
           maxTokens: Math.min(input.maxTokens, options?.maxTokens ?? input.maxTokens),
           temperature: input.temperature, providerType: input.providerType,
           thinkingLevel: input.thinkingLevel ?? (input.env.BLOMA_LOOP_THINKING === 'off' ? 'off' : 'low'),
@@ -56,7 +56,7 @@ export function createPiTransport(input: AgentLoopInput, lifecycle: {
                 stream.push({ type: 'text_delta', contentIndex: index, delta: block.text, partial: message })
               } else if (block.type === 'tool_use' && block.id && block.name) {
                 const index = message.content.length
-                const toolCall = { type: 'toolCall' as const, id: block.id, name: block.name, arguments: block.input ?? {} }
+                const toolCall = { type: 'toolCall' as const, id: block.id, name: block.name, arguments: piToolArguments(block.input ?? {}) }
                 message.content.push(toolCall)
                 stream.push({ type: 'toolcall_end', contentIndex: index, toolCall, partial: message })
               }

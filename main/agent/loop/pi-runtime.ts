@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { AgentMessage, AgentToolResult } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, AgentToolResult, AgentTurnContext } from '@earendil-works/pi-agent-core'
 import type { AgentSession, ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { getPromaHome } from '../../../storage/config-paths'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
@@ -22,7 +22,7 @@ import { createPiTransport } from './pi-transport'
 import { openPiSession, recoverInterruptedTools } from './pi-session-store'
 import { observePiRuntime, PI_CONTEXT_POLICY, PI_RETRY_POLICY } from './runtime-observation'
 
-/** Proma bf3e98c / Pi 0.85.1: the SDK owns model/tool turns, retry,
+/** Proma bf3e98c adapted to Pi 1.4.0: the SDK owns model/tool turns, retry,
  * persistence, queue draining and compaction. Bloma owns permissions, budgets,
  * evidence and delivery gates. There is no fallback to the legacy executor. */
 export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResult> {
@@ -78,11 +78,13 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
   try {
     input.signal.throwIfAborted()
     const { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager } = await import('@earendil-works/pi-coding-agent')
+    const { getCurrentSystemMessage } = await import('@earendil-works/pi-ai')
     const agentDir = join(getPromaHome(), 'bloma-pi-runtime')
     const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true, reserveTokens: PI_CONTEXT_POLICY.reserveTokens, keepRecentTokens: PI_CONTEXT_POLICY.keepRecentTokens },
-      retry: PI_RETRY_POLICY })
+      retry: PI_RETRY_POLICY, images: { autoResize: false, blockImages: false } })
     const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
       noContextFiles: true, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
+      disabledBuiltinExtensions: ['mcp', 'codemode'],
       appendSystemPrompt: [], agentsFilesOverride: () => ({ agentsFiles: [] }),
       systemPromptOverride: () => input.system, appendSystemPromptOverride: () => [] })
     await resourceLoader.reload()
@@ -132,8 +134,11 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
       },
     }))
     ;({ session } = await createAgentSession({ cwd, agentDir, modelRuntime, settingsManager, resourceLoader,
-      sessionManager: opened.manager, model, thinkingLevel: input.thinkingLevel ?? 'low', noTools: 'builtin', customTools }))
+      sessionManager: opened.manager, model, thinkingLevel: input.thinkingLevel ?? 'low', noTools: 'all',
+      tools: customTools.map(tool => tool.name), excludeTools: ['mcp__*', 'codemode', 'tool_search'], customTools }))
     const activeSession = session
+    const expectedTools = input.tools.map(tool => tool.name).sort()
+    if (JSON.stringify(activeSession.getActiveToolNames().sort()) !== JSON.stringify(expectedTools)) throw new Error('PI_TOOL_ALLOWLIST_MISMATCH')
     activeSession.agent.toolExecution = 'sequential'
     activeSession.agent.beforeToolCall = async () => input.shouldPause?.()
       ? { block: true, reason: '任务范围等待用户确认，后续工具未执行。', terminate: true }
@@ -167,10 +172,15 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
       if (!progress) return converted
       const transport = toTransportTurns({ messages: converted })
       pruneDuplicateReads(transport)
-      return importLegacyTurns(transport, model)
+      const systemMessage = getCurrentSystemMessage(converted)
+      return [...(systemMessage ? [systemMessage] : []), ...importLegacyTurns(transport, model)]
     }
     const queue = (text: string) => activeSession.agent.followUp({ role: 'user', content: text, timestamp: Date.now() })
-    activeSession.agent.shouldStopAfterTurn = async ({ message, toolResults }) => {
+    const sdkFinishTurn = activeSession.agent.finishTurn?.bind(activeSession.agent)
+    const shouldEndHostTurn = async ({ message, toolResults }: AgentTurnContext) => {
+      // Pi 1.x invokes finishTurn for errors too. A failed request is not a
+      // completion proposal: let Pi settle/retry it, never start C/V here.
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') return true
       if (input.shouldPause?.()) return true
       if (input.signal.aborted) { status = 'cancelled'; return true }
       if (status !== 'completed') return true
@@ -203,6 +213,13 @@ export async function runPiSession(input: AgentLoopInput): Promise<AgentLoopResu
         }
       }
       return false
+    }
+    // Preserve Pi's own boundary dispatch; host completion/budget/steering still
+    // owns whether another turn is allowed. Do not replace the SDK hook outright.
+    activeSession.agent.finishTurn = async (turn, signal) => {
+      const decision = await sdkFinishTurn?.(turn, signal)
+      if (await shouldEndHostTurn(turn)) return { action: 'end' }
+      return decision ?? undefined
     }
     let initialUser = true
     unsubscribe = activeSession.subscribe(event => {

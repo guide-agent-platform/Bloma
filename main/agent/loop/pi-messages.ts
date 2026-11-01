@@ -1,13 +1,24 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import type { AssistantMessage, Context, ImageContent, Message, Model } from '@earendil-works/pi-ai'
+import type { AssistantMessage, Context, ImageContent, Message, Model, JsonObject } from '@earendil-works/pi-ai'
+import { parseToolCallArguments } from '@earendil-works/pi-ai'
 import type { ConversationTurn } from '../../orchestration/stages/orchestration-contracts'
 import type { MessageContentBlock, PastedImageRef } from '../../../shared/types'
 
-/** The bridge, like Bloma's audit log, carries image references, never base64.
- * Only the existing transport's authenticated attachment hydration reads bytes. */
+/** The bridge carries opaque image references, never actual image bytes.
+ * Only the existing transport's authenticated attachment hydration reads pixels. */
 const IMAGE_REF = 'bloma-image-ref:'
+/** SDK 1.x requires actual JSON, not an unchecked Record<string, unknown>. */
+export function piToolArguments(input: Record<string, unknown>): JsonObject {
+  try {
+    const parsed = parseToolCallArguments(JSON.stringify(input))
+    if (parsed.argumentsError) throw new Error('invalid tool object')
+    return parsed.arguments
+  } catch { throw new Error('PI_TOOL_ARGUMENTS_NOT_JSON') }
+}
 export function piImage(ref: PastedImageRef): ImageContent {
-  return { type: 'image', data: IMAGE_REF + ref.imageId, mimeType: ref.media_type }
+  // Pi 1.x normalizes image blocks as base64 even with resize disabled. Encode
+  // the opaque reference, never the image bytes. Only Bloma hydrates real images.
+  return { type: 'image', data: Buffer.from(IMAGE_REF + ref.imageId, 'utf8').toString('base64'), mimeType: ref.media_type }
 }
 
 export function emptyAssistant(model: Model<string>): AssistantMessage {
@@ -23,8 +34,10 @@ function userBlocks(content: Message['content']): MessageContentBlock[] {
   return content.flatMap((block): MessageContentBlock[] => {
     if (block.type === 'text') return [{ type: 'text', text: block.text }]
     if (block.type === 'image') {
-      if (!block.data.startsWith(IMAGE_REF)) throw new Error('PI_IMAGE_REFERENCE_REQUIRED')
-      return [{ type: 'image', imageId: block.data.slice(IMAGE_REF.length), media_type: block.mimeType }]
+      // Existing 0.85.1 sessions keep their original plain references.
+      const reference = block.data.startsWith(IMAGE_REF) ? block.data : Buffer.from(block.data, 'base64').toString('utf8')
+      if (!reference.startsWith(IMAGE_REF)) throw new Error('PI_IMAGE_REFERENCE_REQUIRED')
+      return [{ type: 'image', imageId: reference.slice(IMAGE_REF.length), media_type: block.mimeType }]
     }
     return []
   })
@@ -89,7 +102,7 @@ export function importLegacyTurns(turns: ConversationTurn[], model: Model<string
         if (block.type === 'text' && block.text) message.content.push({ type: 'text', text: block.text })
         if (block.type === 'tool_use' && block.id && block.name && paired.has(block.id)) {
           names.set(block.id, block.name)
-          message.content.push({ type: 'toolCall', id: block.id, name: block.name, arguments: block.input ?? {} })
+          message.content.push({ type: 'toolCall', id: block.id, name: block.name, arguments: piToolArguments(block.input ?? {}) })
         }
       }
       message.stopReason = message.content.some(b => b.type === 'toolCall') ? 'toolUse' : 'stop'

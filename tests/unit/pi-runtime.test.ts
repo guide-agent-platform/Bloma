@@ -42,6 +42,12 @@ function tool(name: string, execute: AgentLoopTool['execute']): AgentLoopTool {
 function nativeFile() { return piSessionPath('test-project', 'test-session', 'desktop-implement:', process.cwd()) }
 
 describe('real upstream Pi AgentSession integration', () => {
+  it('does not enter host completion or spawn reviews for a failed provider turn', async () => {
+    const beforeComplete=vi.fn(async()=>undefined)
+    const query:SDKQuery=async function*(){throw new Error('REQUEST_BUDGET_EXHAUSTED')}
+    await expect(runAgentLoop(input(query,{beforeComplete}))).rejects.toThrow('REQUEST_BUDGET_EXHAUSTED')
+    expect(beforeComplete).not.toHaveBeenCalled()
+  })
   it.each(['pi', undefined] as const)('stops repeated host failures despite intervening successful commands (runtime=%s)', async runtime => {
     const scripts: SDKMessage[][] = Array.from({ length: 8 }, (_, i) => [call('print-' + i, 'run_command'), call('failed-' + i, 'verify_app')])
     const source = scripted([...scripts, [text('must not reach completion')]])
@@ -62,7 +68,7 @@ describe('real upstream Pi AgentSession integration', () => {
     const result = await runAgentLoop(input(query, { tools: [tool('write_file', write), tool('run_project_script', check)],onRuntimeObservation:observed,
       env:{ANTHROPIC_AUTH_TOKEN:'secret-not-in-identity',ANTHROPIC_MODEL:'fixture',ANTHROPIC_BASE_URL:'https://user:password@fixture.invalid/v1?key=private',ANTHROPIC_PROVIDER_TYPE:'fixture'} }))
     expect(observed).toHaveBeenCalledTimes(1)
-    expect(observed.mock.calls[0][0]).toMatchObject({runtime:{engine:'pi',packages:{'pi-coding-agent':'0.85.1'}},settings:{contextWindow:128000,tool_execution:'sequential'},route:{model:'fixture',endpoint_origin:'https://fixture.invalid'},skills:{mode:'explicit-bloma',names:[]}})
+    expect(observed.mock.calls[0][0]).toMatchObject({runtime:{engine:'pi',packages:{'pi-coding-agent':'1.4.0'}},settings:{contextWindow:128000,tool_execution:'sequential'},route:{model:'fixture',endpoint_origin:'https://fixture.invalid'},skills:{mode:'explicit-bloma',names:[]}})
     expect(JSON.stringify(observed.mock.calls)).not.toMatch(/secret-not-in-identity|password|key=private/)
     expect(result.status).toBe('completed')
     expect(write).toHaveBeenCalledTimes(1); expect(check).toHaveBeenCalledTimes(1)
@@ -249,7 +255,7 @@ describe('real upstream Pi AgentSession integration', () => {
     const see = tool('see_image', async () => ({ output: 'actual screenshot', images }))
     await runAgentLoop(input(flow.query, { tools: [see] }))
     expect(JSON.stringify(flow.received[1].messages)).toContain('actual-screenshot.png')
-    expect(readFileSync(nativeFile(), 'utf8')).toContain('actual-screenshot.png')
+    expect(readFileSync(nativeFile(), 'utf8')).toContain(Buffer.from('bloma-image-ref:test-session/actual-screenshot.png').toString('base64'))
     const resumed = scripted([[text('继续检查')]])
     await runAgentLoop(input(resumed.query, { tools: [see], task: '沿上次截图继续' }))
     expect(JSON.stringify(resumed.received[0].messages)).toContain('actual-screenshot.png')

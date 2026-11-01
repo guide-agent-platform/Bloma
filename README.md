@@ -4,6 +4,8 @@
 > 当前状态：需求、UX、架构、接口、测试、Sprint、科研计划已完成  
 > 日期：2026-07-10
 
+> 2026-11-01：[Pi 1.4.0 升级与原生接口接入](docs/05_PROJECT_PLAN/pi-runtime-upgrade-20261101.md)。三个Pi包统一锁定，完成宿主完成门、原生消息/工具声明和图片授权桥适配；评测身份与此前修复见[实施审计](docs/05_PROJECT_PLAN/frontier-evaluation-pi-audit-20261101.md)。本机工程验证与真实模型收益分别记录。
+
 > 当前入口（2026-10-28）：新项目统一使用 software-v1，经过短任务单、必要的外观确认、连续 Pi 制作和宿主实际验证。长期型按里程碑核对与发布，待办另行确认。未标记历史项目和 lean-v1 只保留历史/产物访问，继续修改须显式复制；冻结实验只读报告。见 [后续清理记录](docs/05_PROJECT_PLAN/workflow-cleanup-20261028.md)。
 
 > 2026-10-29：[第一轮能力扩展](docs/05_PROJECT_PLAN/capability-expansion-20261029.md)接入产品自有PDF／DOCX文本解析、字面检索与精确引用核对，提供业务关系反例和已有工程导入差异；修复发布依赖的Node查找布局。工程验证通过，真实模型生成收益及AI效果另验。
@@ -20,7 +22,7 @@
 
 > 后续模板实施总入口：[产品模板与生成效率完整计划表](docs/05_PROJECT_PLAN/product-template-roadmap-20261029.md)。覆盖8类产品模板、组件契约、诊断/选测支撑、依赖批次、里程碑和固定场景验收；优先多模态与HTTP/Webhook。B0–B8本机模板、连接器设置、组合工作台、独立资源分发与B9对照工具已实施；真实服务、干净系统及真实效率对照仍待条件。当前源码审计修复与重建包见[模板审计记录](docs/05_PROJECT_PLAN/template-audit-20261029.md)；原交付范围见[剩余批次交付记录](docs/05_PROJECT_PLAN/template-rollout-result-20261029.md)。
 
-> 当前会话接手（2026-10-30）：[多Agent生成质量会话交接](docs/05_PROJECT_PLAN/session-handoff-quality-20261030.md)。旧角色面板已改造，Q1质量闭环尚未实施；包含实际基线、原有用户改动和下一批接线入口。[模板与AI服务交接](docs/05_PROJECT_PLAN/session-handoff-templates-20261029.md)保留为此前工程背景。
+> 质量工程接手（2026-10-30）：[多Agent生成质量会话交接](docs/05_PROJECT_PLAN/session-handoff-quality-20261030.md)顶部已更新Q1–Q4接线与后续修复；正文旧快照不代表当前未实施。真实模型质量收益仍待验证。[模板与AI服务交接](docs/05_PROJECT_PLAN/session-handoff-templates-20261029.md)保留为此前工程背景。
 
 > 2026-10-27：[Harness 改进计划](docs/05_PROJECT_PLAN/harness-improvement-plan-20261027.md)按验收设施、独立试用和多模型验收分批推进。需求确认时恢复可选的 AI 灵感建议，默认不选；采纳后更新任务单再确认，不额外增加需求整理的模型调用。
 

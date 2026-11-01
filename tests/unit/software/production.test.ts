@@ -54,7 +54,7 @@ it.each(['quick', 'longterm'] as const)('real Pi software loop writes JS, builds
   expect(calls).toHaveLength(2)
   const evaluation=readFileSync(join(home,'harness-evaluation',project.project_id,'events.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line))
   const observed=evaluation.filter(e=>e.kind==='runtime_identity').map(e=>e.data.observation)
-  expect(observed.some(o=>o.role==='orchestrator'&&o.runtime.packages['pi-coding-agent']==='0.85.1')).toBe(true)
+  expect(observed.some(o=>o.role==='orchestrator'&&o.runtime.packages['pi-coding-agent']==='1.4.0')).toBe(true)
   expect(observed.some(o=>o.quality_role==='C'&&o.role==='review')).toBe(true)
   expect(evaluation.some(e=>e.kind==='collaboration_selected'&&e.data.selection.required.includes('code'))).toBe(true)
   expect(JSON.stringify(calls[0].messages)).not.toContain('schema_version\\":1,\\"command\\":[\\"python\\"')

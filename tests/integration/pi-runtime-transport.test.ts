@@ -45,7 +45,7 @@ it.each(['anthropic-compatible','zhipu'])('actual image bytes traverse attachmen
     const urls=(body:any)=>body.messages.flatMap((turn:any)=>Array.isArray(turn.content)?turn.content.filter((block:any)=>block.type==='image'||block.type==='image_url').map((block:any)=>block.type==='image'?block.source.data:block.image_url.url.split(',')[1]):[])
     expect(urls(bodies[0])).toEqual([red.toString('base64')]);expect(urls(bodies[1])).toContain(blue.toString('base64'));expect(urls(bodies[2])).toContain(blue.toString('base64'))
     const history=readFileSync(piSessionPath(project.project_id,'vision-wire','desktop-implement:',project.root_path),'utf8')
-    expect(history).toContain(initial.imageId);expect(history).not.toContain(blue.toString('base64'));expect(history).not.toContain('local-vision-key')
+    expect(history).toContain(Buffer.from('bloma-image-ref:'+initial.imageId).toString('base64'));expect(history).not.toContain(blue.toString('base64'));expect(history).not.toContain('local-vision-key')
     expect(budget.snapshot().requests).toBe(3)
   }finally{server.closeAllConnections();await new Promise<void>(done=>server.close(()=>done()))}
 },45000)

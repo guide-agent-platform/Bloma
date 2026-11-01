@@ -1,0 +1,10 @@
+{
+  "writer": "@earendil-works/pi-coding-agent",
+  "version": "0.85.1",
+  "source_commit": "785cee1",
+  "mode": "controlled-query-no-provider",
+  "calls": 2,
+  "writes": 1,
+  "session_format": 3,
+  "cwd_placeholder": "__BLOMA_TEST_CWD__"
+}
