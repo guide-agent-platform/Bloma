@@ -41,3 +41,13 @@
 - `frontier-r0-types-final.log`、`frontier-r0-build-final.log`通过；主bundle的动态 `__require(` 调用为0，`frontier-r0-smoke.log` 的隔离Electron `S0-UI-007` PASS。没有全仓模型质量结论、干净机器认证或供应商性能结论。
 
 用户原有生产流程文件未暂存/修改，保护hash `53c7abb3aef8497d8b0522b8aab806c82b2ec164`。磁盘构建变化不意味着用户现用实例已加载，本轮不重启用户实例。
+
+## 第二批：修复实际复现的消息配对缺口
+
+第一批提交 `44d59db` 后，针对上游恢复配对问题建立本地反例。修复前4个纯投影用例失败，另一个真实Pi持久会话恢复用例失败；原Pi组其余16项通过，记录 `frontier-r1-before.log`。本地确有问题：`toTransportTurns`省略error/aborted assistant，却仍发送其toolResult；独立孤立结果、重复结果、跨assistant轮结果和没有结果的调用也可能进入请求。
+
+在Bloma线协议投影层按同一assistant轮匹配调用id与工具名，只投影完整的一对；保留正常文本和正常工具结果。先线性扫描配对，再生成请求，不改变原native JSONL、审计或宿主回执，不重放写入、不补造成功、不绕过预算/权限。与上游 #11233 的差异：上游修改AgentSession恢复状态；本批保持0.85.1，修复我们自己供应商桥的投影边界，覆盖被省略assistant后的残留结果。
+
+修复后6文件42项通过：消息投影、真实Pi恢复、127.0.0.1 HTTP/SSE与图片、超过旧96轮/160请求阈值的连续执行、长任务取消续跑、quick/longterm实际制作。日志 `frontier-r1-regression.log`；类型和构建 `frontier-r1-types.log`、`frontier-r1-build.log`通过，`frontier-r1-smoke.log`隔离Electron启动PASS。并非真实供应商或真实模型效果测试。
+
+后续仍需：独立隔离的无C/V消融入口、可信渠道能力元数据、受控自动技能发现、只读并行实验。上述没有被本轮偷偷开启，也不因费用余额为正而启动付费模型。先用本批身份数据和离线契约定位收益，再单独决定生产默认策略。

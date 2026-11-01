@@ -33,17 +33,35 @@ function userBlocks(content: Message['content']): MessageContentBlock[] {
 /** Pi owns the transcript. Anthropic-style SDK transport is only a wire adapter. */
 export function toTransportTurns(context: Pick<Context, 'messages' | 'systemPrompt'>): ConversationTurn[] {
   const turns: ConversationTurn[] = context.systemPrompt ? [{ role: 'system', content: context.systemPrompt }] : []
-  for (const message of context.messages) {
+  // Recovery/compaction can omit an assistant while retaining its tool results.
+  // Only project complete pairs from the same assistant round to the provider.
+  // Native history and host receipts remain untouched; never replay a tool or
+  // fabricate a successful result to repair a wire-protocol inconsistency.
+  const pairs = new Map<number, Set<string>>(), results = new Set<number>()
+  let round = -1, pending = new Map<string, string>()
+  for (const [index, message] of context.messages.entries()) {
+    if (message.role === 'assistant') {
+      round = index; pending = new Map()
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') continue
+      for (const block of message.content) if (block.type === 'toolCall') pending.set(block.id, block.name)
+    } else if (message.role === 'toolResult' && pending.get(message.toolCallId) === message.toolName) {
+      pending.delete(message.toolCallId); results.add(index)
+      const ids = pairs.get(round) ?? new Set<string>(); ids.add(message.toolCallId); pairs.set(round, ids)
+    }
+  }
+  for (const [index, message] of context.messages.entries()) {
     if (message.role === 'assistant') {
       if (message.stopReason === 'error' || message.stopReason === 'aborted') continue
+      const remaining = new Set(pairs.get(index))
       const content: MessageContentBlock[] = message.content.flatMap((block): MessageContentBlock[] =>
         block.type === 'text' ? [{ type: 'text', text: block.text }]
-          : block.type === 'toolCall' ? [{ type: 'tool_use', id: block.id, name: block.name, input: block.arguments }]
+          : block.type === 'toolCall' && remaining.delete(block.id) ? [{ type: 'tool_use', id: block.id, name: block.name, input: block.arguments }]
             : [])
       if (content.length) turns.push({ role: 'assistant', content })
     } else if (message.role === 'user') {
       turns.push({ role: 'user', content: userBlocks(message.content) })
     } else if (message.role === 'toolResult') {
+      if (!results.has(index)) continue
       const block: MessageContentBlock = { type: 'tool_result', tool_use_id: message.toolCallId,
         content: message.content.filter(b => b.type === 'text').map(b => b.text).join('\n'), is_error: message.isError }
       const last = turns.at(-1)

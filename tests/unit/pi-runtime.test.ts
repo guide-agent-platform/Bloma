@@ -118,6 +118,23 @@ describe('real upstream Pi AgentSession integration', () => {
     expect(stopped.status).toBe('turn_limit'); expect(stopped.termination_detail?.reason).toBe('output_token_limit')
   })
 
+  it('resumes past a failed assistant with a leftover result without sending orphan results or replaying writes', async () => {
+    const {manager,release}=await openPiSession('test-project','test-session','desktop-implement:',process.cwd())
+    const failed=emptyAssistant({id:'bridge',name:'bridge',api:'openai-completions',provider:'bloma-transport',baseUrl:'',reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:128000,maxTokens:1000})
+    failed.content=[{type:'toolCall',id:'failed-call',name:'write_file',arguments:{}}];failed.stopReason='error'
+    manager.appendMessage(failed)
+    manager.appendMessage({role:'toolResult',toolCallId:'failed-call',toolName:'write_file',content:[{type:'text',text:'orphan-native-evidence'}],isError:true,timestamp:Date.now()})
+    release()
+    const query:SDKQuery=async function*(_prompt,options){
+      expect(JSON.stringify(options.messages)).not.toContain('failed-call')
+      yield text('继续核对现场，不重放写入');yield done
+    }
+    const write=vi.fn(async()=>({output:'must-not-replay'}))
+    expect((await runAgentLoop(input(query,{tools:[tool('write_file',write)]}))).status).toBe('completed')
+    expect(write).not.toHaveBeenCalled()
+    expect(readFileSync(nativeFile(),'utf8')).toContain('orphan-native-evidence')
+  })
+
   it('preserves denied permissions and stops mixed tool batches on persistent host budget exhaustion', async () => {
     const write = vi.fn(async () => ({ output: 'unexpected' }))
     const denied = scripted([[call('no', 'write_file')], [text('已受阻')]])
