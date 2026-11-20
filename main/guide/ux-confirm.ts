@@ -196,7 +196,10 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
       : await generateUxVisualDesign({
       project_id: pending.project_id,
       session_id: pending.session_id,
-      query: pending.query,
+      query: (prompt, options) => pending.query(prompt, { ...options, accounting: {
+        ...options.accounting, projectId: pending.project_id, turnId: pending.request_id,
+        role: options.accounting?.role ?? 'ux_sketch', phase: 'interface',
+      } }),
       env: pending.env,
       maxTokens: resolveGenerationMaxTokens(resolution.channel ?? {}),
       backplane: current,
@@ -406,7 +409,7 @@ export async function resumeUxConfirmConfirmed(input: AgentSendMessageInput): Pr
     return true
   }
   if (pending.signal?.aborted) return true
-  if (!await prepareGuiAcceptance({ projectId: pending.project_id, sessionId: pending.session_id, query: pending.query, env: pending.env, signal: pending.signal })) {
+  if (!await prepareGuiAcceptance({ projectId: pending.project_id, sessionId: pending.session_id, requestId: pending.request_id, query: pending.query, env: pending.env, signal: pending.signal })) {
     pendingUxConfirms.set(input.project_id, pending)
     pending.publish(makeUxEvent(pending, 'message_delta', { text: '当前界面方向已保存，独立业务验收规则尚未准备完整，本次未启动实现。可重试确认，或由宿主补齐验收规则。' }))
     pending.publish(makeUxEvent(pending, 'message_completed', { subtype: 'incomplete' }))

@@ -5,14 +5,20 @@ import { getAgentSessionsIndexPath, getPromaHome } from '../../../storage/config
 import type { SDKQuery, SDKQueryOptions } from '../../orchestration/stages/orchestration-contracts'
 import type { SDKMessage, ModelTransportReceipt } from '../../../shared/types'
 
-export interface QueryAccounting { projectId: string; runId?: string; parentSessionId?: string; role?: string; scope?: string }
+export type UsagePhase = 'requirements' | 'interface' | 'production' | 'verification' | 'delivery'
+export interface QueryAccounting {
+  projectId: string; runId?: string; parentSessionId?: string; role?: string; scope?: string
+  phase?: UsagePhase; turnId?: string
+}
 type Usage = NonNullable<SDKMessage['usage']>
 interface LedgerEvent {
   version: 1; at: string; query_id: string; event: 'query_started' | 'query_finished' | 'transport_started' | 'transport_finished' | 'transport_response'
   project_id: string; session_id: string; run_id?: string; parent_session_id?: string; role: string; scope: string
+  phase?: UsagePhase; turn_id?: string; provider_type?: string
   model?: string; endpoint_host?: string; transport_index?: number; status?: string; duration_ms?: number; usage?: Usage
   system_sha256?: string
   stop_reason?: string
+  audit_tool_ids?: string[]
   response?: ModelTransportReceipt
 }
 let sessionCache: { path: string; mtime: number; sessions: Map<string, { project_id: string; parent_session_id?: string }> } | undefined
@@ -58,6 +64,7 @@ export function normalizeHttpUsage(raw: unknown, openai: boolean): Usage | undef
   const usage = raw as Record<string, unknown>
   if (!openai) return cleanUsage(usage as Usage)
   const cached = (usage.prompt_tokens_details as { cached_tokens?: number } | undefined)?.cached_tokens
+    ?? usage.prompt_cache_hit_tokens
   const input = usage.prompt_tokens
   return cleanUsage({ input_tokens: typeof input === 'number' ? Math.max(0, input - (typeof cached === 'number' ? cached : 0)) : undefined,
     output_tokens: typeof usage.completion_tokens === 'number' ? usage.completion_tokens : undefined,
@@ -68,7 +75,7 @@ export function normalizeHttpUsage(raw: unknown, openai: boolean): Usage | undef
 export function startDirectQuery(ctx: QueryAccounting & { sessionId: string; model?: string; endpointHost?: string }) {
   const base = { version: 1 as const, query_id: randomUUID(), project_id: ctx.projectId, session_id: ctx.sessionId,
     run_id: ctx.runId, parent_session_id: ctx.parentSessionId, role: ctx.role ?? 'provider_qualification', scope: ctx.scope ?? 'provider_real',
-    model: ctx.model, endpoint_host: ctx.endpointHost }
+    model: ctx.model, endpoint_host: ctx.endpointHost, phase: ctx.phase, turn_id: ctx.turnId }
   const started = Date.now()
   let index = 0, active = false, done = false
   append({ ...base, at: new Date().toISOString(), event: 'query_started' })
@@ -89,17 +96,19 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
   const session = metadata(options.sessionId)
   const ctx = options.accounting
   let host: string | undefined
-  try { host = new URL(options.env.ANTHROPIC_BASE_URL ?? '').host } catch { /* unavailable */ }
+  try { host = new URL(options.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').host } catch { /* unavailable */ }
   const base = { version: 1 as const, query_id: randomUUID(), project_id: ctx?.projectId ?? session?.project_id ?? 'unassigned',
     session_id: options.sessionId, run_id: ctx?.runId, parent_session_id: ctx?.parentSessionId ?? session?.parent_session_id,
     role: ctx?.role ?? (session?.parent_session_id ? 'child' : 'guide_or_other'), scope: ctx?.scope ?? 'direct',
-    model: options.env.ANTHROPIC_MODEL, endpoint_host: host }
+    model: options.env.ANTHROPIC_MODEL, endpoint_host: host, phase: ctx?.phase, turn_id: ctx?.turnId,
+    provider_type: options.providerType ?? options.env.ANTHROPIC_PROVIDER_TYPE }
   const systems = (options.messages ?? options.history ?? []).filter(message => message.role === 'system').map(message => message.content)
   const withPrompt = { ...base, system_sha256: createHash('sha256').update(JSON.stringify(systems)).digest('hex') }
   const started = Date.now()
   let usage: Usage | undefined
   let finished = false
   let stopReason: string | undefined
+  const auditToolIds = new Set<string>()
   let transportIndex = 0
   let activeTransport = false
   append({ ...withPrompt, at: new Date().toISOString(), event: 'query_started' })
@@ -120,6 +129,9 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
       append({ ...base, at: new Date().toISOString(), event: 'transport_response', transport_index: transportIndex, response: receipt })
     } })) {
       if (message.usage) usage = { ...usage, ...cleanUsage(message.usage) }
+      if (message.type === 'assistant') for (const block of message.message?.content ?? []) {
+        if (block.type === 'tool_use' && block.id && /^[\w-]{1,128}$/.test(block.id) && auditToolIds.size < 64) auditToolIds.add(block.id)
+      }
       if (message.type === 'result') {
         finished = message.subtype === 'success'
         stopReason = message.stop_reason?.slice(0, 100)
@@ -129,7 +141,8 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
   } finally {
     const status = options.signal.aborted ? 'cancelled' : finished ? 'completed' : 'error'
     if (activeTransport) append({ ...base, at: new Date().toISOString(), event: 'transport_finished', transport_index: transportIndex, status })
-    append({ ...base, at: new Date().toISOString(), event: 'query_finished', status, duration_ms: Date.now() - started, usage: cleanUsage(usage), stop_reason: stopReason })
+    append({ ...base, at: new Date().toISOString(), event: 'query_finished', status, duration_ms: Date.now() - started, usage: cleanUsage(usage), stop_reason: stopReason,
+      ...(auditToolIds.size ? { audit_tool_ids: [...auditToolIds] } : {}) })
   }
 }
 

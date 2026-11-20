@@ -195,6 +195,7 @@ export interface AgentLoopInput {
   shouldPause?: () => boolean
   parentSessionId?: string
   accountingRole?: string
+  accountingTurnId?: string
   materials?: import('../../../shared/attachment-types').MaterialContext
   /** 背板锚定系统提示词（PR3 由 prd.json 注入，每轮有效防漂移） */
   system: string

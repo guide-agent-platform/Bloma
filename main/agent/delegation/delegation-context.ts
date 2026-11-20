@@ -6,6 +6,7 @@ import type { ChildToolsBuilder } from './agent-collaboration'
 
 /** 父上下文随 session 隔离；保留统一缺省预算，允许宿主按工作角色指定预算。 */
 export interface DelegationParentContext {
+  accountingTurnId?: string
   maxConcurrentDelegations?: number
   allowChannelOverrides?: boolean
   delegationSummaryLimit?: number

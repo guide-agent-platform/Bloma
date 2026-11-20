@@ -57,7 +57,7 @@ function save(projectId:string,value:IndependentDesignRecord){
 /** Runs before implementation, with an independent context and no tools.
  * Explicit routes retain their own authorization; project-funded design inherits
  * the current production route and its existing accounting boundary. */
-export async function prepareIndependentDesign(input:{projectId:string;sessionId:string;query:SDKQuery;primaryEnv:Record<string,string>;signal:AbortSignal;
+export async function prepareIndependentDesign(input:{projectId:string;sessionId:string;requestId?:string;query:SDKQuery;primaryEnv:Record<string,string>;signal:AbortSignal;
   maxTokens?:number; redesign?:boolean; previousFailure?:IndependentDesignRecord;
   resolveRoute?:(policy:IndependentDesignPolicy)=>{env:Record<string,string>;channel_id:string;model:string}}):Promise<IndependentDesignRecord>{
   const project=findProject(input.projectId),brief=readPrdBackplane(input.projectId),scope=prdScopeFingerprint(brief),operation=project.lean_operation_id??'initial'
@@ -148,7 +148,7 @@ export async function prepareIndependentDesign(input:{projectId:string;sessionId
       let batchPhysical=0
       const routed:SDKQuery=async function*(prompt,options){
         yield* input.query(prompt,{...options,env,...(monetaryPolicyPath?{monetaryPolicyPath}:{}),
-          accounting:{projectId:input.projectId,parentSessionId:input.sessionId,role:'acceptance_designer',scope},
+          accounting:{projectId:input.projectId,parentSessionId:input.sessionId,turnId:input.requestId,role:'acceptance_designer',scope,phase:'verification'},
           requestGuard:request=>{
             if(++batchPhysical>1||++physical>batches.length)throw Error('INDEPENDENT_REQUEST_LIMIT')
             const body=JSON.parse(request.body)
@@ -201,7 +201,7 @@ export async function prepareIndependentDesign(input:{projectId:string;sessionId
       correction = await reviewIndependentCorrection({projectId:input.projectId,sessionId:input.sessionId,
         before:current!.contract!,after:result,from:current!.digest!,findings,requirements:data.requirements,
         query:leanBudget(input.projectId,'acceptance-design').wrap(async function*(prompt,options){
-          yield* input.query(prompt,{...options,accounting:{projectId:input.projectId,parentSessionId:input.sessionId,role:'acceptance_designer',scope}})
+          yield* input.query(prompt,{...options,accounting:{projectId:input.projectId,parentSessionId:input.sessionId,turnId:input.requestId,role:'acceptance_designer',scope,phase:'verification'}})
         }),env,maxTokens,signal})
     }
     input.signal.throwIfAborted()

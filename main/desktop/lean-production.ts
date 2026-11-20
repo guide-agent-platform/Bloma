@@ -265,10 +265,10 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     if (attemptedIndependentRepairs.has(key)) return false
     attemptedIndependentRepairs.add(key)
     emit('message_delta',{text:'验收用例出现争议，正在依据原要求和执行记录独立核对、更正，再继续复验。'})
-    let repaired = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,
+    let repaired = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,requestId:input.requestId,
       query:input.query,primaryEnv:input.env,maxTokens:input.maxTokens,signal,redesign:true})
     if(/^Error: INDEPENDENT_CORRECTION_(INVALID|REVIEW_REQUIRED):/.test(repaired.reason??'')) {
-      repaired=await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,
+      repaired=await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,requestId:input.requestId,
         query:input.query,primaryEnv:input.env,maxTokens:input.maxTokens,signal,redesign:true,previousFailure:repaired})
     }
     if(repaired.status!=='frozen'||!repaired.contract) {
@@ -316,7 +316,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
     independentPrepared=true
     const policy = readIndependentPolicy(input.projectId)
     const shared = !!policy?.enabled && 'funding' in policy
-    let design = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,query:input.query,primaryEnv:input.env,maxTokens:input.maxTokens,signal,redesign:input.redesignIndependentCases})
+    let design = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,requestId:input.requestId,query:input.query,primaryEnv:input.env,maxTokens:input.maxTokens,signal,redesign:input.redesignIndependentCases})
     // Format and business semantics can fail successively. Keep both repairs
     // within this request, charged to the existing budget, and stop on no progress.
     for (let repair = 0; shared && repair < 2; repair++) {
@@ -329,7 +329,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
       if (!formatFailure && !designGap) break
       emit('message_delta', {text:'独立测试设计需要修正，我正在根据具体检查结果调整案例。'})
       const previous = design
-      design = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,query:input.query,primaryEnv:input.env,maxTokens:input.maxTokens,signal,redesign:input.redesignIndependentCases || !!designGap || !!readIndependentDesign(input.projectId)?.contract,previousFailure:previous,})
+      design = await prepareIndependentDesign({projectId:input.projectId,sessionId:input.sessionId,requestId:input.requestId,query:input.query,primaryEnv:input.env,maxTokens:input.maxTokens,signal,redesign:input.redesignIndependentCases || !!designGap || !!readIndependentDesign(input.projectId)?.contract,previousFailure:previous,})
       if (design.status === 'frozen' && design.digest === previous.digest) break
     }
     if (design.status === 'blocked') {
@@ -411,6 +411,7 @@ async function runLeanProductionInner(input: DesktopRouteInput, deps: DesktopRou
   // stop boundary; another 96-turn limit only interrupts useful work early.
   const maxTurns = Number.MAX_SAFE_INTEGER
   registerParentLoopContext(input.sessionId, { query, env: input.env, maxTokens: input.maxTokens, maxTurns,
+    accountingTurnId: input.requestId,
     delegationMaxTurns: 24, delegationTurnLimits: { review: 48 }, delegationTurnCaps: { review: 48 }, permissionMode: 'allow-all', temperature: .1, system, editFormat: 'diff', runtimeScope: 'lean-build',
     executionScope: budget.executionScope, materials: sessionMaterials(input.projectId, input.sessionId), publish: emit,
     childMaterialsBuilder: child => quality.isQualityChild(child) ? undefined : sessionMaterials(input.projectId, input.sessionId),

@@ -89,6 +89,10 @@ describe('project request accounting', () => {
     direct.startAttempt(); direct.finish(usage); direct.finish(usage)
     expect(readProjectUsage('p1')).toMatchObject({ logical_queries: 1, physical_requests: 1, reported_input: 100, reported_output: 7, cache_read: 80, complete: true })
   })
+  it('retains DeepSeek cache hits in its OpenAI-compatible usage format', () => {
+    expect(normalizeHttpUsage({ prompt_tokens: 100, prompt_cache_hit_tokens: 80, completion_tokens: 7 }, true))
+      .toEqual({ input_tokens: 20, cache_read_input_tokens: 80, output_tokens: 7 })
+  })
   it('unfinished and damaged records prevent a complete cost claim', () => {
     const direct = startDirectQuery({ projectId: 'p1', sessionId: 's1' })
     direct.startAttempt()

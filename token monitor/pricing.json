@@ -1,0 +1,483 @@
+{
+  "Anthropic": {
+    "as_of": "2026-11-14",
+    "models": {
+      "claude-fable-5-2": {
+        "output": 40,
+        "read": 0.2,
+        "uncached": 8,
+        "write": 10
+      },
+      "claude-opus-4-5": {
+        "output": 25,
+        "read": 0.5,
+        "uncached": 5,
+        "write": 6.25
+      },
+      "claude-opus-4-6": {
+        "output": 25,
+        "read": 0.5,
+        "uncached": 5,
+        "write": 6.25
+      },
+      "claude-opus-4-7": {
+        "output": 25,
+        "read": 0.5,
+        "uncached": 5,
+        "write": 6.25
+      },
+      "claude-opus-4-8": {
+        "output": 25,
+        "read": 0.5,
+        "uncached": 5,
+        "write": 6.25
+      },
+      "claude-opus-5": {
+        "output": 25,
+        "read": 0.5,
+        "uncached": 5,
+        "write": 6.25
+      },
+      "claude-opus-5-5": {
+        "output": 20,
+        "read": 0.2,
+        "uncached": 4,
+        "write": 5
+      },
+      "claude-sonnet-4-5": {
+        "output": 15,
+        "read": 0.3,
+        "uncached": 3,
+        "write": 3.75
+      },
+      "claude-sonnet-4-6": {
+        "output": 15,
+        "read": 0.3,
+        "uncached": 3,
+        "write": 3.75
+      },
+      "claude-sonnet-5-5": {
+        "output": 10,
+        "read": 0.1,
+        "uncached": 2,
+        "write": 2.5
+      }
+    }
+  },
+  "DeepSeek": {
+    "as_of": "2026-11-14",
+    "models": {
+      "deepseek-flash": {
+        "output": 0.6,
+        "peak": {
+          "output": 1.2,
+          "read": 0.006,
+          "uncached": 0.3,
+          "write": null
+        },
+        "read": 0.003,
+        "uncached": 0.15,
+        "write": null
+      },
+      "deepseek-v4-pro": {
+        "output": 1.98,
+        "peak": {
+          "output": 3.96,
+          "read": 0.044,
+          "uncached": 1.32,
+          "write": null
+        },
+        "read": 0.022,
+        "uncached": 0.66,
+        "write": null
+      }
+    }
+  },
+  "Google": {
+    "as_of": "2026-11-14",
+    "models": {
+      "gemini-2.5-flash": {
+        "output": 2.5,
+        "read": 0.03,
+        "uncached": 0.3,
+        "write": null
+      },
+      "gemini-2.5-flash-lite": {
+        "output": 0.4,
+        "read": 0.01,
+        "uncached": 0.1,
+        "write": null
+      },
+      "gemini-2.5-pro": {
+        "output": 10.0,
+        "read": 0.125,
+        "uncached": 1.25,
+        "write": null
+      },
+      "gemini-3-flash-preview": {
+        "output": 3.0,
+        "read": 0.05,
+        "uncached": 0.5,
+        "write": null
+      },
+      "gemini-3.1-flash-lite": {
+        "output": 1.5,
+        "read": 0.025,
+        "uncached": 0.25,
+        "write": null
+      },
+      "gemini-3.1-pro-preview": {
+        "output": 12.0,
+        "read": 0.2,
+        "uncached": 2.0,
+        "write": null
+      },
+      "gemini-3.5-flash-lite": {
+        "output": 2.5,
+        "read": 0.03,
+        "uncached": 0.3,
+        "write": null
+      },
+      "gemini-3.5-transcribe": {
+        "output": 12.0,
+        "read": null,
+        "uncached": 2.0,
+        "write": null
+      },
+      "gemini-3.6-flash": {
+        "output": 3.75,
+        "read": 0.075,
+        "uncached": 0.75,
+        "write": null
+      },
+      "gemini-3.8-flash": {
+        "output": 3.75,
+        "read": 0.075,
+        "uncached": 0.75,
+        "write": null
+      },
+      "gemini-4-argon": {
+        "output": 10.0,
+        "read": 0.1,
+        "uncached": 2.0,
+        "write": null
+      },
+      "gemini-4-carbon": {
+        "output": 10.0,
+        "read": 0.1,
+        "uncached": 2.0,
+        "write": null
+      },
+      "gemini-4-hydrogen": {
+        "output": 7.5,
+        "read": 0.075,
+        "uncached": 1.5,
+        "write": null
+      },
+      "gemini-nano-banana-2.1": {
+        "output": 7.5,
+        "read": null,
+        "uncached": 1.5,
+        "write": null
+      },
+      "gemini-omni-1.1-flash": {
+        "output": 9.0,
+        "read": null,
+        "uncached": 1.5,
+        "write": null
+      },
+      "gemini-omni-1.2-flash": {
+        "output": 9.0,
+        "read": null,
+        "uncached": 1.5,
+        "write": null
+      }
+    }
+  },
+  "OpenAI": {
+    "as_of": "2026-11-14",
+    "models": {
+      "babbage-002": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 0.4,
+        "read": null,
+        "uncached": 0.4,
+        "write": null
+      },
+      "chat-latest": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 30.0,
+        "read": 0.5,
+        "uncached": 5.0,
+        "write": null
+      },
+      "davinci-002": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 2.0,
+        "read": null,
+        "uncached": 2.0,
+        "write": null
+      },
+      "gpt-3.5-turbo": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 1.5,
+        "read": null,
+        "uncached": 0.5,
+        "write": null
+      },
+      "gpt-3.5-turbo-0125": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 1.5,
+        "read": null,
+        "uncached": 0.5,
+        "write": null
+      },
+      "gpt-3.5-turbo-1106": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 2.0,
+        "read": null,
+        "uncached": 1.0,
+        "write": null
+      },
+      "gpt-3.5-turbo-instruct": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 2.0,
+        "read": null,
+        "uncached": 1.5,
+        "write": null
+      },
+      "gpt-4-0613": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 60.0,
+        "read": null,
+        "uncached": 30.0,
+        "write": null
+      },
+      "gpt-4-turbo-2024-04-09": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 30.0,
+        "read": null,
+        "uncached": 10.0,
+        "write": null
+      },
+      "gpt-4.1": {
+        "output": 8.0,
+        "read": 0.5,
+        "uncached": 2.0,
+        "write": null
+      },
+      "gpt-4.1-mini": {
+        "output": 1.6,
+        "read": 0.1,
+        "uncached": 0.4,
+        "write": null
+      },
+      "gpt-4.1-nano": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 0.4,
+        "read": 0.025,
+        "uncached": 0.1,
+        "write": null
+      },
+      "gpt-4o": {
+        "output": 10.0,
+        "read": 1.25,
+        "uncached": 2.5,
+        "write": null
+      },
+      "gpt-4o-2024-05-13": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 15.0,
+        "read": null,
+        "uncached": 5.0,
+        "write": null
+      },
+      "gpt-4o-mini": {
+        "output": 0.6,
+        "read": 0.075,
+        "uncached": 0.15,
+        "write": null
+      },
+      "gpt-5": {
+        "output": 10.0,
+        "read": 0.125,
+        "uncached": 1.25,
+        "write": null
+      },
+      "gpt-5-mini": {
+        "output": 2.0,
+        "read": 0.025,
+        "uncached": 0.25,
+        "write": null
+      },
+      "gpt-5-nano": {
+        "output": 0.4,
+        "read": 0.005,
+        "uncached": 0.05,
+        "write": null
+      },
+      "gpt-5-pro": {
+        "output": 120.0,
+        "read": null,
+        "uncached": 15.0,
+        "write": null
+      },
+      "gpt-5-search-api": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 10.0,
+        "read": 0.125,
+        "uncached": 1.25,
+        "write": null
+      },
+      "gpt-5.1": {
+        "output": 10.0,
+        "read": 0.125,
+        "uncached": 1.25,
+        "write": null
+      },
+      "gpt-5.2": {
+        "output": 14.0,
+        "read": 0.175,
+        "uncached": 1.75,
+        "write": null
+      },
+      "gpt-5.2-pro": {
+        "output": 168.0,
+        "read": null,
+        "uncached": 21.0,
+        "write": null
+      },
+      "gpt-5.3-codex": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 14.0,
+        "read": 0.175,
+        "uncached": 1.75,
+        "write": null
+      },
+      "gpt-5.4": {
+        "output": 15.0,
+        "read": 0.25,
+        "uncached": 2.5,
+        "write": null
+      },
+      "gpt-5.4-mini": {
+        "output": 4.5,
+        "read": 0.075,
+        "uncached": 0.75,
+        "write": null
+      },
+      "gpt-5.4-nano": {
+        "output": 1.25,
+        "read": 0.02,
+        "uncached": 0.2,
+        "write": null
+      },
+      "gpt-5.4-pro": {
+        "output": 180.0,
+        "read": null,
+        "uncached": 30.0,
+        "write": null
+      },
+      "gpt-5.5": {
+        "output": 30.0,
+        "read": 0.5,
+        "uncached": 5.0,
+        "write": null
+      },
+      "gpt-5.5-pro": {
+        "output": 180.0,
+        "read": null,
+        "uncached": 30.0,
+        "write": null
+      },
+      "gpt-5.6-luna": {
+        "output": 1.2,
+        "read": 0.02,
+        "uncached": 0.2,
+        "write": 0.25
+      },
+      "gpt-5.6-sol": {
+        "output": 20.0,
+        "read": 0.4,
+        "uncached": 4.0,
+        "write": 5.0
+      },
+      "gpt-5.6-terra": {
+        "output": 12.0,
+        "read": 0.2,
+        "uncached": 2.0,
+        "write": 2.5
+      },
+      "gpt-6-astra": {
+        "output": 50.0,
+        "read": 1.0,
+        "uncached": 10.0,
+        "write": 12.5
+      },
+      "gpt-6-luna": {
+        "output": 0.5,
+        "read": 0.01,
+        "uncached": 0.1,
+        "write": 0.125
+      },
+      "gpt-6-sol": {
+        "output": 10.0,
+        "read": 0.2,
+        "uncached": 2.0,
+        "write": 2.5
+      },
+      "gpt-6.1-sol": {
+        "output": 10.0,
+        "read": 0.1,
+        "uncached": 2.0,
+        "write": 2.5
+      },
+      "gpt-6.1-terra": {
+        "output": 5.0,
+        "read": 0.05,
+        "uncached": 1.0,
+        "write": 1.25
+      },
+      "o1": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 60.0,
+        "read": 7.5,
+        "uncached": 15.0,
+        "write": null
+      },
+      "o1-pro": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 600.0,
+        "read": null,
+        "uncached": 150.0,
+        "write": null
+      },
+      "o3": {
+        "output": 8.0,
+        "read": 0.5,
+        "uncached": 2.0,
+        "write": null
+      },
+      "o3-mini": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 4.4,
+        "read": 0.55,
+        "uncached": 1.1,
+        "write": null
+      },
+      "o3-pro": {
+        "output": 80.0,
+        "read": null,
+        "uncached": 20.0,
+        "write": null
+      },
+      "o4-mini": {
+        "as_of": "2026-08-24T15:05:48+08:00",
+        "output": 4.4,
+        "read": 0.275,
+        "uncached": 1.1,
+        "write": null
+      }
+    }
+  }
+}

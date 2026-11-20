@@ -14,7 +14,7 @@ import type { SDKQuery } from '../orchestration/stages/orchestration-contracts'
 
 /** Expectations are prepared from confirmed intent before implementation exists.
  * No source/file tools are available to this independent, bounded role. */
-export async function prepareGuiAcceptance(input: { projectId: string; sessionId: string; query: SDKQuery; env: Record<string, string>; signal?: AbortSignal }): Promise<boolean> {
+export async function prepareGuiAcceptance(input: { projectId: string; sessionId: string; requestId?: string; query: SDKQuery; env: Record<string, string>; signal?: AbortSignal }): Promise<boolean> {
   const project = findProject(input.projectId)
   // Installed rules are still enforced by core verification after editing.
   if (readPrdBackplane(input.projectId).lean_brief) return true
@@ -43,7 +43,7 @@ export async function prepareGuiAcceptance(input: { projectId: string; sessionId
     if (!allowance.allowed) return block('GUI_PREPARATION_ATTEMPTS_EXHAUSTED')
     const budget = createRequestBudget(input.env, { requests: 3, outputTokens: 8192, rmb: 1 })
     const query: SDKQuery = async function* (prompt, options) {
-      yield* budget.wrap(input.query)(prompt, { ...options, accounting: { projectId: input.projectId, role: 'gui_acceptance_planner', scope: 'confirmed_intent_preparation' } })
+      yield* budget.wrap(input.query)(prompt, { ...options, accounting: { projectId: input.projectId, turnId: input.requestId, role: 'gui_acceptance_planner', scope: 'confirmed_intent_preparation', phase: 'verification' } })
     }
     const htmlPath = join(project.root_path, '00_UX/confirmed.html')
     let lastProposal = '', issues: string[] = []
